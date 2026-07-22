@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Meterist.Core\Meterist.Core.csproj" />
+    <ProjectReference Include="..\Meterist.Data\Meterist.Data.csproj" />
+    <ProjectReference Include="..\Meterist.Secrets\Meterist.Secrets.csproj" />
+    <ProjectReference Include="..\Meterist.Vendors\Meterist.Vendors.csproj" />
+    <ProjectReference Include="..\Meterist.ServiceDefaults\Meterist.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.57.2" />
+    <PackageReference Include="System.CommandLine" Version="2.0.10" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

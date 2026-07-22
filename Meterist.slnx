@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Meterist.Cli/Meterist.Cli.csproj" />
+    <Project Path="src/Meterist.Core/Meterist.Core.csproj" />
+    <Project Path="src/Meterist.Data/Meterist.Data.csproj" />
+    <Project Path="src/Meterist.Secrets/Meterist.Secrets.csproj" />
+    <Project Path="src/Meterist.ServiceDefaults/Meterist.ServiceDefaults.csproj" />
+    <Project Path="src/Meterist.Vendors/Meterist.Vendors.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Meterist.Core.Tests/Meterist.Core.Tests.csproj" />
+    <Project Path="tests/Meterist.Vendors.Tests/Meterist.Vendors.Tests.csproj" />
+  </Folder>
+</Solution>
