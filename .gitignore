@@ -433,3 +433,8 @@ FodyWeavers.xsd
 *.db
 *.db-shm
 *.db-wal
+
+# Real per-tenant vendor credentials used for live testing (service account
+# keys, API keys) — never committed, see docs/user-guide.md Setup section
+# for how to regenerate these locally instead.
+env/

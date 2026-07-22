@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Meterist.Core.Vendors;
 using Meterist.Vendors.GeminiEnterprise;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Meterist.Vendors.Tests.GeminiEnterprise;
 
@@ -46,7 +47,8 @@ public class GeminiEnterpriseSpendExtractorTests
         };
         var repository = new FakeGeminiBillingQueryRepository(rows);
 
-        var extractor = new GeminiEnterpriseSpendExtractor(secretStore, repository);
+        var extractor = new GeminiEnterpriseSpendExtractor(
+            secretStore, repository, NullLogger<GeminiEnterpriseSpendExtractor>.Instance);
         var result = await extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken);
 
         Assert.Equal(VendorCatalog.GeminiEnterprise.Id, result.VendorId);
@@ -65,7 +67,8 @@ public class GeminiEnterpriseSpendExtractorTests
     public async Task ExtractAsync_WithNoCredentialConfigured_ThrowsInvalidOperation()
     {
         var extractor = new GeminiEnterpriseSpendExtractor(
-            new FakeSecretStore(), new FakeGeminiBillingQueryRepository([]));
+            new FakeSecretStore(), new FakeGeminiBillingQueryRepository([]),
+            NullLogger<GeminiEnterpriseSpendExtractor>.Instance);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken));
@@ -80,7 +83,8 @@ public class GeminiEnterpriseSpendExtractorTests
             "ecosync", VendorCatalog.GeminiEnterprise.Id, "not valid json", TestContext.Current.CancellationToken);
 
         var extractor = new GeminiEnterpriseSpendExtractor(
-            secretStore, new FakeGeminiBillingQueryRepository([]));
+            secretStore, new FakeGeminiBillingQueryRepository([]),
+            NullLogger<GeminiEnterpriseSpendExtractor>.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken));

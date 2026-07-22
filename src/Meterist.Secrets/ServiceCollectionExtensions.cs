@@ -20,9 +20,15 @@ public static class ServiceCollectionExtensions
             "Meterist",
             "keys");
 
-        // Key storage already lives in a Meterist-only directory, so a separate
-        // application-name discriminator isn't needed for isolation here.
+        // SetApplicationName pins a stable "application discriminator" that gets
+        // baked into every key derivation. Without it, DataProtection derives one
+        // implicitly from ContentRootPath — meaning previously-encrypted secrets
+        // silently become undecryptable ("The payload was invalid") the moment
+        // ContentRootPath changes for any reason (different working directory,
+        // the app copied elsewhere, etc.). A hardcoded name makes decryption
+        // independent of where/how the binary is invoked, permanently.
         services.AddDataProtection()
+            .SetApplicationName("Meterist")
             .PersistKeysToFileSystem(new DirectoryInfo(directory))
             .ProtectKeysWithDpapi();
 

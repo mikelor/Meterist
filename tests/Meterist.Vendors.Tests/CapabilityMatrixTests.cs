@@ -4,6 +4,7 @@ using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
 using Meterist.Vendors.Tests.GeminiEnterprise;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Meterist.Vendors.Tests;
 
@@ -21,7 +22,9 @@ public class CapabilityMatrixTests
         yield return [new ClaudeApiPlatformSpendExtractor(), VendorCatalog.ClaudeApiPlatform, false, false];
         yield return [new ChatGptEnterpriseSpendExtractor(), VendorCatalog.ChatGptEnterprise, true, true];
         yield return [
-            new GeminiEnterpriseSpendExtractor(new FakeSecretStore(), new FakeGeminiBillingQueryRepository()),
+            new GeminiEnterpriseSpendExtractor(
+                new FakeSecretStore(), new FakeGeminiBillingQueryRepository(),
+                NullLogger<GeminiEnterpriseSpendExtractor>.Instance),
             VendorCatalog.GeminiEnterprise, true, true,
         ];
     }

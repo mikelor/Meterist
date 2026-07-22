@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Meterist.Core.Secrets;
 using Meterist.Core.Vendors;
+using Microsoft.Extensions.Logging;
 
 namespace Meterist.Vendors.GeminiEnterprise;
 
@@ -12,13 +13,16 @@ public sealed class GeminiEnterpriseSpendExtractor : IVendorSpendExtractor
 {
     private readonly ISecretStore _secretStore;
     private readonly IGeminiBillingQueryRepository _billingRepository;
+    private readonly ILogger<GeminiEnterpriseSpendExtractor> _logger;
 
     public GeminiEnterpriseSpendExtractor(
         ISecretStore secretStore,
-        IGeminiBillingQueryRepository billingRepository)
+        IGeminiBillingQueryRepository billingRepository,
+        ILogger<GeminiEnterpriseSpendExtractor> logger)
     {
         _secretStore = secretStore;
         _billingRepository = billingRepository;
+        _logger = logger;
     }
 
     public Guid VendorId => VendorCatalog.GeminiEnterprise.Id;
@@ -37,7 +41,15 @@ public sealed class GeminiEnterpriseSpendExtractor : IVendorSpendExtractor
         DateRange period,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug(
+            "Starting Gemini Enterprise extraction for tenant '{TenantId}', {PeriodStart} to {PeriodEnd}.",
+            tenantId, period.Start, period.End);
+
         var credential = await LoadCredentialAsync(tenantId, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogDebug(
+            "Resolved Gemini Enterprise credential for tenant '{TenantId}': project '{Project}', dataset '{Dataset}', table '{Table}'.",
+            tenantId, credential.BillingProjectId, credential.BillingDatasetId, credential.BillingTableId);
 
         var rows = await _billingRepository
             .QueryBillingRowsAsync(credential, period, cancellationToken)
@@ -48,6 +60,10 @@ public sealed class GeminiEnterpriseSpendExtractor : IVendorSpendExtractor
             .ToDictionary(
                 group => group.Key,
                 group => (IReadOnlyList<IReadOnlyDictionary<string, object?>>)group.ToList());
+
+        _logger.LogDebug(
+            "Gemini Enterprise extraction for tenant '{TenantId}' grouped {RowCount} row(s) into {DayCount} day(s).",
+            tenantId, rows.Count, recordsByDate.Count);
 
         return new RawVendorSpendData
         {

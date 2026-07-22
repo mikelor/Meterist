@@ -1,6 +1,8 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Meterist.Core.Secrets;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging;
 
 namespace Meterist.Secrets;
 
@@ -22,12 +24,15 @@ public sealed class DataProtectionSecretStore : ISecretStore
 {
     private readonly IDataProtectionProvider _dataProtectionProvider;
     private readonly string _secretsDirectory;
+    private readonly ILogger<DataProtectionSecretStore> _logger;
 
     public DataProtectionSecretStore(
         IDataProtectionProvider dataProtectionProvider,
+        ILogger<DataProtectionSecretStore> logger,
         string? secretsDirectory = null)
     {
         _dataProtectionProvider = dataProtectionProvider;
+        _logger = logger;
         _secretsDirectory = secretsDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Meterist",
@@ -65,9 +70,28 @@ public sealed class DataProtectionSecretStore : ISecretStore
         }
 
         var protectedBytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-        var plaintextJson = CreateProtectorForTenant(tenantId).Unprotect(protectedBytes);
-        return JsonSerializer.Deserialize<Dictionary<string, string>>(plaintextJson)
-            ?? new Dictionary<string, string>();
+
+        try
+        {
+            var plaintextJson = CreateProtectorForTenant(tenantId).Unprotect(protectedBytes);
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(plaintextJson)
+                ?? new Dictionary<string, string>();
+        }
+        catch (CryptographicException ex)
+        {
+            // An undecryptable file must not become a permanent dead end: SetCredentialAsync
+            // reads-before-write (to merge in other vendors' credentials for this same
+            // tenant), so without this recovery, a corrupted/stale file — e.g. from before
+            // the DataProtection application name was pinned, see ServiceCollectionExtensions
+            // — would permanently block the operator from ever resetting that tenant, not
+            // just from reading it. Treat it as "nothing usable stored" and move on, loudly.
+            _logger.LogWarning(ex,
+                "Stored credential file for tenant '{TenantId}' could not be decrypted — treating it "
+                + "as empty rather than blocking. Any other vendor credentials previously stored for "
+                + "this tenant will need to be re-set with 'credentials set'.",
+                tenantId);
+            return new Dictionary<string, string>();
+        }
     }
 
     private async Task SaveTenantCredentialsAsync(

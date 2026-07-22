@@ -134,6 +134,26 @@ tickets for a specific vendor adapter should point for implementation detail.
 - **Granularity:** **hourly** (finer than daily), SKU-level. Confirmed to
   include both the subscription SKU and overage SKU(s) for Gemini
   Enterprise specifically.
+- **⚠️ Service/SKU naming — corrected 2026-07-22 against a live test account
+  (originally guessed from documentation, and the guess was wrong):**
+  - The subscription and overage lines are billed under
+    `service.description = "Vertex AI Search"` — **not** a service literally
+    named "Gemini Enterprise." That string only appears at the SKU level:
+    `"Gemini Enterprise Plus: Subscription - one month term"` (the seat fee)
+    and `"Vertex AI Search: Search API Request Count - Enterprise"` (the
+    overage/usage line — the "Gemini Enterprise Overage" SKU name guessed
+    earlier doesn't exist; this is the real one).
+  - A sibling SKU, `"Vertex AI Search and Conversation: Data Index"`, is
+    **not** Enterprise-plan-specific and must be excluded — the working
+    filter is `service.description = "Vertex AI Search" AND sku.description
+    LIKE "%Enterprise%"` (implemented in `BigQueryGeminiBillingRepository`).
+  - Plain `service.description = "Vertex AI"` (no "Search") carries raw
+    Gemini model token usage (input/output/thinking tokens, grounding tool
+    calls, ReasoningEngine fees) — this is pay-as-you-go API consumption, a
+    **different product/billing surface** than the seat-licensed Gemini
+    Enterprise product, structurally closer to what this project calls
+    "Claude API Platform" than "Gemini Enterprise." Deliberately excluded
+    from this adapter, not a gap.
 - **Per-user:** available for *activity*, not *cost* — the key gap for this vendor:
   - The standard/detailed/FOCUS BigQuery billing export schemas have **no
     user-identity column at all**, at any tier — cost stays aggregated at

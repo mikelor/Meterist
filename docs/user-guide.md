@@ -21,6 +21,19 @@ and data — and runs as a CLI you operate from a terminal.
 | Claude API Platform | `claude-api-platform` | Not yet implemented |
 | ChatGPT Enterprise | `chatgpt-enterprise` | Not yet implemented |
 
+### What to use for `--tenant`
+
+There's no tenant registry or lookup table — `--tenant` is any string you
+choose, and it's purely the partition key tying a stored credential to that
+same client's extracted data. The only real requirement is using the exact
+same string across every `credentials set` and `extract` call for a given
+client organization.
+
+Pick a distinct value per client (and keep test/sandbox instances separate
+from real ones — e.g. `ecosync-test` rather than reusing whatever you'd use
+for the real `ecosync` account later), since Meterist won't stop you from
+mixing data under the same tenant string.
+
 Running `extract` for a tenant always reports a result for every vendor —
 unimplemented ones report a clear "Not implemented" status rather than
 silently doing nothing.
@@ -124,6 +137,16 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 
 ## Troubleshooting
 
+- **Debug logging is on by default** ([`appsettings.json`](../src/Meterist.Cli/appsettings.json)
+  sets `Meterist` categories to `Debug`, while quieting EF Core's own very
+  chatty SQL command logging down to `Warning`). This shows the exact
+  BigQuery SQL and parameters sent for Gemini Enterprise, the resolved
+  project/dataset/table for a tenant's credential (never the secret itself),
+  row/record counts at each pipeline stage, and full exception stack traces
+  on failure — this is usually the fastest way to see *why* something
+  returned 0 records or failed, before resorting to the raw-data table
+  below. To go back to quieter output, edit that file's `Meterist` level to
+  `Information` or `Warning`.
 - **"Succeeded" with 0 records** is a legitimate outcome, not a bug — it
   means there was no billable activity for that vendor/tenant in the
   requested range, or (for a newly-enabled Gemini BigQuery export) data

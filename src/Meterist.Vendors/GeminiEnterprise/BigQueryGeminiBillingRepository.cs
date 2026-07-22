@@ -1,15 +1,25 @@
 using Google.Apis.Auth.OAuth2;
 using Google.Cloud.BigQuery.V2;
 using Meterist.Core.Vendors;
+using Microsoft.Extensions.Logging;
 
 namespace Meterist.Vendors.GeminiEnterprise;
 
 /// <summary>
 /// Real IGeminiBillingQueryRepository, querying the tenant's Cloud Billing
-/// BigQuery export. Filters on service.description rather than an exact SKU
-/// string so newly added Gemini Enterprise SKU lines (Agent Gateway, Memory
-/// Bank/Sessions — see docs/vendor-integration-reference.md) keep being
-/// picked up without a code change.
+/// BigQuery export.
+///
+/// Filter corrected 2026-07-22 against a live test account: Google bills the
+/// Gemini Enterprise seat/subscription line and its per-request overage under
+/// <c>service.description = "Vertex AI Search"</c> — NOT a service literally
+/// named "Gemini Enterprise" (that string only appears in the SKU
+/// description, e.g. "Gemini Enterprise Plus: Subscription - one month
+/// term"). Plain "Vertex AI" (no "Search") carries raw Gemini model token
+/// usage instead — a different, pay-as-you-go product/billing surface, out
+/// of scope for this adapter. Within "Vertex AI Search," the SKU filter
+/// (LIKE '%Enterprise%') deliberately excludes sibling SKUs like "Vertex AI
+/// Search and Conversation: Data Index," which isn't specific to the
+/// Enterprise plan.
 ///
 /// Aggregates to (day, SKU) grain at the SQL level (GROUP BY DATE(...), sku)
 /// rather than returning raw hourly rows for the extractor to bucket later —
@@ -18,7 +28,15 @@ namespace Meterist.Vendors.GeminiEnterprise;
 /// </summary>
 public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryRepository
 {
-    private const string ServiceDescriptionFilter = "%Gemini Enterprise%";
+    public const string ServiceName = "Vertex AI Search";
+    public const string SkuDescriptionFilter = "%Enterprise%";
+
+    private readonly ILogger<BigQueryGeminiBillingRepository> _logger;
+
+    public BigQueryGeminiBillingRepository(ILogger<BigQueryGeminiBillingRepository> logger)
+    {
+        _logger = logger;
+    }
 
     public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> QueryBillingRowsAsync(
         GeminiCredential credential,
@@ -36,25 +54,23 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
         var client = await BigQueryClient.CreateAsync(credential.BillingProjectId, googleCredential)
             .ConfigureAwait(false);
 
-        var sql = $"""
-            SELECT
-              DATE(usage_start_time) AS record_date,
-              sku.description AS sku_description,
-              SUM(cost) AS cost,
-              IFNULL(SUM((SELECT SUM(c.amount) FROM UNNEST(credits) AS c)), 0) AS credits_amount
-            FROM {tableRef}
-            WHERE service.description LIKE @serviceFilter
-              AND DATE(usage_start_time) BETWEEN @periodStart AND @periodEnd
-            GROUP BY record_date, sku_description
-            ORDER BY record_date
-            """;
+        var sql = BuildSql(tableRef);
 
         var parameters = new[]
         {
-            new BigQueryParameter("serviceFilter", BigQueryDbType.String, ServiceDescriptionFilter),
+            new BigQueryParameter("serviceName", BigQueryDbType.String, ServiceName),
+            new BigQueryParameter("skuFilter", BigQueryDbType.String, SkuDescriptionFilter),
             new BigQueryParameter("periodStart", BigQueryDbType.Date, period.Start.ToDateTime(TimeOnly.MinValue)),
             new BigQueryParameter("periodEnd", BigQueryDbType.Date, period.End.ToDateTime(TimeOnly.MinValue)),
         };
+
+        // Deliberately not logging credential.ServiceAccountJson — everything else
+        // here is safe to log and is exactly what you'd want when a query comes
+        // back empty and you need to know precisely what was asked for.
+        _logger.LogDebug(
+            "Querying Gemini Enterprise billing export {Table} for {PeriodStart} to {PeriodEnd} "
+            + "with service '{ServiceName}' and SKU filter '{SkuFilter}'. SQL: {Sql}",
+            tableRef, period.Start, period.End, ServiceName, SkuDescriptionFilter, sql);
 
         var results = await client.ExecuteQueryAsync(sql, parameters, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -71,8 +87,29 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
             });
         }
 
+        _logger.LogDebug(
+            "Gemini Enterprise billing export {Table} returned {RowCount} (day, SKU) row(s) for {PeriodStart} to {PeriodEnd}.",
+            tableRef, rows.Count, period.Start, period.End);
+
         return rows;
     }
+
+    // Extracted purely so the WHERE-clause shape is unit-testable without a live
+    // BigQuery connection — see BigQueryGeminiBillingRepositoryTests, added
+    // specifically to guard against silently reverting the 2026-07-22 fix above.
+    public static string BuildSql(string tableRef) => $"""
+        SELECT
+          DATE(usage_start_time) AS record_date,
+          sku.description AS sku_description,
+          SUM(cost) AS cost,
+          IFNULL(SUM((SELECT SUM(c.amount) FROM UNNEST(credits) AS c)), 0) AS credits_amount
+        FROM {tableRef}
+        WHERE service.description = @serviceName
+          AND sku.description LIKE @skuFilter
+          AND DATE(usage_start_time) BETWEEN @periodStart AND @periodEnd
+        GROUP BY record_date, sku_description
+        ORDER BY record_date
+        """;
 
     private static DateOnly ToDateOnly(object? value) => value switch
     {

@@ -13,7 +13,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
 
-var builder = Host.CreateApplicationBuilder(args);
+// ContentRootPath must be pinned to the compiled app's own directory, not the
+// default (the caller's current working directory) — otherwise appsettings.json
+// silently fails to load whenever this is invoked from anywhere other than
+// this exact folder (e.g. a wrapper script, or `dotnet run --project` from the
+// repo root, both of which this tool is meant to support).
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 builder.AddServiceDefaults();
 
 builder.Services.AddMeteristData();

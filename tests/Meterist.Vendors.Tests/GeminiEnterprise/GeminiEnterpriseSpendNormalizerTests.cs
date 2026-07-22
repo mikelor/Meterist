@@ -1,6 +1,7 @@
 using Meterist.Core.Models;
 using Meterist.Core.Vendors;
 using Meterist.Vendors.GeminiEnterprise;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Meterist.Vendors.Tests.GeminiEnterprise;
 
@@ -31,7 +32,7 @@ public class GeminiEnterpriseSpendNormalizerTests
             },
         };
 
-        var normalizer = new GeminiEnterpriseSpendNormalizer();
+        var normalizer = new GeminiEnterpriseSpendNormalizer(NullLogger<GeminiEnterpriseSpendNormalizer>.Instance);
         var result = normalizer.Normalize(rawData, applicableRates: []);
 
         Assert.Equal(2, result.Count);

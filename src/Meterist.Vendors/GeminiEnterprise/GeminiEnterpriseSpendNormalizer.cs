@@ -1,5 +1,6 @@
 using Meterist.Core.Models;
 using Meterist.Core.Vendors;
+using Microsoft.Extensions.Logging;
 
 namespace Meterist.Vendors.GeminiEnterprise;
 
@@ -12,6 +13,13 @@ namespace Meterist.Vendors.GeminiEnterprise;
 public sealed class GeminiEnterpriseSpendNormalizer : IVendorSpendNormalizer
 {
     private const string SubscriptionMarker = "Subscription";
+
+    private readonly ILogger<GeminiEnterpriseSpendNormalizer> _logger;
+
+    public GeminiEnterpriseSpendNormalizer(ILogger<GeminiEnterpriseSpendNormalizer> logger)
+    {
+        _logger = logger;
+    }
 
     public Guid VendorId => VendorCatalog.GeminiEnterprise.Id;
 
@@ -67,6 +75,10 @@ public sealed class GeminiEnterpriseSpendNormalizer : IVendorSpendNormalizer
                 NetSpend = grossSpend - creditsApplied,
             });
         }
+
+        _logger.LogDebug(
+            "Normalized {DayCount} day(s) of Gemini Enterprise raw data into {RecordCount} DailySpendRecord(s) for tenant '{TenantId}'.",
+            rawData.RecordsByDate.Count, records.Count, rawData.TenantId);
 
         return records;
     }

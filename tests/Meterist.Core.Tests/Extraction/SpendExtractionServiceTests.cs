@@ -2,6 +2,7 @@ using Meterist.Core.Extraction;
 using Meterist.Core.Models;
 using Meterist.Core.Persistence;
 using Meterist.Core.Vendors;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Meterist.Core.Tests.Extraction;
 
@@ -22,7 +23,8 @@ public class SpendExtractionServiceTests
         var rawRepo = new FakeRawExtractionRepository();
         var dailyRepo = new FakeDailySpendRepository();
 
-        var service = new SpendExtractionService([extractor], [normalizer], rawRepo, dailyRepo);
+        var service = new SpendExtractionService(
+            [extractor], [normalizer], rawRepo, dailyRepo, NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -41,7 +43,8 @@ public class SpendExtractionServiceTests
         var normalizer = new FakeNormalizer(vendorId, []);
 
         var service = new SpendExtractionService(
-            [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository());
+            [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -57,7 +60,8 @@ public class SpendExtractionServiceTests
         var normalizer = new FakeNormalizer(vendorId, []);
 
         var service = new SpendExtractionService(
-            [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository());
+            [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -73,7 +77,8 @@ public class SpendExtractionServiceTests
         var extractor = new FakeExtractor(vendorId, EmptyRawData(vendorId));
 
         var service = new SpendExtractionService(
-            [extractor], [], new FakeRawExtractionRepository(), new FakeDailySpendRepository());
+            [extractor], [], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -92,7 +97,8 @@ public class SpendExtractionServiceTests
         var extractor = new ThrowingExtractor(vendorId, new NotImplementedException("nope"));
 
         var service = new SpendExtractionService(
-            [extractor], [], new FakeRawExtractionRepository(), new FakeDailySpendRepository());
+            [extractor], [], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -113,7 +119,8 @@ public class SpendExtractionServiceTests
 
         var service = new SpendExtractionService(
             [extractorA, extractorB], [normalizerA, normalizerB],
-            new FakeRawExtractionRepository(), new FakeDailySpendRepository());
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            NullLogger<SpendExtractionService>.Instance);
 
         var results = await service.ExtractAsync(
             "ecosync", Period, vendorFilter: vendorA, cancellationToken: TestContext.Current.CancellationToken);
