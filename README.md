@@ -13,6 +13,7 @@ Today, this is tracked manually in an Excel workbook (`AI_Vendor_Weekly_Spend_Mo
 
 ### Project docs
 
+- [`docs/user-guide.md`](docs/user-guide.md) — operator-facing guide: per-vendor setup, running extraction, reading results, troubleshooting
 - [`docs/product-design-document.md`](docs/product-design-document.md) — problem statement, v1 scope, future features/backlog, open questions
 - [`docs/architecture.md`](docs/architecture.md) — system shape, data model, multi-tenancy, and flagged open decisions
 - [`docs/vendor-integration-reference.md`](docs/vendor-integration-reference.md) — living technical reference for each vendor's API (endpoints, auth, granularity, overage/per-user matrix), including deferred future-vendor research (Microsoft Copilot family)
