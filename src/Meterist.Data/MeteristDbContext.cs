@@ -10,26 +10,26 @@ public sealed class MeteristDbContext : DbContext
     {
     }
 
-    public DbSet<WeeklySpendRecord> WeeklySpendRecords => Set<WeeklySpendRecord>();
+    public DbSet<DailySpendRecord> DailySpendRecords => Set<DailySpendRecord>();
+
+    public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
     public DbSet<VendorRateConfig> VendorRateConfigs => Set<VendorRateConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // Shadow "Id" surrogate keys: WeeklySpendRecord/VendorRateConfig are kept
-        // exactly as documented in architecture.md §5 (no Id property in the
-        // C# model) — EF Core's own key requirement is satisfied here instead,
-        // in the persistence layer, rather than leaking a persistence concern
-        // into the domain model.
-        modelBuilder.Entity<WeeklySpendRecord>(entity =>
+        // Shadow "Id" surrogate keys: the Core models are kept exactly as
+        // documented (no Id property in the C# model) — EF Core's own key
+        // requirement is satisfied here instead, in the persistence layer,
+        // rather than leaking a persistence concern into the domain model.
+        modelBuilder.Entity<DailySpendRecord>(entity =>
         {
             entity.Property<int>("Id").ValueGeneratedOnAdd();
             entity.HasKey("Id");
 
-            // The natural idempotency key from architecture.md §9 ("upsert by
-            // TenantId + VendorName + WeekStart") — enforced here so a re-run
-            // extraction for an already-pulled week is safe by construction.
-            entity.HasIndex(r => new { r.TenantId, r.VendorName, r.WeekStart }).IsUnique();
+            // The natural idempotency/overlap key: re-running extraction for an
+            // already-stored day is an upsert against this same index.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.Date }).IsUnique();
 
             // SQLite has no native DECIMAL type (EF Core stores decimal as TEXT
             // to preserve precision) — set explicit precision/scale so a later
@@ -42,6 +42,14 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.NetSpend).HasPrecision(18, 4);
         });
 
+        modelBuilder.Entity<RawDailyExtractionRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.Date }).IsUnique();
+        });
+
         modelBuilder.Entity<VendorRateConfig>(entity =>
         {
             entity.Property<int>("Id").ValueGeneratedOnAdd();
@@ -51,7 +59,7 @@ public sealed class MeteristDbContext : DbContext
             // rate), and standard SQL unique indexes don't enforce uniqueness
             // across NULL values the way this business rule would need — good
             // enough for v1 query performance, not a full constraint.
-            entity.HasIndex(r => new { r.TenantId, r.VendorName, r.ModelOrSku, r.EffectiveFrom });
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.ModelOrSku, r.EffectiveFrom });
 
             entity.Property(r => r.Rate).HasPrecision(18, 6);
         });

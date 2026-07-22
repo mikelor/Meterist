@@ -1,3 +1,4 @@
+using Meterist.Core.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,6 +25,9 @@ public static class ServiceCollectionExtensions
 
         services.AddDbContext<MeteristDbContext>(options =>
             options.UseSqlite($"Data Source={path}"));
+
+        services.AddScoped<IDailySpendRepository, EfDailySpendRepository>();
+        services.AddScoped<IRawExtractionRepository, EfRawExtractionRepository>();
 
         return services;
     }

@@ -3,6 +3,7 @@ using Meterist.Vendors.ChatGptEnterprise;
 using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
+using Meterist.Vendors.Tests.GeminiEnterprise;
 
 namespace Meterist.Vendors.Tests;
 
@@ -16,21 +17,35 @@ public class CapabilityMatrixTests
 {
     public static IEnumerable<object[]> Extractors()
     {
-        yield return [new ClaudeEnterpriseSpendExtractor(), true, true];
-        yield return [new ClaudeApiPlatformSpendExtractor(), false, false];
-        yield return [new ChatGptEnterpriseSpendExtractor(), true, true];
-        yield return [new GeminiEnterpriseSpendExtractor(), true, true];
+        yield return [new ClaudeEnterpriseSpendExtractor(), VendorCatalog.ClaudeEnterprise, true, true];
+        yield return [new ClaudeApiPlatformSpendExtractor(), VendorCatalog.ClaudeApiPlatform, false, false];
+        yield return [new ChatGptEnterpriseSpendExtractor(), VendorCatalog.ChatGptEnterprise, true, true];
+        yield return [
+            new GeminiEnterpriseSpendExtractor(new FakeSecretStore(), new FakeGeminiBillingQueryRepository()),
+            VendorCatalog.GeminiEnterprise, true, true,
+        ];
     }
 
     [Theory]
     [MemberData(nameof(Extractors))]
     public void CapabilityFlags_MatchTheDocumentedMatrix(
         IVendorSpendExtractor extractor,
+        VendorIdentity expectedIdentity,
         bool expectedSupportsOverage,
         bool expectedSupportsPerUserBreakdown)
     {
+        Assert.Equal(expectedIdentity.Id, extractor.VendorId);
         Assert.Equal(expectedSupportsOverage, extractor.SupportsOverage);
         Assert.Equal(expectedSupportsPerUserBreakdown, extractor.SupportsPerUserBreakdown);
+    }
+
+    [Fact]
+    public void VendorCatalog_HasNoDuplicateIdsOrShortNames()
+    {
+        Assert.Equal(VendorCatalog.All.Count, VendorCatalog.All.Select(v => v.Id).Distinct().Count());
+        Assert.Equal(
+            VendorCatalog.All.Count,
+            VendorCatalog.All.Select(v => v.ShortName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     [Fact]

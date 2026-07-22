@@ -8,7 +8,7 @@ namespace Meterist.Vendors.ClaudeApiPlatform;
 /// </summary>
 public sealed class ClaudeApiPlatformSpendExtractor : IVendorSpendExtractor
 {
-    public string VendorName => "ClaudeApiPlatform";
+    public Guid VendorId => VendorCatalog.ClaudeApiPlatform.Id;
 
     // No seat/overage concept applies to this vendor at all — it's pure
     // usage-based pricing, so the entire cost_report figure is the spend.

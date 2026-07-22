@@ -9,7 +9,7 @@ namespace Meterist.Vendors.ChatGptEnterprise;
 /// </summary>
 public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
 {
-    public string VendorName => "ChatGptEnterprise";
+    public Guid VendorId => VendorCatalog.ChatGptEnterprise.Id;
 
     // True for raw credit consumption, which the Cost API does expose. The
     // credit-pool size and contracted overage rate are NOT API-derivable

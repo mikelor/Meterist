@@ -8,7 +8,7 @@ namespace Meterist.Vendors.ClaudeEnterprise;
 /// </summary>
 public sealed class ClaudeEnterpriseSpendExtractor : IVendorSpendExtractor
 {
-    public string VendorName => "ClaudeEnterprise";
+    public Guid VendorId => VendorCatalog.ClaudeEnterprise.Id;
 
     // True because the API *can* return overage — but only for tenants that have
     // "usage credits" enabled. A seat-based tenant without that toggle has no

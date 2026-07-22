@@ -14,7 +14,7 @@ public interface IPricingRateResolver
 {
     Task<VendorRateConfig?> ResolveRateAsync(
         string tenantId,
-        string vendorName,
+        Guid vendorId,
         string? modelOrSku,
         DateOnly effectiveDate,
         CancellationToken cancellationToken = default);

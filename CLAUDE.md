@@ -102,7 +102,7 @@ overage/per-user feasibility matrix) now lives in
 
 ## Target Data Model
 
-Full data model (`WeeklySpendRecord`, `VendorRateConfig`, and the future
+Full data model (`DailySpendRecord`, `VendorRateConfig`, and the future
 `UserSpendRecord`) plus the vendor adapter pattern now live in
 [`docs/architecture.md`](docs/architecture.md) — that is the source of
 truth going forward. Key point carried over: **overage semantics vary by

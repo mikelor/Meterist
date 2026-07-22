@@ -7,7 +7,7 @@ namespace Meterist.Core.Vendors;
 /// </summary>
 public interface IVendorSpendExtractor
 {
-    string VendorName { get; }
+    Guid VendorId { get; }
 
     // Capability flags genuinely vary per vendor/plan — not a gap to paper over.
     // The aggregation engine must treat "false" (or, for Claude Enterprise, a

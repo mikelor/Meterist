@@ -36,21 +36,21 @@ public sealed class DataProtectionSecretStore : ISecretStore
 
     public async Task<string?> GetCredentialAsync(
         string tenantId,
-        string vendorName,
+        Guid vendorId,
         CancellationToken cancellationToken = default)
     {
         var credentials = await LoadTenantCredentialsAsync(tenantId, cancellationToken).ConfigureAwait(false);
-        return credentials.TryGetValue(vendorName, out var value) ? value : null;
+        return credentials.TryGetValue(vendorId.ToString(), out var value) ? value : null;
     }
 
     public async Task SetCredentialAsync(
         string tenantId,
-        string vendorName,
+        Guid vendorId,
         string credential,
         CancellationToken cancellationToken = default)
     {
         var credentials = await LoadTenantCredentialsAsync(tenantId, cancellationToken).ConfigureAwait(false);
-        credentials[vendorName] = credential;
+        credentials[vendorId.ToString()] = credential;
         await SaveTenantCredentialsAsync(tenantId, credentials, cancellationToken).ConfigureAwait(false);
     }
 

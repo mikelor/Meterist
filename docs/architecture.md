@@ -31,10 +31,12 @@ every layer below:
                      │
 ┌────────────────────▼───────────────────────────┐
 │  Core Library / Service Layer                   │
-│  - Extraction orchestration (per-tenant, per-    │
-│    vendor, per-week)                             │
+│  - SpendExtractionService: orchestration (per-   │
+│    tenant, arbitrary date range — not locked to  │
+│    one week at a time)                           │
 │  - Pricing/rate resolution engine                │
-│  - Aggregation into WeeklySpendRecord            │
+│  - Raw persistence (day-grouped, latest-pull-per-│
+│    day), then normalization into DailySpendRecord│
 │  - Multi-tenant credential resolution            │
 └───────┬───────────┬───────────┬───────────┬─────┘
         │           │           │           │
@@ -73,7 +75,8 @@ engine and everything above it is vendor-agnostic:
 
 ```
 IVendorSpendExtractor
-├── VendorName: string
+├── VendorId: Guid   — stable identity; see §3.1 Vendor Identity. Matched to
+│                       its normalizer by VendorId, not a display-name string.
 ├── ExtractAsync(TenantId, DateRange) → RawVendorSpendData
 └── SupportsOverage / SupportsPerUserBreakdown (capability flags —
     see the cross-vendor matrix in vendor-integration-reference.md;
@@ -81,10 +84,23 @@ IVendorSpendExtractor
 ```
 
 A separate `IVendorSpendNormalizer` (or equivalent mapping step) turns each
-vendor's `RawVendorSpendData` into one or more `WeeklySpendRecord`s, applying
+vendor's `RawVendorSpendData` into one or more `DailySpendRecord`s, applying
 the resolved `VendorRateConfig` where the vendor's own API returns raw usage
 rather than dollars (only Claude API Platform's `usage_report` case, if used
 instead of `cost_report` — see vendor reference).
+
+### 4.1 Vendor Identity — DECIDED (2026-07-21)
+
+Vendor identity is a stable `Guid` (`VendorId`) plus a CLI-friendly
+`VendorShortName` (e.g. `gemini-enterprise`), not the display name — a
+rebrand or merger shouldn't orphan historical data or break credential
+lookups. The vendor set is small and fixed in code (not tenant-created), so
+this is a compile-time `VendorCatalog` (one `VendorIdentity` constant per
+vendor: `Id`, `ShortName`, `DisplayName`), not a database table. `ISecretStore`,
+`VendorRateConfig`, `DailySpendRecord`, and the CLI's `--vendor` argument all
+key off `VendorId`/`VendorShortName`; `DisplayName` is resolved from the
+catalog only where shown to a human, and can change freely since nothing is
+keyed on it.
 
 **Capability flags matter architecturally, not just descriptively:** e.g.
 `SupportsOverage` is `false` for Claude API Platform by design (no seat
@@ -93,16 +109,22 @@ concept), and conditionally true for Claude Enterprise (depends on whether
 engine must treat "no overage" as a valid, expected outcome for some
 vendor/tenant combinations, not an extraction failure.
 
-## 5. Data Model
+## 5. Data Model — REVISED (2026-07-22): daily grain, not weekly
 
-Carried forward from initial design discussion, refined by research:
+Stakeholders confirmed a need for timespan-based extraction (e.g. "backfill
+the last 4 months") rather than one-week-at-a-time, so **daily is the
+canonical stored grain**. Weekly, monthly, and annual views (Annual
+Projection, the spreadsheet's existing convention) are query-time
+aggregations over daily records, not a separately stored table. Overlapping
+extraction timespans need no special handling: the natural key
+`(TenantId, VendorId, Date)` means re-extracting an already-stored day is
+just another upsert against that same key — identical code path to a new day.
 
 ```
-WeeklySpendRecord
+DailySpendRecord
 ├── TenantId (string/guid)
-├── VendorName (string)
-├── WeekStart (date)
-├── WeekEnd (date)
+├── VendorId (guid)                  — see §4.1, not a display-name string
+├── Date (date)                      — the grain; no WeekStart/WeekEnd
 ├── SeatFee (decimal)
 ├── UsageOrOverage (decimal)         — legitimately 0 for some vendor/tenant
 │                                       combinations, see §4
@@ -114,22 +136,61 @@ WeeklySpendRecord
 ```
 VendorRateConfig
 ├── TenantId (nullable — null = default/public rate applies to all tenants)
-├── VendorName (string)
-├── RateType (e.g. "per-seat-monthly", "per-million-tokens-input",
-│             "per-credit-overage")
+├── VendorId (guid)
+├── RateType (e.g. "per-seat", "per-million-tokens-input", "per-credit-overage")
 ├── ModelOrSku (nullable — for token/SKU-level rates)
 ├── Rate (decimal)
+├── SeatCount (nullable int)         — the *billed* seat count (e.g. committed,
+│                                       not necessarily active — see the ChatGPT
+│                                       Enterprise 50-purchased/12-active
+│                                       example in vendor-integration-reference.md)
+├── BillingCadence (nullable enum: Monthly/Annual/OneTime)
 ├── EffectiveFrom (date)
 └── EffectiveTo (nullable date)
 ```
+
+`SeatCount`/`BillingCadence` were added 2026-07-22 alongside the `VendorId`
+migration: a seat/license contract term (rate × seat count, billed monthly
+or annually) is the same *kind* of versioned tenant+vendor+date-scoped fact
+`VendorRateConfig` already models, so it reuses the same
+`EffectiveFrom`/`EffectiveTo` versioning rather than a parallel table — a
+rate-card change correctly leaves already-computed historical
+`DailySpendRecord`s alone. **Not consumed by anything yet**: no v1 vendor
+needs it (three return dollars directly; Gemini's seat fee arrives
+pre-prorated from BigQuery) — these fields sit defined-but-unused until
+Claude Enterprise or ChatGPT Enterprise needs to derive a seat fee from
+contract terms rather than a vendor API (the same deferred
+`IPricingRateResolver` implementation below).
+
+### 5.1 Raw Data — structurally daily, not a convention
+
+`RawVendorSpendData` groups records by calendar day
+(`IReadOnlyDictionary<DateOnly, ...>`) rather than a flat list, so "daily is
+the raw grain" is a property of the type itself — every vendor extractor is
+required to satisfy this shape, not just encouraged to via a naming
+convention. Gemini's BigQuery query aggregates to `(date, sku)` at the SQL
+level for exactly this reason, rather than returning hourly rows for later
+bucketing in C#.
+
+Raw data is persisted (one row per `(TenantId, VendorId, Date)`, that day's
+records as a JSON blob) **before** normalization runs, so a normalization bug
+found later can be fixed and replayed against the original pull — this
+matters because some vendors have limited retention (Claude Enterprise
+Analytics API only goes back to Jan 1, 2026; ChatGPT Enterprise ~120 days),
+so the vendor API may no longer have the historical window by the time a bug
+is found. **Scope cut:** this keeps only the *latest* pull per day (an
+upsert, same semantics as the canonical layer) — not a full audit log of
+every historical extraction attempt. A true append-only history is a larger,
+separate feature (unbounded growth, different retention story) and is
+deliberately not built.
 
 **Future addition (v1.x, not v1):**
 
 ```
 UserSpendRecord
 ├── TenantId
-├── VendorName
-├── WeekStart
+├── VendorId
+├── Date
 ├── UserId / Email
 ├── Amount (decimal)
 └── IsEstimated (bool)    — true for Gemini Enterprise (no vendor-reported
@@ -231,8 +292,8 @@ vendor adapter or pricing-engine code.
 rather than all at once.**
 
 - **v1 runs locally**, operator-triggered via CLI
-  (`meterist extract --tenant X --week 2026-07-14`). No hosted service,
-  no container orchestration required to ship v1.
+  (`meterist extract --tenant X --from 2026-07-01 --to 2026-07-31`). No
+  hosted service, no container orchestration required to ship v1.
 - **Aspire's `ServiceDefaults` pattern is adopted now**, decoupled from the
   full Aspire AppHost — this is just a shared project wiring up
   OpenTelemetry, health checks, and Polly-based resilience into the CLI/core
@@ -254,11 +315,12 @@ rather than all at once.**
   choice — flagged here as an implicit commitment worth being deliberate
   about, not an accident of tooling choice.
 - **Idempotency requirement carries over regardless of deployment model:**
-  re-running extraction for an already-pulled week must be safe (e.g.
-  upsert by `TenantId + VendorName + WeekStart`), since at least two
-  vendors' APIs (Claude Enterprise Analytics API, Claude API Platform
-  cost/usage reports) explicitly document revision windows (data can change
-  for up to 30 days / ~5 minutes after initial availability).
+  re-running extraction for an already-pulled day must be safe — the
+  `TenantId + VendorId + Date` natural key (§5) makes this an upsert by
+  construction — since at least two vendors' APIs (Claude Enterprise
+  Analytics API, Claude API Platform cost/usage reports) explicitly document
+  revision windows (data can change for up to 30 days / ~5 minutes after
+  initial availability).
 
 ## 10. Error Handling & Observability — DECIDED (2026-07-21)
 

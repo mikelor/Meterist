@@ -92,10 +92,11 @@ programmatic audit trail or historical query capability.
    constants. Required because rates have already changed mid-project
    (Sonnet 5 pricing step-up Sep 1, 2026; Claude Enterprise seat→usage
    transition; new Gemini SKUs).
-4. **Weekly spend aggregation into a normalized data model** — one shape
-   across all four vendors (`WeeklySpendRecord`, see
-   [`architecture.md`](architecture.md)), regardless of each vendor's very
-   different native API/export shape.
+4. **Daily spend aggregation into a normalized data model** — one shape
+   across all four vendors (`DailySpendRecord`, see
+   [`architecture.md`](architecture.md) §5), regardless of each vendor's
+   very different native API/export shape. Daily is the stored grain;
+   weekly/monthly/annual views are query-time aggregations over it.
 5. **CLI interface** to trigger extraction and view aggregated
    reports/exports.
 6. **Historical data continuity.** Ecosync's spreadsheet-tracked weeks
