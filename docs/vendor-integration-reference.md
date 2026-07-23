@@ -89,38 +89,161 @@ tickets for a specific vendor adapter should point for implementation detail.
 
 ### ChatGPT Enterprise
 
-- **API:** Unified **Cost API**, shipped June 18, 2026 as part of OpenAI's
-  "New usage analytics and updated spend controls" release. Unifies ChatGPT
-  + Codex credit consumption. A separate **Spend Controls API** manages
-  limits. The old CSV export ("Credit Usage Report") still exists as a
-  fallback/UI path, not removed.
-- **Auth:** Workspace-scoped **Admin key** (Global Admin Console →
-  Credentials → Admin keys). Reportedly exposes up to 120 days of history.
+- **⚠️ Schema spiked 2026-07-22 against the real, authenticated OpenAI
+  Programmatic Admin Platform reference** (`chatgpt.com/admin/api-reference`,
+  v2.5.3 as of that date — this page 403s without an active admin session,
+  which is why it wasn't visible in the 2026-07-21 research pass). The
+  marketing "unified Cost API" turns out to be a `COSTS` event type inside
+  the **Compliance Logs Platform** (immutable JSONL file export), not a
+  simple REST reporting endpoint — see below for the concrete shape. Not yet
+  tested against a live pull (that's the next step — zelleri Admin key is
+  being provisioned); everything below is transcribed from the official
+  reference, not yet verified against real response bytes.
+- **Base URL:** `https://api.chatgpt.com/v1/`. Auth: `Authorization: Bearer
+  <admin_api_key>`, an Admin key created in the OpenAI Admin Console
+  (Billing → Create admin key in the UI seen 2026-07-22; the reference doc
+  says "Credentials > Admin keys"). Scope needed: `chatgpt.enterprise.compliance_logs_platform.costs.read`
+  (shown in the console as **Compliance logging platform → Costs → Read**),
+  or the broader `chatgpt.enterprise.compliance_logs_platform.read`. Read is
+  the only permission level offered for this scope — there is no write
+  variant, consistent with it being a reporting-only surface.
+- **⚠️ Org-scoped, not workspace-scoped** — a doc correction landed the same
+  day we spiked this (v2.5.3, 2026-07-21): COSTS files are listed via
+  `GET /compliance/organizations/{organization_id}/logs?event_type=COSTS`
+  using the **API Platform Organization ID** (`org-...`, found in workspace
+  Settings → General → "Organization ID" — NOT the Workspace ID). The
+  workspace-scoped logs route (`/compliance/workspaces/{workspace_id}/logs`)
+  does not carry `COSTS`.
+- **Two-step fetch, like Gemini's BigQuery export** (confirmed against the
+  OpenAPI spec directly, `docs/chatgpt/openapi.json` — a user-supplied
+  download of the same v2.5.3 reference, not just the rendered HTML page):
+  (1) **list files** — `after`/`before` are ISO 8601 timestamps bounding
+  `end_time`, `limit` ≤ 100, response is `{ data: ComplianceLogFileMetadata[],
+  has_more, last_end_time }`; paginate by feeding `last_end_time` back in as
+  `after`. Each `ComplianceLogFileMetadata` item has `id` (pass as
+  `log_file_id` to the download call), `event_type`, `end_time`, `file_name`,
+  `file_size`, `file_sha256` (hex SHA-256 — worth verifying downloaded bytes
+  against this before parsing). (2) **download a file** —
+  `GET /compliance/organizations/{organization_id}/logs/{log_file_id}`
+  responds `307` with a `Location` header holding a **short-lived signed
+  URL** and no body on the redirect itself — follow it immediately, then
+  parse the fetched body as JSONL. Files expire after a **30-day retention
+  window** — this is a forward-sync design (`after`/`before` paging), not a
+  full historical export; there's no self-service backfill beyond 30 days
+  (OpenAI support can do a manual "rehydration" for `CONVERSATION_MESSAGE`
+  specifically, but that offer wasn't stated to cover `COSTS`).
+- **Latency:** OpenAI states 3–5 hours for `COSTS` specifically (other log
+  types target a p99 <30min SLA — costs are explicitly slower). Events use
+  an "at least once" contract — **de-duplicate on `event_id`** before
+  aggregating.
+- **Grain: hourly, per-user, per-model, per-workspace-group-combination** —
+  finer than we need. Each `COSTS` record is one `(day, hour, identity,
+  group-membership-combination, product, surface, client, model,
+  service_tier, reasoning)` row; a user in two workspace groups can produce
+  two rows for the same hour. Our extractor needs to aggregate hour→day and
+  drop the per-user/group dimensions for the v1 canonical `DailySpendRecord`
+  (the per-user breakdown remains available from the raw JSONL later if the
+  future "per-employee spend" feature needs it — this is exactly the kind of
+  case `IRawExtractionRepository` exists for).
+- **Per-user:** confirmed, richer than expected — `payload.identity` carries
+  `user_id`, `email`, `name`, `groups[]` (workspace group id/name), and
+  optionally `agent` (Workspace Agent id/name) when the usage came from an
+  agent rather than a direct chat.
+- **⚠️ Dollar cost — `estimated_cost_usd` does NOT reliably appear, corrected
+  2026-07-22 against a real zelleri pull:** a real row (org
+  `org-QfdtNaipyr41iIOkKRw3fa7y`, 2026-07-13) had four `billing[]` entries,
+  all `cost.unit = "CREDITS"` (values like `3.3408`, `6.09925`), and **none**
+  carried `estimated_cost_usd` — despite the doc's claim that it's
+  "populated only when the SKU has a cost in CREDITS" (i.e., exactly this
+  case). So the field is real but evidently conditional on something the doc
+  doesn't state (an overage-rate/contract configuration on the org, maybe,
+  or a rollout that hasn't reached this tenant/plan) — **don't assume it
+  will be present; treat it as opportunistic, not load-bearing.** Practical
+  effect: the credit→USD conversion the manual reconstruction used to do
+  (console `estimated overage` ÷ cumulative credits → per-credit rate) is
+  **still needed** in the general case, same as before this spike — model it
+  as a per-tenant configurable rate (fits the existing `VendorRateConfig`
+  versioned-config story), and treat `estimated_cost_usd` as a bonus
+  shortcut to use *when present*, falling back to the configured rate ×
+  `cost.value` (in credits) otherwise. Each `billing[]` entry also has
+  `sku` (free-form string, e.g. `"GPT-5.6 Sol - Cached Input"`) and
+  `quantity` (`value`+`unit`, e.g. tokens) alongside `cost`. The credit
+  **pool size** and **contracted overage rate** remain
+  console/contract-only, unchanged from the original assessment.
+- **Other real-data notes from the same pull:** `payload.product` was
+  `"Work"` in the real row vs. `"chatgpt"` in the doc's illustrative example
+  — confirms these are free-form strings, not a fixed enum; don't hardcode
+  expected values. A file's write-time can lag its contained events by
+  hours (a file named `COSTS_2026-07-14T00:44:02...` contained an event with
+  `day: "2026-07-13", hour: 19`) — consistent with the documented 3–5h
+  latency. File volume is high relative to the 30-day retention window (10
+  files covered well under a day of activity for one small tenant) — the
+  real extractor needs a proper `after`/`last_end_time` pagination loop from
+  the first call, not a single fetch. `payload.identity` carries real PII
+  (name, email) — fine for internal cost tracking, but worth being
+  deliberate later about where it surfaces (dashboards, logs) if the future
+  per-employee breakdown feature is built on top of this.
+- **Seat fee is still not in this schema at all** — `COSTS` is a usage/credit
+  ledger, not a subscription invoice. The flat per-seat license fee
+  (Ecosync: 50 purchased / 12 active seats) still has to come from
+  `VendorRateConfig`/contract terms, same as before.
+- **⚠️ Confirmed 2026-07-22: there is no Billing API — the credit pool/grant/
+  expiration side is genuinely absent from every documented surface, not
+  just the ones checked so far.** Cross-checked two independent sources
+  against a real zelleri question ("credits are added monthly, the amount
+  dropped from 50,000 to 30,000, and credits appear to expire — where can we
+  get this programmatically?"):
+  - Exhaustively searched all 74 paths and the full text of
+    `docs/chatgpt/openapi.json` for `credit_pool`, `grant`, `balance`,
+    `expir*`, `top_up`, `renewal` — zero hits for anything credit-grant- or
+    expiration-related. The only `grant`/`expir` hits are unrelated (access
+    grants in `AUDIT_LOG` actions; token/signed-URL/file expiration).
+  - Cross-checked the legacy **"Credit Usage Report" CSV** (still downloadable
+    from the Admin Console UI — the same export the original 2026-07-21
+    research flagged as "not removed") against a real zelleri download
+    (Jan 1–Jul 17, 2026, 1,477 rows). Its columns —
+    `date_partition, account_id, account_user_id, email, name, public_id,
+    usage_type, usage_credits, usage_quantity, usage_units` — are the same
+    underlying per-user/day/usage-type consumption ledger `COSTS` now serves
+    (`usage_type` values like `codex`, `chat.completion.5.pro`,
+    `chat_tool.imagegen`, `deep_research.completion`, `voice.audio.4o`, and
+    the `api.gpt_5_x`/`codex_fast` model families all match what `COSTS`
+    returns under different, customer-facing SKU names). **But the CSV only
+    has consumption rows** — no negative values, no lump-sum rows that would
+    represent a monthly credit grant. Confirms the grant/pool/expiration
+    mechanics aren't exposed via *either* the old CSV path or the new API
+    path — this isn't a gap specific to `COSTS`, it's not published anywhere
+    OpenAI ships programmatically today.
+  - Real public pricing-model change found (not zelleri-specific, but
+    plausibly explains the timing of the observed grant change): **April 2,
+    2026**, OpenAI moved Codex and other advanced features (Deep Research,
+    Thinking models, Image Gen, Advanced Voice) to usage-based/credit
+    pricing, funded from "a shared credit pool purchased at the contract
+    level rather than per-seat caps" ([Flexible pricing for ChatGPT
+    Enterprise plans](https://help.openai.com/en/articles/11487671-flexible-pricing-for-chatgpt-enterprise-plans)).
+    Zelleri's monthly consumed-credit total (from the CSV) roughly doubled
+    right after: Jan 5,648 → Feb 12,831 → Mar 12,126 → Apr 15,913 → **May
+    29,830 → Jun 29,167** → Jul (17 days) 16,508 (≈30,090 if the pace holds
+    for the full month). May/June landing right at ~29–30k rather than
+    continuing the prior growth trend looks like a plateau-at-a-cap pattern,
+    not organic leveling off — plausible evidence zelleri is already at or
+    near a 30,000/month ceiling, though the specific grant number is a
+    contract fact that needs confirming with the OpenAI account team, not
+    something derivable from usage data alone.
+  - **Practical conclusion:** don't build a pool-size lookup against any
+    vendor API — there isn't one. If pool tracking is wanted, it has to be a
+    manually-entered config value (see the backlog item in
+    `product-design-document.md` §7), compared against the cumulative
+    `COSTS`-derived credit consumption Meterist already extracts.
 - **Do not confuse with** the pre-existing `/v1/organization/costs`
-  developer-platform Admin API — that's a different product (api.openai.com
-  token spend, project-scoped), confirmed to NOT cover ChatGPT/Codex
-  workspace credits.
-- **Per-user:** confirmed — the Cost API breaks down credit spend "by user,
-  product, and model" and supports identifying top users.
-- **Overage — the key gap, not eliminated by the new API:** the Cost API
-  returns raw credit consumption (now via API instead of CSV), but does
-  **not** expose the credit pool size, the "unbilled overage" dollar figure,
-  or the contracted overage rate as API fields. Those remain
-  **console-only** (Global Admin Console → Billing) or **contract-only**
-  ("the exact rates are not exposed in public documentation—only accessible
-  through your OpenAI account agreement"). The manual reconstruction (sum
-  credits → subtract unbilled overage from console → back into pool size →
-  walk cumulative usage) still applies; only the "sum credits" step is now
-  API-automatable. Overage rate observed for Ecosync: $0.07/credit — confirm
-  per-tenant, do not assume universal.
-- **Schema risk:** no public field-level API reference was found (OpenAI
-  gates the full reference behind authenticated developer access). **Spike
-  this with a real Admin key before finalizing the extraction/mapping code**
-  — this is the least-documented of the four v1 APIs.
-- Seat count/rate: Ecosync has 50 purchased / 12 active seats. Enterprise
-  contracts typically bill against committed seats, not active usage —
-  confirm via contract/order form per tenant, not assumption.
-- Compliance API confirmed to NOT carry billing/credit data.
+  developer-platform Admin API — different product (api.openai.com token
+  spend, project-scoped), confirmed to NOT cover ChatGPT/Codex workspace
+  credits.
+- A separate **Spend Controls** surface (`https://api.chatgpt.com/v1/usage`,
+  scopes `chatgpt.enterprise.usage_limit.read`/`.write`) manages/reads
+  monthly hard-cap limits at workspace/group/user level — write access,
+  useful for a possible future "set spend alerts from Meterist" feature, but
+  out of scope for the read-only extraction this tool needs today.
 
 ### Gemini Enterprise
 

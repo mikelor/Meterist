@@ -18,6 +18,7 @@ public sealed class SpendExtractionService
     private readonly IEnumerable<IVendorSpendNormalizer> _normalizers;
     private readonly IRawExtractionRepository _rawExtractionRepository;
     private readonly IDailySpendRepository _dailySpendRepository;
+    private readonly IVendorRateConfigRepository _vendorRateConfigRepository;
     private readonly ILogger<SpendExtractionService> _logger;
 
     public SpendExtractionService(
@@ -25,12 +26,14 @@ public sealed class SpendExtractionService
         IEnumerable<IVendorSpendNormalizer> normalizers,
         IRawExtractionRepository rawExtractionRepository,
         IDailySpendRepository dailySpendRepository,
+        IVendorRateConfigRepository vendorRateConfigRepository,
         ILogger<SpendExtractionService> logger)
     {
         _extractors = extractors;
         _normalizers = normalizers;
         _rawExtractionRepository = rawExtractionRepository;
         _dailySpendRepository = dailySpendRepository;
+        _vendorRateConfigRepository = vendorRateConfigRepository;
         _logger = logger;
     }
 
@@ -92,9 +95,10 @@ public sealed class SpendExtractionService
                     "Extractor succeeded but no normalizer is registered for this vendor.");
             }
 
-            // No rate resolution yet — deliberate scope cut, see VendorRateConfig's
-            // doc comment. No v1 vendor's normalizer needs this list populated.
-            var records = normalizer.Normalize(rawData, []);
+            var applicableRates = await _vendorRateConfigRepository
+                .GetApplicableRatesAsync(tenantId, extractor.VendorId, period, cancellationToken)
+                .ConfigureAwait(false);
+            var records = normalizer.Normalize(rawData, applicableRates);
             await _dailySpendRepository.UpsertAsync(records, cancellationToken).ConfigureAwait(false);
 
             _logger.LogDebug(

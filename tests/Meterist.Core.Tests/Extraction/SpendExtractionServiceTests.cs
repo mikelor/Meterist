@@ -24,7 +24,8 @@ public class SpendExtractionServiceTests
         var dailyRepo = new FakeDailySpendRepository();
 
         var service = new SpendExtractionService(
-            [extractor], [normalizer], rawRepo, dailyRepo, NullLogger<SpendExtractionService>.Instance);
+            [extractor], [normalizer], rawRepo, dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -44,7 +45,7 @@ public class SpendExtractionServiceTests
 
         var service = new SpendExtractionService(
             [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
-            NullLogger<SpendExtractionService>.Instance);
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -61,7 +62,7 @@ public class SpendExtractionServiceTests
 
         var service = new SpendExtractionService(
             [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
-            NullLogger<SpendExtractionService>.Instance);
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -78,7 +79,7 @@ public class SpendExtractionServiceTests
 
         var service = new SpendExtractionService(
             [extractor], [], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
-            NullLogger<SpendExtractionService>.Instance);
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -98,7 +99,7 @@ public class SpendExtractionServiceTests
 
         var service = new SpendExtractionService(
             [extractor], [], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
-            NullLogger<SpendExtractionService>.Instance);
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
         var results = await service.ExtractAsync(
             "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -120,13 +121,35 @@ public class SpendExtractionServiceTests
         var service = new SpendExtractionService(
             [extractorA, extractorB], [normalizerA, normalizerB],
             new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
-            NullLogger<SpendExtractionService>.Instance);
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
 
         var results = await service.ExtractAsync(
             "ecosync", Period, vendorFilter: vendorA, cancellationToken: TestContext.Current.CancellationToken);
 
         var result = Assert.Single(results);
         Assert.Equal(vendorA, result.VendorId);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ResolvesApplicableRates_AndPassesThemToNormalizer()
+    {
+        var vendorId = Guid.NewGuid();
+        var extractor = new FakeExtractor(vendorId, EmptyRawData(vendorId));
+        var normalizer = new FakeNormalizer(vendorId, []);
+        var expectedRates = new List<VendorRateConfig>
+        {
+            new() { VendorId = vendorId, RateType = "per-seat", Rate = 30m, EffectiveFrom = Period.Start },
+        };
+        var rateConfigRepo = new FakeVendorRateConfigRepository(expectedRates);
+
+        var service = new SpendExtractionService(
+            [extractor], [normalizer], new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            rateConfigRepo, NullLogger<SpendExtractionService>.Instance);
+
+        await service.ExtractAsync("ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(Period, rateConfigRepo.ReceivedPeriod);
+        Assert.Same(expectedRates, normalizer.ReceivedApplicableRates);
     }
 
     private static RawVendorSpendData EmptyRawData(Guid vendorId) => new()
@@ -168,9 +191,37 @@ public class SpendExtractionServiceTests
     {
         public Guid VendorId => vendorId;
 
+        public IReadOnlyList<VendorRateConfig>? ReceivedApplicableRates { get; private set; }
+
         public IReadOnlyList<DailySpendRecord> Normalize(
-            RawVendorSpendData rawData, IReadOnlyList<VendorRateConfig> applicableRates) =>
-            recordsToReturn;
+            RawVendorSpendData rawData, IReadOnlyList<VendorRateConfig> applicableRates)
+        {
+            ReceivedApplicableRates = applicableRates;
+            return recordsToReturn;
+        }
+    }
+
+    private sealed class FakeVendorRateConfigRepository(IReadOnlyList<VendorRateConfig>? ratesToReturn = null)
+        : IVendorRateConfigRepository
+    {
+        private readonly IReadOnlyList<VendorRateConfig> _ratesToReturn = ratesToReturn ?? [];
+
+        public DateRange? ReceivedPeriod { get; private set; }
+
+        public Task AddAsync(VendorRateConfig rate, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<int> CloseOpenEndedRateAsync(
+            string? tenantId, Guid vendorId, string? modelOrSku, DateOnly newEffectiveFrom,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<IReadOnlyList<VendorRateConfig>> GetApplicableRatesAsync(
+            string tenantId, Guid vendorId, DateRange period, CancellationToken cancellationToken = default)
+        {
+            ReceivedPeriod = period;
+            return Task.FromResult(_ratesToReturn);
+        }
     }
 
     private sealed class FakeRawExtractionRepository : IRawExtractionRepository

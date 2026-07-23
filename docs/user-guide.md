@@ -17,9 +17,9 @@ and data — and runs as a CLI you operate from a terminal.
 | Vendor | Short name (for `--vendor`) | Status |
 |---|---|---|
 | Gemini Enterprise | `gemini-enterprise` | Implemented |
+| ChatGPT Enterprise | `chatgpt-enterprise` | Implemented — also requires `rates set` before extracting, see [Configuring rates](#configuring-rates) below |
 | Claude Enterprise | `claude-enterprise` | Not yet implemented |
 | Claude API Platform | `claude-api-platform` | Not yet implemented |
-| ChatGPT Enterprise | `chatgpt-enterprise` | Not yet implemented |
 
 ### What to use for `--tenant`
 
@@ -102,14 +102,94 @@ $credential | ConvertTo-Json | Set-Content -Path "C:\path\to\gemini-credential.j
 dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-id> --vendor gemini-enterprise --from-file "C:\path\to\gemini-credential.json"
 ```
 
-### Claude Enterprise / Claude API Platform / ChatGPT Enterprise
+### ChatGPT Enterprise
+
+**One-time Admin key setup:**
+
+1. In **OpenAI Admin Console → Billing**, click **Create admin key**.
+2. Select **Restricted** permissions, and set only:
+   - **Compliance logging platform → Costs → Read**
+   Leave everything else (Workspace analytics, Codex analytics API, Usage
+   limits, Group Management, etc.) at `None` — Meterist only ever needs to
+   read cost data, and Read is the only permission level this scope offers
+   anyway (it's a reporting-only surface).
+3. Copy the generated key immediately — it's shown once. This is the
+   `AdminApiKey` value below.
+4. Find your **Organization ID** (`org-...`) under **Settings → General** —
+   this is the API Platform Organization ID, **not** the Workspace ID shown
+   just below it on the same page. The `COSTS` export is organization-scoped.
+
+**Build the credential file:**
+
+```powershell
+$credential = @{
+    OrganizationId = "org-XXXXXXXXXXXXXXXXXXXXXXXX"
+    AdminApiKey    = "<the admin key you copied>"
+}
+$credential | ConvertTo-Json | Set-Content -Path "C:\path\to\chatgpt-credential.json"
+```
+
+**Store it:**
+
+```powershell
+dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-id> --vendor chatgpt-enterprise --from-file "C:\path\to\chatgpt-credential.json"
+```
+
+**Required before extracting — configure rates.** Unlike Gemini, ChatGPT
+Enterprise's `COSTS` export has no seat/subscription line and no reliable
+dollar figure for usage — both have to come from rates you enter yourself.
+See [Configuring rates](#configuring-rates) below; skipping this step means
+`extract` will still succeed, but every day's `SeatFee` will be `0` and
+`UsageOrOverage` will be `0` for any credit-denominated usage.
+
+### Claude Enterprise / Claude API Platform
 
 Not yet implemented — see
 [`vendor-integration-reference.md`](vendor-integration-reference.md) for
-each vendor's confirmed API and what's still blocking (a real Admin key
-spike for ChatGPT Enterprise; confirming whether "usage credits" is
-enabled for Claude Enterprise). Setup instructions will be added here once
-each adapter is built.
+each vendor's confirmed API and what's still blocking (confirming whether
+"usage credits" is enabled for Claude Enterprise). Setup instructions will
+be added here once each adapter is built.
+
+## Configuring rates
+
+Some vendors' APIs don't return a usable dollar figure for everything
+Meterist needs — a flat per-seat license fee is never exposed by any
+vendor's API, and ChatGPT Enterprise's usage data arrives as raw credits
+with no reliable dollar conversion either (see
+[`vendor-integration-reference.md`](vendor-integration-reference.md)). For
+those cases, you enter the rate once via `rates set`, and it's applied
+automatically (with historical versioning — a rate change doesn't retroactively
+alter days already extracted before it took effect).
+
+**ChatGPT Enterprise needs two rates configured per tenant** before its
+`SeatFee`/`UsageOrOverage` will be non-zero — use exactly these
+`--rate-type`/`--model-or-sku` values (the normalizer looks them up by
+these literal strings):
+
+```powershell
+# Seat fee: $/seat/month, prorated daily across each calendar month
+dotnet run --project src/Meterist.Cli -- rates set --tenant <your-tenant-id> --vendor chatgpt-enterprise --rate-type per-seat --model-or-sku seat --rate 30 --seats 50 --cadence Monthly --effective-from 2026-01-01
+
+# Credit-to-USD conversion: dollars per credit
+dotnet run --project src/Meterist.Cli -- rates set --tenant <your-tenant-id> --vendor chatgpt-enterprise --rate-type credit-to-usd --model-or-sku credit-usd --rate 0.07 --effective-from 2026-01-01
+```
+
+- Omit `--tenant` to set a **public default** rate shared by any tenant
+  without its own override, instead of a tenant-specific one.
+- `--effective-to` is optional — leave it open-ended day to day. **When a
+  contract renews with a new rate, just run `rates set` again** with the new
+  `--rate` and the renewal's `--effective-from` — Meterist automatically
+  closes out the previous open-ended row for that same
+  tenant/vendor/`--model-or-sku`, ending it the day before the new rate
+  starts, so historical days extracted under the old rate are never
+  recomputed. You'll see a `Closed 1 previous open-ended rate(s)...` message
+  confirming this happened.
+
+**Confirm what's stored:**
+
+```powershell
+dotnet run --project src/Meterist.Cli -- rates list --tenant <your-tenant-id> --vendor chatgpt-enterprise
+```
 
 ## Usage
 
@@ -132,7 +212,7 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 | Status | Meaning |
 |---|---|
 | **Succeeded** | Extraction and storage completed; Records shows how many days were written. |
-| **Not implemented** | This vendor's adapter doesn't exist yet — expected for the three not-yet-built vendors, not an error. |
+| **Not implemented** | This vendor's adapter doesn't exist yet — expected for the two not-yet-built vendors, not an error. |
 | **Failed** | Something went wrong (bad credential, network/auth failure, etc.) — the Detail column has the specific error. |
 
 ## Troubleshooting
@@ -154,10 +234,26 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 - **Unexpectedly 0 records when you expect data (Gemini Enterprise):**
   check the SKU/service filter in
   [`BigQueryGeminiBillingRepository.cs`](../src/Meterist.Vendors/GeminiEnterprise/BigQueryGeminiBillingRepository.cs)
-  (`service.description LIKE '%Gemini Enterprise%'`) against the real
-  `service.description` values in your BigQuery export — the filter was
-  written from documentation, not a live account, so it's the first thing
-  worth confirming if a query that should return rows doesn't.
+  (`service.description = "Vertex AI Search" AND sku.description LIKE
+  '%Enterprise%'`, corrected 2026-07-22 against a live account — see that
+  file's doc comment) against the real `service.description`/`sku.description`
+  values in your BigQuery export.
+- **ChatGPT Enterprise: `SeatFee` is always `0`, or `UsageOrOverage` is `0`
+  despite real usage:** you're missing a rate config — run `rates list
+  --tenant <id> --vendor chatgpt-enterprise` to confirm both the `seat` and
+  `credit-usd` rows exist and their `EffectiveFrom`/`EffectiveTo` window
+  actually covers the days you extracted (see
+  [Configuring rates](#configuring-rates)). Debug logging will also show a
+  one-time warning per extraction call when a rate is missing.
+- **ChatGPT Enterprise: `extract` fails with a 401/403:** the Admin key is
+  invalid, expired, or missing the **Compliance logging platform → Costs →
+  Read** scope — recreate it per the [ChatGPT Enterprise](#chatgpt-enterprise)
+  setup section above.
+- **ChatGPT Enterprise: expect data from more than ~29 days ago and it's
+  missing:** the compliance log export has a hard 30-day retention window —
+  older days simply aren't retrievable from this vendor's API at all, not a
+  Meterist bug. The extractor logs a warning when it clamps a request to
+  stay inside that window.
 - **Inspecting stored data directly:** the SQLite database lives at
   `%LOCALAPPDATA%\Meterist\meterist.db`. Open it with any SQLite viewer
   (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)) and check:

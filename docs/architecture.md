@@ -85,9 +85,14 @@ IVendorSpendExtractor
 
 A separate `IVendorSpendNormalizer` (or equivalent mapping step) turns each
 vendor's `RawVendorSpendData` into one or more `DailySpendRecord`s, applying
-the resolved `VendorRateConfig` where the vendor's own API returns raw usage
-rather than dollars (only Claude API Platform's `usage_report` case, if used
-instead of `cost_report` — see vendor reference).
+the resolved `VendorRateConfig` (via `IVendorRateConfigRepository`, §8) where
+the vendor's own API doesn't already return a usable dollar figure — either
+because it returns raw usage instead of dollars (Claude API Platform's
+`usage_report`, if used instead of `cost_report`), or because it has no seat
+line and no reliable dollar figure at all (ChatGPT Enterprise's `COSTS`
+export — see vendor reference). Gemini Enterprise's normalizer is the
+counter-example: its BigQuery export already carries dollar cost directly and
+ignores `applicableRates` entirely.
 
 ### 4.1 Vendor Identity — DECIDED (2026-07-21)
 
@@ -270,21 +275,49 @@ Regardless of backend, the aggregation engine (§2) depends on a repository
 abstraction, not a concrete store, so this decision doesn't leak into
 vendor adapter or pricing-engine code.
 
-## 8. Pricing / Rate Resolution Engine
+## 8. Pricing / Rate Resolution Engine — WIRED UP (2026-07-22)
 
-- Resolves the effective rate for a given vendor + tenant + model/SKU +
-  date, preferring a tenant-specific override (`VendorRateConfig.TenantId`
-  non-null) over the public default.
-- Must handle overlapping/adjacent `EffectiveFrom`/`EffectiveTo` ranges
-  cleanly (e.g. the confirmed Sonnet 5 rate step-up on Sep 1, 2026 is a
-  real, dated example this engine needs to get right on day one).
-- For vendors whose API returns dollar cost directly (Claude Enterprise
-  Analytics API, Claude API Platform `cost_report`, ChatGPT Enterprise Cost
-  API, Gemini Enterprise BigQuery cost columns), this engine is *not* in the
-  critical path for spend calculation — it's only load-bearing where an
-  adapter falls back to raw usage counts (e.g. Claude API Platform's
-  `usage_report` as a cross-check) or for seat-fee configuration, which no
-  vendor exposes via API at all.
+- `IVendorRateConfigRepository` (`Meterist.Core.Persistence`), implemented by
+  `EfVendorRateConfigRepository` — replaces an earlier, unconsumed
+  `IPricingRateResolver` interface whose single-date, single-`modelOrSku`
+  signature didn't compose with `IVendorSpendNormalizer.Normalize`'s
+  whole-period `applicableRates` list. `SpendExtractionService` now calls
+  `GetApplicableRatesAsync(tenantId, vendorId, period, ct)` once per vendor
+  per extraction and passes the real result into `Normalize` — no longer
+  "not consumed yet."
+- `GetApplicableRatesAsync` returns rows whose `[EffectiveFrom, EffectiveTo]`
+  window overlaps the period, for this vendor, where `TenantId` is either the
+  requested tenant or `null` (the public default). **v1 policy:** a
+  tenant-specific row fully replaces the public default for the same
+  `ModelOrSku` — simpler than day-by-day interval merging between an
+  override and a default that both partially cover the period. A
+  `ModelOrSku` can still have multiple time-versions within what's returned
+  (a rate change mid-period, e.g. the confirmed Sonnet 5 rate step-up on Sep
+  1, 2026) — callers (normalizers) pick, per day, whichever row's window
+  actually covers that day.
+- **`CloseOpenEndedRateAsync`** — called by the CLI's `rates set` before
+  `AddAsync`, closes out any existing open-ended (`EffectiveTo == null`) row
+  in the same scope (same `TenantId`-or-public, `VendorId`, `ModelOrSku`) by
+  setting its `EffectiveTo` to the day before the new row's
+  `EffectiveFrom`. This is what makes a contract renewal a single `rates
+  set` call rather than a manual two-step "close the old row, then add the
+  new one" — without it, two open-ended rows for the same scope would leave
+  `GetApplicableRatesAsync`'s per-day lookup with an undefined tie-break.
+- **Corrected claim:** this was originally scoped as "not in the critical
+  path for vendors whose API returns dollar cost directly," listing ChatGPT
+  Enterprise Cost API among them. That assumption didn't survive contact
+  with the real schema (see `docs/vendor-integration-reference.md`): the
+  `COSTS` compliance-log export has **no seat/subscription line at all** and
+  **no reliably-present dollar figure** (`estimated_cost_usd` was absent in
+  a real sample). ChatGPT Enterprise is the first real consumer of this
+  engine — `ChatGptEnterpriseSpendNormalizer` resolves both a `per-seat`
+  rate (prorated daily by `BillingCadence`) and a `credit-to-usd` rate (used
+  only when the vendor's own estimate isn't present) from this list, using
+  fixed `ModelOrSku` string keys (`ChatGptRateKeys` in
+  `Meterist.Vendors.ChatGptEnterprise`) so code and the `rates set` CLI
+  command can't silently drift apart. Claude Enterprise/API Platform still
+  return dollar cost directly and are expected to remain out of this
+  engine's critical path once built.
 
 ## 9. Deployment Model & Scheduling — DECIDED (2026-07-21)
 

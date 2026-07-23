@@ -29,8 +29,9 @@ public sealed class GeminiEnterpriseSpendNormalizer : IVendorSpendNormalizer
     {
         // Not used: Gemini's BigQuery export already carries dollar cost
         // directly (no token/usage-count rate-table math needed) — see
-        // IPricingRateResolver's doc comment on when rate resolution is and
-        // isn't in the critical path.
+        // IVendorSpendNormalizer's doc comment on when rate resolution is and
+        // isn't in the critical path. ChatGptEnterpriseSpendNormalizer is the
+        // first real consumer of this list.
         _ = applicableRates;
 
         var records = new List<DailySpendRecord>(rawData.RecordsByDate.Count);

@@ -3,6 +3,7 @@ using Meterist.Vendors.ChatGptEnterprise;
 using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
+using Meterist.Vendors.Tests.ChatGptEnterprise;
 using Meterist.Vendors.Tests.GeminiEnterprise;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -20,7 +21,12 @@ public class CapabilityMatrixTests
     {
         yield return [new ClaudeEnterpriseSpendExtractor(), VendorCatalog.ClaudeEnterprise, true, true];
         yield return [new ClaudeApiPlatformSpendExtractor(), VendorCatalog.ClaudeApiPlatform, false, false];
-        yield return [new ChatGptEnterpriseSpendExtractor(), VendorCatalog.ChatGptEnterprise, true, true];
+        yield return [
+            new ChatGptEnterpriseSpendExtractor(
+                new FakeSecretStore(), new FakeChatGptCostLogRepository(),
+                NullLogger<ChatGptEnterpriseSpendExtractor>.Instance),
+            VendorCatalog.ChatGptEnterprise, true, true,
+        ];
         yield return [
             new GeminiEnterpriseSpendExtractor(
                 new FakeSecretStore(), new FakeGeminiBillingQueryRepository(),
@@ -51,10 +57,17 @@ public class CapabilityMatrixTests
             VendorCatalog.All.Select(v => v.ShortName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
-    [Fact]
-    public async Task UnimplementedExtractors_ThrowNotImplemented_NotSilentlyReturnEmpty()
+    public static IEnumerable<object[]> UnimplementedExtractors()
     {
-        var extractor = new ChatGptEnterpriseSpendExtractor();
+        yield return [new ClaudeEnterpriseSpendExtractor()];
+        yield return [new ClaudeApiPlatformSpendExtractor()];
+    }
+
+    [Theory]
+    [MemberData(nameof(UnimplementedExtractors))]
+    public async Task UnimplementedExtractors_ThrowNotImplemented_NotSilentlyReturnEmpty(
+        IVendorSpendExtractor extractor)
+    {
         var period = new DateRange(new DateOnly(2026, 7, 19), new DateOnly(2026, 7, 25));
 
         await Assert.ThrowsAsync<NotImplementedException>(

@@ -83,8 +83,12 @@ overage/per-user feasibility matrix) now lives in
   browser automation (Playwright/CoWork-driven) as a primary extraction
   path. Three of the four APIs are beta/recently-shipped (May–Jun 2026);
   re-check the reference doc periodically for schema drift.
-- **Claude Enterprise** (Analytics API) and **ChatGPT Enterprise** (unified
-  Cost API) both return native per-user dollar cost. **Gemini Enterprise**
+- **Claude Enterprise** (Analytics API) returns native per-user dollar cost.
+  **ChatGPT Enterprise** (`COSTS` compliance log export) returns native
+  per-user *credit* usage, but a reliable per-row dollar figure is **not**
+  consistently present — confirmed 2026-07-22 against real data (see
+  `docs/vendor-integration-reference.md`); converting to dollars needs a
+  configured credit-to-USD rate in the general case. **Gemini Enterprise**
   gives per-user activity but not per-user dollars (would be a derived
   estimate). **Claude API Platform** has no per-human-user concept at all
   (workspace/API-key scoped only).
@@ -127,12 +131,18 @@ investigate.
    interface; the future cloud secrets manager (post-hosting) is
    intentionally left open, not pre-committed to Azure Key Vault — see
    `docs/architecture.md` §6. No longer blocking implementation.
-3. **ChatGPT Enterprise Cost API schema is not yet spiked.** The API's
-   existence and per-user breakdown are confirmed, but no public field-level
-   reference was found (OpenAI gates it behind authenticated developer
-   access) — get a real Admin key and inspect actual response shapes before
-   finalizing the extraction/mapping code for this vendor. Overage pool
-   size/rate remain contract-only regardless (see vendor reference doc).
+3. **ChatGPT Enterprise Cost API schema spiked 2026-07-22 against the real
+   OpenAI Programmatic Admin Platform reference** (authenticated-only doc,
+   gated behind an active admin session — not publicly fetchable). Full
+   shape now in `docs/vendor-integration-reference.md`: it's a `COSTS` event
+   type inside the Compliance Logs Platform (JSONL file export via
+   org-scoped `/compliance/organizations/{organization_id}/logs`), hourly +
+   per-user grain, with a vendor-computed `estimated_cost_usd` per SKU line
+   that may substantially close the overage-dollar gap (though it's an
+   estimate at current rates, not an authoritative invoice figure). **Not
+   yet verified against a real response** — still need a live Admin key pull
+   before finalizing the extractor/mapping code. Credit pool size / true
+   contracted overage rate remain contract/console-only regardless.
 4. **Pricing data changes over time and per tenant.** Any hardcoded rate table
    will go stale and won't generalize across clients. Design for updatability
    and per-tenant overrides from the start — this is a first-class requirement,
@@ -163,19 +173,19 @@ investigate.
    file as onboarding/session context only.
 3. ~~Confirm the output target and credential-storage approach~~ — **decided
    2026-07-21**, see `docs/architecture.md` §§6–7.
-4. Design the multi-tenant data model and the pricing-config abstraction
-   (see `docs/architecture.md` §§3, 5, 8) before writing any vendor-specific
-   extraction code, so all four vendors normalize into the same shape and
-   pricing changes don't require code changes. Bake in the "overage may
-   legitimately be zero/N-A" and "per-user cost may be estimated, not
-   vendor-reported" semantics now, rather than retrofitting later.
-5. Prioritize Gemini Enterprise via BigQuery export first for a working
-   end-to-end proof of concept, since it's the most clearly programmatic path
-   of the four vendors and needs no per-tenant API key provisioning beyond
-   enabling the export once.
-6. Spike the ChatGPT Enterprise Cost API's actual schema early (Constraints
-   #3) since it's the least-documented of the four APIs — don't let it be
-   the vendor that surfaces integration surprises last.
+4. ~~Design the multi-tenant data model and the pricing-config abstraction~~
+   — **done**, see `docs/architecture.md` §§3, 5, 8.
+5. ~~Prioritize Gemini Enterprise via BigQuery export first for a working
+   end-to-end proof of concept~~ — **done**, built and verified live against
+   the zelleri tenant (2026-07-22).
+6. ~~Spike the ChatGPT Enterprise Cost API's actual schema~~ — **done
+   2026-07-22**, against both the real OpenAPI spec and a live zelleri pull;
+   see `docs/vendor-integration-reference.md`. **Adapter built** the same
+   day: the `COSTS` compliance-log export has no seat line and no reliable
+   dollar figure, which made this the first real consumer of
+   `IVendorRateConfigRepository` (now wired up, see `docs/architecture.md`
+   §8) and the `rates set`/`rates list` CLI commands. Claude Enterprise and
+   Claude API Platform remain the two not-yet-built vendors.
 7. ~~Decide deployment model and scheduling approach~~ — **decided
    2026-07-21**, see `docs/architecture.md` §9.
 8. Revisit CLI vs. dashboard sequencing once the core library/service layer
