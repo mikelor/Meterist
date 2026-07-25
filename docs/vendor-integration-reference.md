@@ -49,24 +49,59 @@ tickets for a specific vendor adapter should point for implementation detail.
   per-member spend caps — a secondary signal, not the primary reporting source.
 - **Compliance API** exists (audit/governance events) — confirmed irrelevant to spend.
 
-### Claude API Platform (developer API — billed separately from Claude Enterprise)
+### Claude API Platform (developer API — billed separately from Claude Enterprise) — IMPLEMENTED (2026-07-22)
 
 - **API:** Two Admin API endpoints (Admin API key, distinct from the
   Analytics key above):
-  - `GET /v1/organizations/cost_report` — **daily USD cost directly**,
-    grouped by `workspace_id` or `description` (parses out model/geo).
-    Covers token cost, web search, code execution. Priority Tier is billed
-    separately and excluded from this endpoint — track via `usage_report`'s
-    `service_tier` field instead.
+  - `GET https://api.anthropic.com/v1/organizations/cost_report` — **daily
+    USD cost directly**, grouped by `workspace_id` and/or `description`
+    (grouping by `description` also parses out `model`/`token_type`/
+    `cost_type`/`inference_geo`). Covers token cost, web search, code
+    execution. Priority Tier is billed separately and excluded from this
+    endpoint — track via `usage_report`'s `service_tier` field instead. **No
+    organization ID in the path at all** — the Admin API key itself scopes
+    the request.
   - `GET /v1/organizations/usage_report/messages` — token counts (not
     dollars), `bucket_width` of 1m/1h/1d, filterable by
-    model/workspace/api_key/service_tier/context_window/inference_geo.
-  - **Recommend `cost_report` as the primary source** — eliminates
-    maintaining a rate table for this vendor entirely. Both beta; data
-    lands ~5 min after the period; poll at most once/minute.
-- **Auth:** Admin API key.
+    model/workspace/api_key/service_tier/context_window/inference_geo. Not
+    used by the adapter — `cost_report` alone is sufficient for v1.
+  - **`cost_report` used as the sole source** — confirmed 2026-07-22 against
+    the real public API reference
+    (`platform.claude.com/docs/en/api/usage-cost-api` and
+    `.../api/admin-api/usage-cost/get-cost-report`, both publicly fetchable,
+    unlike ChatGPT's admin-console-gated docs). Eliminates maintaining a
+    rate table for this vendor entirely — `ClaudeApiPlatformSpendNormalizer`
+    is the simplest of the four, ignoring `applicableRates` completely (no
+    seat fee, no credit conversion). Data lands ~5 min after the period; poll
+    at most once/minute. Pagination via `has_more`/`next_page`, same shape
+    as ChatGPT's `COSTS` list endpoint.
+  - **⚠️ `amount` is a decimal string in *cents*, not dollars** — e.g.
+    `"12345"` means $123.45. Confirmed directly against the docs' own
+    example (`"amount": "123.78912"` for one model/token-type/day line
+    item — plausible only as cents, not dollars, at that granularity). Get
+    this wrong and every cost is 100x too large; `HttpClaudeCostReportRepository`
+    divides by 100 explicitly and a unit test pins the conversion.
+  - **⚠️ Implementation gotcha found via live test failure, not docs:**
+    `starting_at`/`ending_at` are full ISO-8601 datetime strings
+    (`"2026-07-20T00:00:00Z"`), and `DateOnly.TryParse` **rejects** these
+    outright ("contains parts which are not specific to the DateOnly") —
+    every bucket silently got skipped until caught by a WireMock-backed
+    test asserting non-empty results. Fixed by parsing as `DateTime` first
+    (`DateTimeStyles.AdjustToUniversal | AssumeUniversal`), then
+    `DateOnly.FromDateTime(...)`. Worth remembering for any other vendor
+    whose timestamps carry a time component — Gemini/ChatGPT's date fields
+    were already bare `YYYY-MM-DD` strings, so this specific pitfall never
+    came up until now.
+  - Auth headers: `anthropic-version: 2023-06-01` and `x-api-key:
+    <admin-key>`, both per-request (never as shared `HttpClient` default
+    headers) — same discipline as ChatGPT's per-request `Authorization`,
+    since the typed client is pooled across tenants.
+- **Auth:** Admin API key — a **bare string credential**, no wrapper JSON
+  record needed (unlike Gemini/ChatGPT), since there's no other per-tenant
+  config (no org ID, no dataset/table).
 - **Overage:** not applicable — this product is pure usage-based; the
-  entire `cost_report` figure *is* the spend.
+  entire `cost_report` figure *is* the spend. `SeatFee` is always `0` for
+  this vendor; the whole daily total lands in `UsageOrOverage`.
 - **Per-user:** not available natively — granularity is by `workspace_id`/
   `api_key_id`, a developer-API construct, not a named human user. If
   per-individual comparison is wanted for this vendor, it would require a

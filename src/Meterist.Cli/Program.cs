@@ -44,6 +44,12 @@ builder.Services.AddHttpClient<IChatGptCostLogRepository, HttpChatGptCostLogRepo
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IVendorSpendNormalizer, ChatGptEnterpriseSpendNormalizer>();
 
+builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReportRepository>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com/");
+});
+builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeApiPlatformSpendNormalizer>();
+
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeApiPlatformSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ChatGptEnterpriseSpendExtractor>();

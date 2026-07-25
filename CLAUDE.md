@@ -110,11 +110,12 @@ Full data model (`DailySpendRecord`, `VendorRateConfig`, and the future
 `UserSpendRecord`) plus the vendor adapter pattern now live in
 [`docs/architecture.md`](docs/architecture.md) — that is the source of
 truth going forward. Key point carried over: **overage semantics vary by
-vendor/plan and the model must represent that explicitly** (e.g.
-`UsageOrOverage` is legitimately `0` for Claude API Platform always, and for
-Claude Enterprise whenever "usage credits" isn't enabled for that
-tenant/vendor pairing) — that's expected behavior, not a data gap to
-investigate.
+vendor/plan and the model must represent that explicitly** (e.g. `SeatFee`
+is legitimately `0` for Claude API Platform always — it's pure usage-based
+with no seat concept, so the entire daily spend lands in `UsageOrOverage`
+instead — and `UsageOrOverage` itself is `0` for Claude Enterprise whenever
+"usage credits" isn't enabled for that tenant/vendor pairing) — that's
+expected behavior, not a data gap to investigate.
 
 ## Constraints & Unknowns — resolve these before/during build
 
@@ -184,8 +185,16 @@ investigate.
    day: the `COSTS` compliance-log export has no seat line and no reliable
    dollar figure, which made this the first real consumer of
    `IVendorRateConfigRepository` (now wired up, see `docs/architecture.md`
-   §8) and the `rates set`/`rates list` CLI commands. Claude Enterprise and
-   Claude API Platform remain the two not-yet-built vendors.
+   §8) and the `rates set`/`rates list` CLI commands.
+6a. ~~Build Claude API Platform~~ — **done 2026-07-22**, against the real
+   public Admin API reference (`platform.claude.com/docs/en/api/usage-cost-api`)
+   — no admin-console spelunking needed, unlike ChatGPT. The simplest of the
+   four adapters: `cost_report` returns real dollar cost directly, so it
+   never touches `IVendorRateConfigRepository` at all — `SeatFee` is always
+   `0`, the whole daily total is `UsageOrOverage`. One non-obvious bug found
+   via a failing WireMock test rather than docs: `DateOnly.TryParse` rejects
+   the API's full ISO-datetime timestamps outright — fixed by parsing as
+   `DateTime` first. Claude Enterprise remains the one not-yet-built vendor.
 7. ~~Decide deployment model and scheduling approach~~ — **decided
    2026-07-21**, see `docs/architecture.md` §9.
 8. Revisit CLI vs. dashboard sequencing once the core library/service layer

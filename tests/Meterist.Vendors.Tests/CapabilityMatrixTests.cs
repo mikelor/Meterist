@@ -4,6 +4,7 @@ using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
 using Meterist.Vendors.Tests.ChatGptEnterprise;
+using Meterist.Vendors.Tests.ClaudeApiPlatform;
 using Meterist.Vendors.Tests.GeminiEnterprise;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -20,7 +21,12 @@ public class CapabilityMatrixTests
     public static IEnumerable<object[]> Extractors()
     {
         yield return [new ClaudeEnterpriseSpendExtractor(), VendorCatalog.ClaudeEnterprise, true, true];
-        yield return [new ClaudeApiPlatformSpendExtractor(), VendorCatalog.ClaudeApiPlatform, false, false];
+        yield return [
+            new ClaudeApiPlatformSpendExtractor(
+                new FakeSecretStore(), new FakeClaudeCostReportRepository(),
+                NullLogger<ClaudeApiPlatformSpendExtractor>.Instance),
+            VendorCatalog.ClaudeApiPlatform, false, false,
+        ];
         yield return [
             new ChatGptEnterpriseSpendExtractor(
                 new FakeSecretStore(), new FakeChatGptCostLogRepository(),
@@ -60,7 +66,6 @@ public class CapabilityMatrixTests
     public static IEnumerable<object[]> UnimplementedExtractors()
     {
         yield return [new ClaudeEnterpriseSpendExtractor()];
-        yield return [new ClaudeApiPlatformSpendExtractor()];
     }
 
     [Theory]

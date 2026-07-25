@@ -18,8 +18,8 @@ and data — and runs as a CLI you operate from a terminal.
 |---|---|---|
 | Gemini Enterprise | `gemini-enterprise` | Implemented |
 | ChatGPT Enterprise | `chatgpt-enterprise` | Implemented — also requires `rates set` before extracting, see [Configuring rates](#configuring-rates) below |
+| Claude API Platform | `claude-api-platform` | Implemented |
 | Claude Enterprise | `claude-enterprise` | Not yet implemented |
-| Claude API Platform | `claude-api-platform` | Not yet implemented |
 
 ### What to use for `--tenant`
 
@@ -142,13 +142,36 @@ See [Configuring rates](#configuring-rates) below; skipping this step means
 `extract` will still succeed, but every day's `SeatFee` will be `0` and
 `UsageOrOverage` will be `0` for any credit-denominated usage.
 
-### Claude Enterprise / Claude API Platform
+### Claude API Platform
+
+**One-time Admin API key setup:**
+
+1. In the **Claude Console** (`platform.claude.com`), go to **Settings →
+   Organization**, and create an **Admin API key** (format
+   `sk-ant-admin01-...`). You need to be an Organization Admin — this is a
+   distinct key type from a regular Claude API key.
+2. Copy the key value — this is the entire credential. Unlike Gemini/ChatGPT,
+   there's no wrapping JSON needed (no org ID, no dataset/table to also
+   supply) — just save the raw key string to a file.
+
+**Store it:**
+
+```powershell
+"sk-ant-admin01-..." | Set-Content -Path "C:\path\to\claude-api-key.txt" -NoNewline
+dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-id> --vendor claude-api-platform --from-file "C:\path\to\claude-api-key.txt"
+```
+
+No rate configuration needed — the Cost Report API returns real dollar cost
+directly, and this product has no seat/subscription concept at all (the
+entire daily total lands in `UsageOrOverage`, with `SeatFee` always `0`).
+
+### Claude Enterprise
 
 Not yet implemented — see
 [`vendor-integration-reference.md`](vendor-integration-reference.md) for
-each vendor's confirmed API and what's still blocking (confirming whether
-"usage credits" is enabled for Claude Enterprise). Setup instructions will
-be added here once each adapter is built.
+the confirmed API and what's still blocking (confirming whether "usage
+credits" is enabled for this tenant). Setup instructions will be added here
+once the adapter is built.
 
 ## Configuring rates
 
@@ -212,7 +235,7 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 | Status | Meaning |
 |---|---|
 | **Succeeded** | Extraction and storage completed; Records shows how many days were written. |
-| **Not implemented** | This vendor's adapter doesn't exist yet — expected for the two not-yet-built vendors, not an error. |
+| **Not implemented** | This vendor's adapter doesn't exist yet — expected for the one not-yet-built vendor (Claude Enterprise), not an error. |
 | **Failed** | Something went wrong (bad credential, network/auth failure, etc.) — the Detail column has the specific error. |
 
 ## Troubleshooting
@@ -254,6 +277,10 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
   older days simply aren't retrievable from this vendor's API at all, not a
   Meterist bug. The extractor logs a warning when it clamps a request to
   stay inside that window.
+- **Claude API Platform: `extract` fails with a 401:** the Admin API key is
+  invalid, expired, or isn't actually an Admin key (`sk-ant-admin01-...`) —
+  a regular Claude API key won't work for these endpoints. Recreate it per
+  the [Claude API Platform](#claude-api-platform) setup section above.
 - **Inspecting stored data directly:** the SQLite database lives at
   `%LOCALAPPDATA%\Meterist\meterist.db`. Open it with any SQLite viewer
   (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)) and check:
