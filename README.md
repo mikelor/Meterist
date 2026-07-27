@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project tracks weekly spend across four AI vendor products used by Ecosync Universal:
+This project tracks weekly spend across four AI vendor products used by Daffy:
 
 1. **Claude** (Chat, Claude Code, Cowork) — Anthropic Enterprise plan
 2. **Claude API Platform** — Anthropic's pay-as-you-go developer API (billed separately from Claude Enterprise seats)
@@ -48,7 +48,7 @@ Weekly tracking began the week of **Jun 24, 2026**, timed to a billing model cha
 - Source: `platform.claude.com` → Usage → CSV export
 - Granularity: **per-day** rows (`usage_date_utc`), broken out by model and API key/workspace
 - Contains raw token counts only (input/output/cache tiers) — no dollar figures. Cost must be computed from Anthropic's current published per-model rate card.
-- ⚠️ Only one workspace ("Ecosync Universal Sandbox") has been pulled so far. Other API workspaces, if any, are not yet covered.
+- ⚠️ Only one workspace ("Daffy Sandbox") has been pulled so far. Other API workspaces, if any, are not yet covered.
 - Billed separately from Claude Enterprise seats.
 
 **ChatGPT Enterprise**
@@ -119,7 +119,7 @@ The next phase is a .NET 10 C# application that fully replaces this spreadsheet,
 **Confirmed requirements:**
 
 - **Replaces the spreadsheet entirely** — this is not a companion tool; the xlsx workflow goes away once this is live.
-- **Multi-tenant.** The tool must support administering spend tracking for multiple customer organizations, not just Ecosync Universal. This reflects a real consulting use case — the user administers AI vendor spend for multiple client organizations and sees a cost-projection model as valuable from a consulting delivery perspective. Architectural implications include: tenant isolation, per-tenant vendor credentials/configuration, and likely cross-tenant reporting/benchmarking for the consultant's own use.
+- **Multi-tenant.** The tool must support administering spend tracking for multiple customer organizations, not just Daffy. This reflects a real consulting use case — the user administers AI vendor spend for multiple client organizations and sees a cost-projection model as valuable from a consulting delivery perspective. Architectural implications include: tenant isolation, per-tenant vendor credentials/configuration, and likely cross-tenant reporting/benchmarking for the consultant's own use.
 - **Support Changing Pricing Models.** Vendor pricing and billing structures are moving fast (seat-based vs. usage-based shifts, introductory pricing windows, new SKUs like Agent Gateway/Memory Bank appearing mid-year). Pricing/rate data must be modeled as versioned, updatable configuration — never hardcoded constants — across all four vendors.
 - **Interface path: start CLI, evolve toward a dashboard.** Initial delivery can be a console application, but the architecture should not preclude a future web/desktop dashboard layer on top of the same core logic.
 - **Output target — decided 2026-07-21.** Database + reporting layer, SQLite for v1, migrating to a server-based RDBMS (engine TBD) once hosted. See [`docs/architecture.md`](docs/architecture.md) §7.
@@ -148,10 +148,10 @@ needs a hands-on spike with a real Admin key.
 ## Open Questions / TODOs
 
 - [ ] Confirm ChatGPT Enterprise per-seat rate and whether billing is based on 50 committed seats or 12 active seats
-- [ ] Confirm whether other Claude API Platform workspaces exist beyond "Ecosync Universal Sandbox"
+- [ ] Confirm whether other Claude API Platform workspaces exist beyond "Daffy Sandbox"
 - [x] Complete research spike on all four vendors' programmatic access options (see "Verified Programmatic Access" above) — done 2026-07-21
 - [ ] Spike the ChatGPT Enterprise Cost API with a real Admin key to confirm exact field-level schema (no public reference found)
-- [ ] Confirm whether Ecosync's Claude Enterprise sub-accounts have "usage credits" enabled (determines whether any overage will ever appear for seat-based tenants)
+- [ ] Confirm whether Daffy's Claude Enterprise sub-accounts have "usage credits" enabled (determines whether any overage will ever appear for seat-based tenants)
 - [x] Decide the .NET tool's output target — **decided 2026-07-21**: database + reporting layer, SQLite for v1, server-based RDBMS (engine TBD) once hosted; see [`docs/architecture.md`](docs/architecture.md) §7
 - [x] Decide credential storage approach for API keys/service accounts across vendors AND across tenants — **decided 2026-07-21**: DPAPI-encrypted local files behind `ISecretStore` for v1, future cloud secrets manager intentionally left open; see [`docs/architecture.md`](docs/architecture.md) §6
 - [ ] Design the multi-tenant data model (tenant isolation, per-tenant vendor config, cross-tenant reporting)
