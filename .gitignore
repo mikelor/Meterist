@@ -88,10 +88,11 @@ project.fragment.lock.json
 artifacts/
 .artifacts/
 
-# Meterist keeps generated client-facing reports in a top-level artifacts/
-# folder, unrelated to the generic .NET build-artifacts/ convention above.
-!/artifacts/
-!/artifacts/**
+# Meterist generates client-facing reports under a top-level artifacts/
+# folder (see docs/client-report-generation.md). These can contain real
+# per-tenant financial data pulled live from vendor APIs and must never be
+# committed — same handling as env/. Left ignored deliberately; do not
+# un-ignore this path.
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
