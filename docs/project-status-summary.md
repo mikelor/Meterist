@@ -42,22 +42,25 @@ The short version: the spreadsheet answered "what did we spend last week" for on
 
 ---
 
-## 3. Eight insights we can report on right now
+## 3. Nine insights we can report on right now
 
-Assuming Claude Enterprise stays excluded from the numbers for now (three vendors, two tenants, real data):
+Assuming Claude Enterprise stays excluded from the numbers for now (three vendors, two tenants, real data). Priority is now split from effort into its own column (P0 = do next, P1 = near-term, P2 = medium-term, P3 = backlog), so the two can be weighed independently — a few items are low effort but still not P0 because nothing depends on them yet.
 
-| # | Insight | Why it matters | Priority / effort |
-|---|---|---|---|
-| 1 | **Executive TCO rollup** — total spend per tenant, vendor mix %, run-rate projection | The one-slide number an exec actually reads | High priority, low effort |
-| 2 | **Cross-tenant benchmarking** — effective $/seat, usage intensity, compared across clients | The actual consulting differentiator — no off-the-shelf tool can do this, only Meterist's multi-tenant model can | High priority, medium effort |
-| 3 | **Vendor concentration / diversification risk** — % of spend on a single vendor | A client at 80%+ on one vendor has no renewal leverage — worth flagging proactively | High priority, low effort |
-| 4 | **Cost driver breakdown within a vendor** — by model, workspace, or SKU (Claude API Platform and Gemini both preserve this in raw data) | Chargeback-ready detail: "Workspace X is 60% of your Claude spend" | Medium-high priority, medium effort (needs raw data, not just normalized records) |
-| 5 | **Seat efficiency signal** (ChatGPT specifically, since it has both seat fee and usage/overage) | Tells you if a client is over- or under-provisioned on seats | Medium priority, low effort |
-| 6 | **Anomaly / spike detection** — days that jump well above trailing average | Catches a runaway script or misuse before it becomes a real problem | Medium priority, low-medium effort |
-| 7 | **Day-of-week seasonality** | Mostly a trust-builder — validates the data looks like real human usage before making bolder claims with it | Low-medium priority, low effort |
-| 8 | **Data-quality / coverage disclosure** — which vendors give real per-user dollars vs. workspace- or SKU-level aggregates, and any gaps in configured rates | Not glamorous, but protects credibility by not implying more precision than the data actually has | Medium priority, low effort |
+| # | Insight | Why it matters | Priority | Effort |
+|---|---|---|---|---|
+| 1 | **Executive TCO rollup** — total spend per tenant, vendor mix %, run-rate projection | The one-slide number an exec actually reads | P0 | Low |
+| 2 | **Cross-tenant benchmarking** — effective $/seat, usage intensity, compared across clients | The actual consulting differentiator — no off-the-shelf tool can do this, only Meterist's multi-tenant model can | P0 | Medium |
+| 3 | **Vendor concentration / diversification risk** — % of spend on a single vendor | A client at 80%+ on one vendor has no renewal leverage — worth flagging proactively | P0 | Low |
+| 4 | **Cost driver breakdown within a vendor** — by model, workspace, or SKU (Claude API Platform and Gemini both preserve this in raw data) | Chargeback-ready detail: "Workspace X is 60% of your Claude spend" | P2 | Medium (needs raw data, not just normalized records) |
+| 5 | **Seat efficiency signal** (ChatGPT specifically, since it has both seat fee and usage/overage) | Tells you if a client is over- or under-provisioned on seats | P2 | Low |
+| 6 | **Anomaly / spike detection** — days that jump well above trailing average | Catches a runaway script or misuse before it becomes a real problem | P2 | Low-Medium |
+| 7 | **Day-of-week seasonality** | Mostly a trust-builder — validates the data looks like real human usage before making bolder claims with it | P3 | Low |
+| 8 | **Data-quality / coverage disclosure** — which vendors give real per-user dollars vs. workspace- or SKU-level aggregates, and any gaps in configured rates | Not glamorous, but protects credibility by not implying more precision than the data actually has | P1 | Low |
+| 9 | **Audit / reconciliation** — for a given tenant/vendor/date range, show the extracted `DailySpendRecord` total side by side with the value pulled straight from the vendor's own console/billing UI, flagging any delta past a small tolerance | The single highest-leverage item on this list right now: it's the automated version of the manual smoke-test comparison already planned before trusting any vendor as "live-verified." It also doubles as an early warning for schema drift — three of the four vendor APIs are recent (beta or shipped within ~2 months per the README), so a silent field-mapping change would otherwise surface as a wrong number in a client report with no way to tell why | **P0** | Medium |
 
 **Recommended first deliverable:** combine #1 + #2 + #3 into one compact "Client Spend & Benchmark Report" — spend, mix, and comparative risk in one page. It's the smallest bundle that reads as a complete story and it's the one built entirely on the multi-tenant capability that's already proven working.
+
+**On #9 specifically:** this is worth sequencing *before* or alongside the reporting bundle above, not after it. Right now, "live-verified" rests on tests passing against mocked/WireMock fixtures plus a manual spot-check — #9 turns that spot-check into something repeatable and reportable, which matters more once real client numbers are on the line. Concretely, this only needs three pieces already sitting in the codebase: raw extraction records are already persisted separately from normalized ones (so there's something to reconcile *against*, not just re-derive), the vendor adapters already know how to call each API on demand, and `VendorExtractionResult`'s Succeeded/NotImplemented/Failed pattern is a natural fit to extend into a fourth state (`Mismatch`) once a reconciliation check exists. A reasonable v1 for this: a `meterist audit <tenant> <vendor> <date-range>` command that re-pulls the vendor's own reported total for the period (not the per-day breakdown, just a lightweight total-cost check) and diffs it against `SUM(DailySpendRecord)` for the same scope, surfacing a clear match/mismatch/tolerance-exceeded result per vendor.
 
 ---
 
@@ -67,11 +70,13 @@ Assuming Claude Enterprise stays excluded from the numbers for now (three vendor
 - **Priority:** is chargeback detail (#4) or cross-client benchmarking (#2) more valuable to the consulting business model right now — they pull toward different next-build priorities.
 - **Claude Enterprise timing:** worth chasing down a live Analytics API key now, or defer until the reporting layer proves value with the three vendors already live?
 - **Interface direction:** this pushes the still-open CLI-vs-dashboard question. A report generator might be the natural next increment either way — worth deciding whether it's a new `report` CLI command, an exported file (CSV/PDF), or the first real reason to start the dashboard.
+- **Audit tolerance:** #9 needs a defined "close enough" threshold before it's useful — vendor-reported totals and `DailySpendRecord` sums may legitimately differ by pennies from rounding/proration, so an exact-match check would generate constant false positives. Worth deciding per-vendor tolerance (e.g., dollar or percentage-based) rather than a single global rule, given how differently each vendor's rate/proration logic works today.
 
 ---
 
 ## 5. Suggested next steps
 
-1. Pick one report from the insight list (or the recommended #1+#2+#3 bundle) to prototype first.
-2. Decide delivery format — plain-text/Markdown summary from a CLI command, an exported file, or a small HTML dashboard.
-3. Decide whether report generation lives inside Meterist itself or as a downstream layer reading from the same SQLite database.
+1. Prototype #9 (audit/reconciliation) first, or alongside the #1+#2+#3 reporting bundle — it's what turns "live-verified" from a one-time manual spot-check into something repeatable, and de-risks trusting the other insights before they reach a client.
+2. Pick one report from the insight list (or the recommended #1+#2+#3 bundle) to prototype next.
+3. Decide delivery format — plain-text/Markdown summary from a CLI command, an exported file, or a small HTML dashboard.
+4. Decide whether report generation lives inside Meterist itself or as a downstream layer reading from the same SQLite database.
