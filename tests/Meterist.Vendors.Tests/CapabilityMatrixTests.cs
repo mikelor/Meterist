@@ -5,6 +5,7 @@ using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
 using Meterist.Vendors.Tests.ChatGptEnterprise;
 using Meterist.Vendors.Tests.ClaudeApiPlatform;
+using Meterist.Vendors.Tests.ClaudeEnterprise;
 using Meterist.Vendors.Tests.GeminiEnterprise;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -20,7 +21,12 @@ public class CapabilityMatrixTests
 {
     public static IEnumerable<object[]> Extractors()
     {
-        yield return [new ClaudeEnterpriseSpendExtractor(), VendorCatalog.ClaudeEnterprise, true, true];
+        yield return [
+            new ClaudeEnterpriseSpendExtractor(
+                new FakeSecretStore(), new FakeClaudeAnalyticsCostReportRepository(),
+                NullLogger<ClaudeEnterpriseSpendExtractor>.Instance),
+            VendorCatalog.ClaudeEnterprise, true, true,
+        ];
         yield return [
             new ClaudeApiPlatformSpendExtractor(
                 new FakeSecretStore(), new FakeClaudeCostReportRepository(),
@@ -63,19 +69,8 @@ public class CapabilityMatrixTests
             VendorCatalog.All.Select(v => v.ShortName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
-    public static IEnumerable<object[]> UnimplementedExtractors()
-    {
-        yield return [new ClaudeEnterpriseSpendExtractor()];
-    }
-
-    [Theory]
-    [MemberData(nameof(UnimplementedExtractors))]
-    public async Task UnimplementedExtractors_ThrowNotImplemented_NotSilentlyReturnEmpty(
-        IVendorSpendExtractor extractor)
-    {
-        var period = new DateRange(new DateOnly(2026, 7, 19), new DateOnly(2026, 7, 25));
-
-        await Assert.ThrowsAsync<NotImplementedException>(
-            () => extractor.ExtractAsync("ecosync", period, TestContext.Current.CancellationToken));
-    }
+    // All four v1 vendors are implemented as of 2026-07-22 — no stub
+    // extractors remain to regression-test here. Reintroduce a
+    // UnimplementedExtractors theory (see git history prior to this commit
+    // for the pattern) if a future vendor adds a NotImplementedException stub.
 }

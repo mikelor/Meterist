@@ -19,7 +19,7 @@ and data — and runs as a CLI you operate from a terminal.
 | Gemini Enterprise | `gemini-enterprise` | Implemented |
 | ChatGPT Enterprise | `chatgpt-enterprise` | Implemented — also requires `rates set` before extracting, see [Configuring rates](#configuring-rates) below |
 | Claude API Platform | `claude-api-platform` | Implemented |
-| Claude Enterprise | `claude-enterprise` | Not yet implemented |
+| Claude Enterprise | `claude-enterprise` | Implemented — also requires `rates set` before extracting, see [Configuring rates](#configuring-rates) below |
 
 ### What to use for `--tenant`
 
@@ -167,11 +167,36 @@ entire daily total lands in `UsageOrOverage`, with `SeatFee` always `0`).
 
 ### Claude Enterprise
 
-Not yet implemented — see
-[`vendor-integration-reference.md`](vendor-integration-reference.md) for
-the confirmed API and what's still blocking (confirming whether "usage
-credits" is enabled for this tenant). Setup instructions will be added here
-once the adapter is built.
+**One-time Analytics API key setup:**
+
+1. Sign in to **claude.ai** as the organization's **primary owner** — only
+   the primary owner can enable API access and create Analytics API keys,
+   even other org admins can't do this.
+2. Go to **claude.ai → Organization settings → API**
+   (`claude.ai/admin-settings/api-access`), enable public API access, and
+   create an **Analytics API key**. This is a different key type from Claude
+   API Platform's Admin key — **not interchangeable** with it.
+3. Copy the key value — this is the entire credential, same as Claude API
+   Platform (no wrapping JSON needed).
+
+**Store it:**
+
+```powershell
+"<the analytics key you copied>" | Set-Content -Path "C:\path\to\claude-enterprise-key.txt" -NoNewline
+dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-id> --vendor claude-enterprise --from-file "C:\path\to\claude-enterprise-key.txt"
+```
+
+**Required before extracting — configure the seat rate.** Like ChatGPT
+Enterprise, this vendor's Analytics API has no seat/subscription line at
+all — the seat fee has to come from a rate you enter yourself. See
+[Configuring rates](#configuring-rates) below. Unlike ChatGPT, no
+credit-to-USD rate is needed — per-user cost is already real dollars.
+
+A `UsageOrOverage` of `$0` across the board is a **legitimate result**, not
+a bug, if this tenant's Claude Enterprise plan is seat-based without "usage
+credits" enabled (Organization settings → Usage → Enable, in the Claude
+Console) — that plan type has no overage concept at all until credits are
+turned on.
 
 ## Configuring rates
 
@@ -214,6 +239,13 @@ dotnet run --project src/Meterist.Cli -- rates set --tenant <your-tenant-id> --v
 dotnet run --project src/Meterist.Cli -- rates list --tenant <your-tenant-id> --vendor chatgpt-enterprise
 ```
 
+**Claude Enterprise needs just the seat rate** (no credit-to-USD rate — its
+`amount` is already real dollars):
+
+```powershell
+dotnet run --project src/Meterist.Cli -- rates set --tenant <your-tenant-id> --vendor claude-enterprise --rate-type per-seat --model-or-sku seat --rate 60 --seats 50 --cadence Monthly --effective-from 2026-01-01
+```
+
 ## Usage
 
 ### Extracting spend
@@ -235,7 +267,7 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 | Status | Meaning |
 |---|---|
 | **Succeeded** | Extraction and storage completed; Records shows how many days were written. |
-| **Not implemented** | This vendor's adapter doesn't exist yet — expected for the one not-yet-built vendor (Claude Enterprise), not an error. |
+| **Not implemented** | This vendor's adapter doesn't exist yet — no v1 vendors are in this state as of 2026-07-22, all four are implemented. |
 | **Failed** | Something went wrong (bad credential, network/auth failure, etc.) — the Detail column has the specific error. |
 
 ## Troubleshooting
@@ -281,6 +313,22 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
   invalid, expired, or isn't actually an Admin key (`sk-ant-admin01-...`) —
   a regular Claude API key won't work for these endpoints. Recreate it per
   the [Claude API Platform](#claude-api-platform) setup section above.
+- **Claude Enterprise: `SeatFee` is always `0`:** you're missing the seat
+  rate — run `rates list --tenant <id> --vendor claude-enterprise` to
+  confirm the `seat` row exists and its `EffectiveFrom`/`EffectiveTo` window
+  covers the days you extracted.
+- **Claude Enterprise: `UsageOrOverage` is `0` despite real usage in the
+  Claude Console:** confirm whether this tenant's plan has "usage credits"
+  enabled (Claude Console → Organization settings → Usage) — on a
+  seat-based plan without it, the Analytics API has no overage to report by
+  design, not a bug. See the [Claude Enterprise](#claude-enterprise) setup
+  note above.
+- **Claude Enterprise: `extract` fails with a 401/403:** the Analytics API
+  key is invalid or expired, or it's actually an Admin key
+  (`sk-ant-admin01-...`) instead of an Analytics key — the two key types
+  aren't interchangeable. Recreate it per the
+  [Claude Enterprise](#claude-enterprise) setup section above; only the
+  org's primary owner can do this.
 - **Inspecting stored data directly:** the SQLite database lives at
   `%LOCALAPPDATA%\Meterist\meterist.db`. Open it with any SQLite viewer
   (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)) and check:

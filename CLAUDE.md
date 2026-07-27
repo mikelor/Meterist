@@ -194,7 +194,25 @@ expected behavior, not a data gap to investigate.
    `0`, the whole daily total is `UsageOrOverage`. One non-obvious bug found
    via a failing WireMock test rather than docs: `DateOnly.TryParse` rejects
    the API's full ISO-datetime timestamps outright — fixed by parsing as
-   `DateTime` first. Claude Enterprise remains the one not-yet-built vendor.
+   `DateTime` first.
+6b. ~~Build Claude Enterprise~~ — **done 2026-07-22**, against the real
+   public Analytics API reference (`platform.claude.com/docs/en/api/admin/analytics`)
+   — a *different* key type from Claude API Platform's Admin key (Analytics
+   API key, created only by the org's primary owner). Needed the seat-fee
+   mechanism ChatGPT already used, which prompted extracting shared
+   `VendorRateConfigExtensions.FindRateForDay`/`ProrateSeatFee` helpers
+   (`Meterist.Core.Models`) instead of duplicating that logic a second time.
+   Also introduced a new constraint none of the other three adapters had: a
+   hard 31-day span cap per query (`user_cost_report`'s `ending_at`), requiring
+   an outer loop chunking the requested period into windows, on top of the
+   usual `has_more`/`next_page` pagination inside each window. Applied the
+   cents→dollars and `DateOnly.TryParse`-rejects-full-timestamps fixes from
+   the start this time, having already hit both while building Claude API
+   Platform. **All four v1 vendors are now implemented** — this closes out
+   the vendor-adapter scope from the original research spike; remaining work
+   is the backlog in `docs/product-design-document.md` §7 (dashboard,
+   cross-tenant benchmarking, ChatGPT credit-pool tracking, etc.) and any
+   future vendor.
 7. ~~Decide deployment model and scheduling approach~~ — **decided
    2026-07-21**, see `docs/architecture.md` §9.
 8. Revisit CLI vs. dashboard sequencing once the core library/service layer

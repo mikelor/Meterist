@@ -17,36 +17,69 @@ tickets for a specific vendor adapter should point for implementation detail.
 
 ## v1 Vendors (confirmed in scope)
 
-### Claude Enterprise (seat-based — Chat/Code/Cowork)
+### Claude Enterprise (seat-based — Chat/Code/Cowork) — IMPLEMENTED (2026-07-22)
 
-- **API:** Claude Enterprise Analytics API — `docs.claude.com/en/manage-claude/analytics-api`,
-  endpoints under `https://api.anthropic.com/v1/organizations/analytics/`
-  (e.g. `GET .../user_cost_report`). Beta since May 2026.
-- **Auth:** Dedicated **Analytics API key** (`read:analytics` scope). Only the
-  org's *primary owner* can create one (claude.ai → Organization settings → API).
-- **Granularity:** Daily-bucketed, per-user (`actor.user_id`/`email`/`name`),
-  per-model, in fractional cents (`amount` = post-discount, `list_amount` =
-  pre-discount). Historical data starts Jan 1, 2026. Data lands within
-  4–24h but can revise for up to 30 days — query 30+ days back for
-  invoicing-grade totals.
-- **Overage semantics (load-bearing for the data model):**
-  - Seat-based plans have **no overage concept by default** — usage is
-    hard-capped once a member hits their limit.
-  - Overage only exists if the org enables **"usage credits"**
-    (Organization settings → Usage → Enable).
-  - Once enabled, the cost/usage endpoints return **overage spend only** —
-    in-allotment usage generates no cost and never appears in the response.
-  - Usage-based Enterprise plans (Ecosync's current state, post
-    seat→usage transition) get full dollar cost from the same endpoints.
-  - **Required tenant config:** a per-sub-account flag for "usage credits
-    enabled?" — if false, expect empty/zero from these endpoints by design,
-    not a broken integration.
-- **Per-user comparison:** confirmed to work, including on seat-based plans —
-  returns real dollar `amount` per user, not just credit counts. The product
-  UI itself has a "top-10 users-by-spend" leaderboard.
+- **API:** Claude Enterprise Analytics API, verified 2026-07-22 against the
+  real public reference (`platform.claude.com/docs/en/api/admin/analytics`
+  and `.../manage-claude/analytics-api`, both publicly fetchable, same as
+  Claude API Platform's docs). Endpoint used:
+  `GET https://api.anthropic.com/v1/organizations/analytics/user_cost_report`
+  — per-user cost. No organization ID in the path — the key scopes the
+  request, same as Claude API Platform. Two sibling endpoints exist
+  (`/cost_report` for org-wide totals without per-user breakdown,
+  `/user_usage_report`/`/usage_report` for token counts instead of dollars)
+  but weren't needed — `user_cost_report` alone gives both a per-day org
+  total (by summing) and per-user identity to preserve in raw storage.
+- **Auth:** Dedicated **Analytics API key** (`read:analytics` scope, header
+  `x-api-key`), created by the org's *primary owner* only
+  (`claude.ai/admin-settings/api-access`) — **a different key type from
+  Claude API Platform's Admin key**, not interchangeable. Bare string
+  credential, no wrapper JSON needed (no org ID or other per-tenant config).
+- **⚠️ `bucket_width=1d` must be passed explicitly** — omitting it collapses
+  the response to one row per user for the *entire* queried range, not one
+  row per (user, day). Confirmed from the real reference: "When set, one
+  actor may span multiple rows (one per time bucket)."
+- **⚠️ Hard 31-day span cap per query, distinct from pagination** —
+  `ending_at` "Defaults to min(now, starting_at + 31 days). Max span: 31
+  days." Unlike Claude API Platform's `cost_report` (which only caps *page
+  size*, with `has_more`/`next_page` handling arbitrarily long ranges), a
+  multi-month extraction here requires an **outer loop stepping through
+  ≤31-day windows**, each with its own inner pagination loop. New
+  requirement not present in any of the other three adapters.
+- **⚠️ `amount` is a decimal string in cents** — identical pitfall to Claude
+  API Platform's `cost_report` ("post-discount, pre-credit... divide by
+  100"). Same conversion, same unit-test discipline, this time gotten right
+  from the start rather than discovered via a failing test.
+- **⚠️ `starting_at`/`ending_at` are full ISO datetime strings** — the exact
+  shape that broke `DateOnly.TryParse` while building
+  `HttpClaudeCostReportRepository` for Claude API Platform. Built this
+  adapter with the `DateTime.TryParse` + `DateOnly.FromDateTime` fix from
+  the start, with a dedicated regression test using a non-midnight
+  timestamp (`"2026-07-20T05:30:00Z"`) to prove it.
+- **Date range limits:** `starting_at` "must be within last 365 days, no
+  earlier than 2026-01-01T00:00:00Z" — clamped with a warning, mirroring
+  ChatGPT's 30-day retention clamp.
+- **Overage semantics — no code branch needed, confirmed by the real docs:**
+  "The cost and usage endpoints apply to usage-based Enterprise plans; for
+  seat-based Enterprise plans, they reflect usage credits only." There is
+  **no API field indicating which kind of plan a tenant is on** — and none
+  is needed: the endpoint naturally returns `$0` when usage credits aren't
+  enabled, which the normalizer already treats as a legitimate
+  `UsageOrOverage = 0` (same pattern as `SupportsOverage`-can-be-zero
+  elsewhere). No new tenant-config flag was built for this.
+- **Per-user:** confirmed real vendor-reported dollar `amount` per user
+  (`actor.user_id`/`email`/`name`), not a derived estimate — this vendor's
+  standout capability, preserved in raw storage even though the v1
+  normalizer aggregates it into a daily org total.
+- **Seat fee still isn't in this schema at all** — same gap as ChatGPT.
+  Comes from `VendorRateConfig` via the same `IVendorRateConfigRepository`
+  mechanism, reused unchanged for a second vendor (see the shared
+  `VendorRateConfigExtensions.FindRateForDay`/`ProrateSeatFee` helpers in
+  `Meterist.Core.Models`, extracted once this vendor needed the identical
+  logic `ChatGptEnterpriseSpendNormalizer` already had).
 - **Spend Limits API** (`docs.claude.com/en/manage-claude/spend-limits-api`,
   separate `read:spend_limits`/`write:spend_limits` scopes): reads/sets
-  per-member spend caps — a secondary signal, not the primary reporting source.
+  per-member spend caps — a secondary signal, not used by this adapter.
 - **Compliance API** exists (audit/governance events) — confirmed irrelevant to spend.
 
 ### Claude API Platform (developer API — billed separately from Claude Enterprise) — IMPLEMENTED (2026-07-22)

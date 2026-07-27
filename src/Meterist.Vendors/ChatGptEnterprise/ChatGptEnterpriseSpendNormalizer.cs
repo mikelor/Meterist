@@ -30,9 +30,6 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
         RawVendorSpendData rawData,
         IReadOnlyList<VendorRateConfig> applicableRates)
     {
-        var seatRates = applicableRates.Where(r => r.ModelOrSku == ChatGptRateKeys.SeatModelOrSku).ToList();
-        var creditRates = applicableRates.Where(r => r.ModelOrSku == ChatGptRateKeys.CreditUsdModelOrSku).ToList();
-
         // Warn once per extraction call, not once per day, to avoid log spam
         // across a multi-week range when a rate simply hasn't been entered yet.
         var warnedMissingSeatRate = false;
@@ -42,12 +39,12 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
 
         foreach (var (date, rows) in rawData.RecordsByDate.OrderBy(kvp => kvp.Key))
         {
-            var seatRate = FindRateForDay(seatRates, date);
+            var seatRate = applicableRates.FindRateForDay(ChatGptRateKeys.SeatModelOrSku, date);
             var seatFee = 0m;
 
             if (seatRate is not null)
             {
-                seatFee = ProrateSeatFee(seatRate, date);
+                seatFee = seatRate.ProrateSeatFee(date);
             }
             else if (!warnedMissingSeatRate)
             {
@@ -80,7 +77,7 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
 
                 if (string.Equals(costUnit, CreditsUnit, StringComparison.OrdinalIgnoreCase))
                 {
-                    var creditRate = FindRateForDay(creditRates, date);
+                    var creditRate = applicableRates.FindRateForDay(ChatGptRateKeys.CreditUsdModelOrSku, date);
                     if (creditRate is not null)
                     {
                         usageOrOverage += costValue * creditRate.Rate;
@@ -126,25 +123,6 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
             rawData.RecordsByDate.Count, records.Count, rawData.TenantId);
 
         return records;
-    }
-
-    private static VendorRateConfig? FindRateForDay(IReadOnlyList<VendorRateConfig> rates, DateOnly date) =>
-        rates.FirstOrDefault(r => r.EffectiveFrom <= date && (r.EffectiveTo is null || r.EffectiveTo >= date));
-
-    private static decimal ProrateSeatFee(VendorRateConfig seatRate, DateOnly date)
-    {
-        var totalAmount = (seatRate.SeatCount ?? 1) * seatRate.Rate;
-
-        var daysInCadencePeriod = seatRate.BillingCadence switch
-        {
-            BillingCadence.Monthly => DateTime.DaysInMonth(date.Year, date.Month),
-            BillingCadence.Annual => DateTime.IsLeapYear(date.Year) ? 366 : 365,
-            // OneTime isn't meaningfully "prorateable" in a daily model — treated
-            // as already a single day's amount, a documented v1 limitation.
-            _ => 1,
-        };
-
-        return totalAmount / daysInCadencePeriod;
     }
 
     private static decimal ToDecimal(object? value) => value switch
