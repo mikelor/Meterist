@@ -8,14 +8,14 @@
 
 Meterist is the .NET tool replacing the manual `AI_Vendor_Weekly_Spend_Model.xlsx` + CSV-export workflow for tracking AI vendor spend across client organizations.
 
-**All four v1 vendors are code-complete. Three are live-verified with real data:**
+**All four v1 vendors are now code-complete and live-verified with real data:**
 
 | Vendor | Status | Notes |
 |---|---|---|
 | Claude API Platform | ✅ Live-verified | Real dollar cost directly from the API; no seat concept, pure usage pricing |
 | ChatGPT Enterprise | ✅ Live-verified | Seat fee + usage/credits; per-user activity preserved from compliance log export |
 | Gemini Enterprise | ✅ Live-verified | Per-user activity, aggregate SKU-level dollars via BigQuery billing export |
-| Claude Enterprise | ⚠️ Code-complete, not yet live-verified | 61 passing tests, full adapter built; blocked only on obtaining a real Analytics API key from a tenant's *primary org owner* — not a code gap |
+| Claude Enterprise | ✅ Live-verified for zelleri | Reconciled against a real Anthropic invoice, not just a console spot-check: June's extracted usage ($70.61) matched the invoiced "extra usage units" line exactly, and the seat-fee proration ($1,972.60 for June) checks out against the annual $2,400/seat contract. Still needs a credential for ecosync — no Claude Enterprise data exists for that tenant yet |
 
 **Multi-tenancy is proven, not just designed.** Two real tenants (zelleri, ecosync) each have independently configured, DPAPI-encrypted credentials, and both have successfully extracted and persisted isolated data into one shared SQLite database — confirmed via live extraction runs, not just unit tests.
 
@@ -44,7 +44,7 @@ The short version: the spreadsheet answered "what did we spend last week" for on
 
 ## 3. Nine insights we can report on right now
 
-Assuming Claude Enterprise stays excluded from the numbers for now (three vendors, two tenants, real data). Priority is now split from effort into its own column (P0 = do next, P1 = near-term, P2 = medium-term, P3 = backlog), so the two can be weighed independently — a few items are low effort but still not P0 because nothing depends on them yet.
+Claude Enterprise is now live for zelleri but still absent for ecosync (no credential yet), so cross-tenant insights below (#2 especially) currently draw on three vendors for ecosync and four for zelleri. Priority is now split from effort into its own column (P0 = do next, P1 = near-term, P2 = medium-term, P3 = backlog), so the two can be weighed independently — a few items are low effort but still not P0 because nothing depends on them yet.
 
 | # | Insight | Why it matters | Priority | Effort |
 |---|---|---|---|---|
@@ -62,13 +62,15 @@ Assuming Claude Enterprise stays excluded from the numbers for now (three vendor
 
 **On #9 specifically:** this is worth sequencing *before* or alongside the reporting bundle above, not after it. Right now, "live-verified" rests on tests passing against mocked/WireMock fixtures plus a manual spot-check — #9 turns that spot-check into something repeatable and reportable, which matters more once real client numbers are on the line. Concretely, this only needs three pieces already sitting in the codebase: raw extraction records are already persisted separately from normalized ones (so there's something to reconcile *against*, not just re-derive), the vendor adapters already know how to call each API on demand, and `VendorExtractionResult`'s Succeeded/NotImplemented/Failed pattern is a natural fit to extend into a fourth state (`Mismatch`) once a reconciliation check exists. A reasonable v1 for this: a `meterist audit <tenant> <vendor> <date-range>` command that re-pulls the vendor's own reported total for the period (not the per-day breakdown, just a lightweight total-cost check) and diffs it against `SUM(DailySpendRecord)` for the same scope, surfacing a clear match/mismatch/tolerance-exceeded result per vendor.
 
+**A manual precedent for #9 already happened:** zelleri's Claude Enterprise invoices (an annual seat contract + a June overage invoice) gave a real number to reconcile against by hand — June's extracted usage matched the invoiced overage exactly, and the seat-fee proration matched the annual contract math. That's exactly the shape #9 would automate; it's the first proof this kind of check is both possible and worth having on demand rather than only when an invoice happens to land in an inbox.
+
 ---
 
 ## 4. Open questions worth discussing back in Chat
 
 - **Cadence:** should these insights become a recurring templated report (e.g., generated monthly per client) or a one-off proof-of-value pitch showing Meterist beats the spreadsheet?
 - **Priority:** is chargeback detail (#4) or cross-client benchmarking (#2) more valuable to the consulting business model right now — they pull toward different next-build priorities.
-- **Claude Enterprise timing:** worth chasing down a live Analytics API key now, or defer until the reporting layer proves value with the three vendors already live?
+- **Claude Enterprise for ecosync:** now live and invoice-validated for zelleri — worth chasing down an Analytics API key for ecosync too, so cross-tenant insights (#2 especially) cover all four vendors for both tenants instead of three.
 - **Interface direction:** this pushes the still-open CLI-vs-dashboard question. A report generator might be the natural next increment either way — worth deciding whether it's a new `report` CLI command, an exported file (CSV/PDF), or the first real reason to start the dashboard.
 - **Audit tolerance:** #9 needs a defined "close enough" threshold before it's useful — vendor-reported totals and `DailySpendRecord` sums may legitimately differ by pennies from rounding/proration, so an exact-match check would generate constant false positives. Worth deciding per-vendor tolerance (e.g., dollar or percentage-based) rather than a single global rule, given how differently each vendor's rate/proration logic works today.
 
