@@ -39,11 +39,25 @@ bundled into one page:
 5. **Concentration risk** — a segmented bar per tenant showing vendor mix
    %, with a risk flag if any single vendor exceeds roughly 70–75% of that
    tenant's tracked spend, or a "diversified" flag if not.
-6. **Audit & reconciliation status** — per vendor, how the numbers were
+6. **Rate card** — per tenant/vendor pairing: seat fee (normalized to
+   $/seat/month, actual contracted cadence noted alongside), seat count,
+   overage mechanism, and the rate's effective-from date. This is
+   deliberately **not** a per-vendor table — the same vendor can have a
+   different seat rate and a different overage rate per tenant (confirmed
+   real-world case: zelleri and ecosync both run ChatGPT Enterprise at 50
+   seats but different seat rates and different credit-to-USD rates), so
+   rows are one per (vendor, tenant) pair, labeled `Vendor (tenant)` to
+   match the row-label convention already used in the audit table below.
+   Not every vendor has a seat/overage rate to show: Claude API Platform is
+   pure usage-based pricing with no seat concept at all, and Gemini
+   Enterprise's subscription fee arrives pre-priced from the BigQuery
+   billing export rather than being computed from a configured
+   `VendorRateConfig` row — both show `—` by design, not a data gap.
+7. **Audit & reconciliation status** — per vendor, how the numbers were
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the
    planned `meterist audit` command (insight #9).
-7. **Footnote** — methodology and caveats: what "Gross Spend" means, why
+8. **Footnote** — methodology and caveats: what "Gross Spend" means, why
    date ranges can differ by vendor within a tenant, which vendors are
    excluded and why (e.g., Claude Enterprise pending a live credential),
    and any zero-activity vendor explained (new account vs. missing pull).
@@ -66,6 +80,26 @@ Map the `VendorId` GUIDs to names via
 [`VendorCatalog`](../src/Meterist.Core/Vendors/VendorCatalog.cs) — don't
 assume a mapping from memory, the four vendor GUIDs aren't in any obviously
 memorable order.
+
+The **rate card** section pulls from a different table — `VendorRateConfigs`,
+not `DailySpendRecords` — since it shows configured contract terms, not
+extracted spend. Only the currently-active row per tenant/vendor/rate-type
+matters (`EffectiveTo IS NULL`):
+
+```sql
+SELECT TenantId, VendorId, RateType, ModelOrSku, Rate, SeatCount,
+       BillingCadence, EffectiveFrom, EffectiveTo
+FROM VendorRateConfigs
+WHERE EffectiveTo IS NULL
+ORDER BY TenantId, VendorId, RateType;
+```
+
+`BillingCadence` is stored as an int (`0` = Monthly, `1` = Annual, `2` =
+OneTime) — map it before display. Normalize seat fees to $/seat/month for
+the table (`Rate / 12` for Annual, `Rate` as-is for Monthly) but keep the
+actual cadence and raw contracted rate visible alongside (e.g. "$200.00/mo
+· Annual · $2,400/seat/yr") — don't silently discard the real contract
+terms in favor of the normalized figure.
 
 **Tooling note:** a sandboxed Bash tool reading paths under
 `%LOCALAPPDATA%` (outside this repo's working directory) can return a
