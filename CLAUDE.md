@@ -218,3 +218,22 @@ expected behavior, not a data gap to investigate.
 8. Revisit CLI vs. dashboard sequencing once the core library/service layer
    is in place — the interface should be a thin layer on top, not something
    the core logic depends on.
+9. ~~Reconcile against the real spreadsheet it replaces~~ — **done
+   2026-08-05**: built weekly-spend and annual-projection reporting sections,
+   then compared them line-by-line against a live copy of
+   `AI_Vendor_Weekly_Spend_Model.xlsx`. Validated the core premise both ways —
+   caught two real bugs in the spreadsheet (an off-by-one-row `SUM` formula
+   in its Summary tab; a `TREND(...,26.5)` formula that silently extrapolates
+   a full year of unmoderated growth instead of projecting one week ahead) —
+   but also exposed gaps in Meterist itself: every reconciliation-report
+   number was hand-computed from ad-hoc SQL scripts and manually edited into
+   HTML, the same category of risk (manual arithmetic, human transcription)
+   this project exists to remove from the vendor side. Reprioritized
+   `docs/product-design-document.md` §7 accordingly — leading items now:
+   anomalous-period flagging (a stored reason code for "don't trend this
+   week," e.g. retention-clamped or credit-grant-affected), a ChatGPT
+   credit-grant manual config (unconfirmed day/amount estimates recorded in
+   `docs/vendor-integration-reference.md`'s ChatGPT Enterprise section),
+   automated report generation, the already-planned `meterist audit`
+   command (now scoped to optionally diff against a spreadsheet baseline
+   too), seat-count drift detection, and CLI support for backdating rates.

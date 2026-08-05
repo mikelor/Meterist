@@ -303,6 +303,17 @@ tickets for a specific vendor adapter should point for implementation detail.
     manually-entered config value (see the backlog item in
     `product-design-document.md` §7), compared against the cumulative
     `COSTS`-derived credit consumption Meterist already extracts.
+  - **Addendum, 2026-08-05:** weekly reconciliation-report work surfaced
+    further, still-**unconfirmed** observational evidence of a recurring
+    monthly grant for both tenants: possibly ~day 30 / ~25,000 credits for
+    ecosync, and ~day 14 / ~30,000 credits for zelleri. Neither the exact
+    day, the exact amount, nor whether this genuinely differs by tenant is
+    confirmed — there simply isn't enough billing history yet to be sure,
+    and (per the conclusion above) no API can confirm it directly either
+    way. Recorded here so the next session building the credit-grant
+    manual-config backlog item doesn't have to re-derive this from the
+    report or chat history; treat both figures as a starting point to
+    refine once each account team confirms the real contract terms.
 - **Do not confuse with** the pre-existing `/v1/organization/costs`
   developer-platform Admin API — different product (api.openai.com token
   spend, project-scoped), confirmed to NOT cover ChatGPT/Codex workspace
