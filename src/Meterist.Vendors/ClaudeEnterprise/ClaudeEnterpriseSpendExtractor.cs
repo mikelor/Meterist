@@ -58,6 +58,15 @@ public sealed class ClaudeEnterpriseSpendExtractor : IVendorSpendExtractor
                 group => group.Key,
                 group => (IReadOnlyList<IReadOnlyDictionary<string, object?>>)group.ToList());
 
+        // A day with zero usage-credit activity returns no rows at all from the
+        // Analytics API — without this, that day would never reach the
+        // normalizer, silently dropping its SeatFee too (seats accrue daily
+        // regardless of usage). Every day in the requested period needs a key.
+        foreach (var date in period.EnumerateDays())
+        {
+            recordsByDate.TryAdd(date, Array.Empty<IReadOnlyDictionary<string, object?>>());
+        }
+
         _logger.LogDebug(
             "Claude Enterprise extraction for tenant '{TenantId}' grouped {RowCount} row(s) into {DayCount} day(s).",
             tenantId, rows.Count, recordsByDate.Count);

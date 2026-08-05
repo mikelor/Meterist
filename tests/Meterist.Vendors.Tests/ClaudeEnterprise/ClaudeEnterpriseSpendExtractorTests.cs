@@ -48,9 +48,14 @@ public class ClaudeEnterpriseSpendExtractorTests
         Assert.Equal("ecosync", result.TenantId);
         Assert.Equal(Period, result.Period);
 
-        Assert.Equal(2, result.RecordsByDate.Count);
+        // Every day in the 7-day period (Jul 19-25) must be present, not just
+        // the 2 days with actual activity — a zero-activity day must still
+        // reach the normalizer so its SeatFee accrues.
+        Assert.Equal(7, result.RecordsByDate.Count);
         Assert.Equal(2, result.RecordsByDate[day1].Count);
         Assert.Single(result.RecordsByDate[day2]);
+        Assert.Empty(result.RecordsByDate[new DateOnly(2026, 7, 19)]);
+        Assert.Empty(result.RecordsByDate[new DateOnly(2026, 7, 22)]);
 
         Assert.Equal(analyticsApiKey, repository.ReceivedAnalyticsApiKey);
         Assert.Equal(Period, repository.ReceivedPeriod);

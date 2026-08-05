@@ -63,6 +63,15 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
                 group => group.Key,
                 group => (IReadOnlyList<IReadOnlyDictionary<string, object?>>)group.ToList());
 
+        // A day with zero billed activity returns no rows at all from the COSTS
+        // export — without this, that day would never reach the normalizer,
+        // silently dropping its SeatFee too (seats accrue daily regardless of
+        // usage). Every day in the requested period needs a key.
+        foreach (var date in period.EnumerateDays())
+        {
+            recordsByDate.TryAdd(date, Array.Empty<IReadOnlyDictionary<string, object?>>());
+        }
+
         _logger.LogDebug(
             "ChatGPT Enterprise extraction for tenant '{TenantId}' grouped {RowCount} row(s) into {DayCount} day(s).",
             tenantId, rows.Count, recordsByDate.Count);
