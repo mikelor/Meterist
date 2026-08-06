@@ -42,4 +42,30 @@ public interface IVendorRateConfigRepository
     /// </summary>
     Task<IReadOnlyList<VendorRateConfig>> GetApplicableRatesAsync(
         string tenantId, Guid vendorId, DateRange period, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the EffectiveFrom of the earliest row in the same scope (same
+    /// TenantId — including both null for a public default — same VendorId,
+    /// same ModelOrSku) whose EffectiveFrom is strictly after
+    /// <paramref name="afterEffectiveFrom"/>, or null if none exists. Used by
+    /// the CLI's `rates set` to auto-derive a backdated rate's EffectiveTo (the
+    /// day before) when --effective-to is omitted, instead of requiring the
+    /// caller to hand-compute it.
+    /// </summary>
+    Task<DateOnly?> FindNextEffectiveFromAsync(
+        string? tenantId, Guid vendorId, string? modelOrSku, DateOnly afterEffectiveFrom,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns any existing rows in the same scope whose [EffectiveFrom,
+    /// EffectiveTo] window overlaps the given range. Called by the CLI's
+    /// `rates set` after CloseOpenEndedRateAsync (so a legitimate renewal's
+    /// freshly-closed row is evaluated with its updated EffectiveTo, not its
+    /// stale open-ended state) as a safety net against inserting a row that
+    /// would otherwise leave two ambiguous overlapping windows for the same
+    /// scope. Empty means the insert is safe.
+    /// </summary>
+    Task<IReadOnlyList<VendorRateConfig>> FindOverlappingRatesAsync(
+        string? tenantId, Guid vendorId, string? modelOrSku, DateOnly effectiveFrom, DateOnly? effectiveTo,
+        CancellationToken cancellationToken = default);
 }

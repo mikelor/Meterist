@@ -232,6 +232,17 @@ dotnet run --project src/Meterist.Cli -- rates set --tenant <your-tenant-id> --v
   starts, so historical days extracted under the old rate are never
   recomputed. You'll see a `Closed 1 previous open-ended rate(s)...` message
   confirming this happened.
+- **Backdating an earlier contract you didn't have on file yet** works the
+  same single-command way — no manual deletes or careful ordering needed.
+  Run `rates set` with an `--effective-from` *earlier* than a rate you
+  already have, and omit `--effective-to`: Meterist looks up the earliest
+  rate already on file for that scope and caps the new row's `EffectiveTo`
+  to the day before it, printing a `Capped this rate's EffectiveTo to
+  ...` message so you can confirm the boundary it picked. If the date range
+  you end up with (whether auto-capped or explicitly given) would overlap
+  an existing row for that scope, the command refuses to insert it and
+  lists the conflicting row instead — so a typo'd date can't silently create
+  two ambiguous overlapping rates.
 
 **Confirm what's stored:**
 

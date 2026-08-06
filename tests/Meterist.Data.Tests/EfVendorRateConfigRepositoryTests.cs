@@ -136,6 +136,105 @@ public class EfVendorRateConfigRepositoryTests : IDisposable
         Assert.Equal(0, closedCount);
     }
 
+    [Fact]
+    public async Task FindNextEffectiveFromAsync_ReturnsEarliestLaterRate_InSameScope()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "seat", 40m, new DateOnly(2026, 7, 14)), TestContext.Current.CancellationToken);
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "seat", 45m, new DateOnly(2027, 1, 1)), TestContext.Current.CancellationToken);
+
+        var next = await _repository.FindNextEffectiveFromAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2025, 12, 5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new DateOnly(2026, 7, 14), next);
+    }
+
+    [Fact]
+    public async Task FindNextEffectiveFromAsync_ReturnsNull_WhenNoLaterRateExists()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "seat", 40m, new DateOnly(2026, 7, 14)), TestContext.Current.CancellationToken);
+
+        var next = await _repository.FindNextEffectiveFromAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2026, 8, 1), TestContext.Current.CancellationToken);
+
+        Assert.Null(next);
+    }
+
+    [Fact]
+    public async Task FindNextEffectiveFromAsync_IgnoresRowsInDifferentScope()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("other-tenant", vendorId, "seat", 40m, new DateOnly(2026, 7, 14)), TestContext.Current.CancellationToken);
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "credit-usd", 0.07m, new DateOnly(2026, 7, 14)), TestContext.Current.CancellationToken);
+
+        var next = await _repository.FindNextEffectiveFromAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2025, 12, 5), TestContext.Current.CancellationToken);
+
+        Assert.Null(next);
+    }
+
+    [Fact]
+    public async Task FindOverlappingRatesAsync_DetectsOverlap_WithOpenEndedRow()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "seat", 40m, new DateOnly(2026, 7, 14)), TestContext.Current.CancellationToken);
+
+        var overlaps = await _repository.FindOverlappingRatesAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 1),
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(overlaps);
+    }
+
+    [Fact]
+    public async Task FindOverlappingRatesAsync_DetectsOverlap_WithClosedRow()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "seat", 33m, new DateOnly(2025, 7, 14), new DateOnly(2026, 7, 13)),
+            TestContext.Current.CancellationToken);
+
+        var overlaps = await _repository.FindOverlappingRatesAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2025, 12, 5), new DateOnly(2026, 7, 13),
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(overlaps);
+    }
+
+    [Fact]
+    public async Task FindOverlappingRatesAsync_ReturnsEmpty_WhenNoOverlap()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("zelleri", vendorId, "seat", 40m, new DateOnly(2026, 7, 14)), TestContext.Current.CancellationToken);
+
+        var overlaps = await _repository.FindOverlappingRatesAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2025, 12, 5), new DateOnly(2026, 7, 13),
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(overlaps);
+    }
+
+    [Fact]
+    public async Task FindOverlappingRatesAsync_ReturnsEmpty_ForDifferentScope()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        await _repository.AddAsync(
+            Rate("other-tenant", vendorId, "seat", 40m, new DateOnly(2026, 1, 1)), TestContext.Current.CancellationToken);
+
+        var overlaps = await _repository.FindOverlappingRatesAsync(
+            "zelleri", vendorId, "seat", new DateOnly(2026, 1, 1), null, TestContext.Current.CancellationToken);
+
+        Assert.Empty(overlaps);
+    }
+
     private static VendorRateConfig Rate(
         string? tenantId, Guid vendorId, string modelOrSku, decimal rate, DateOnly effectiveFrom,
         DateOnly? effectiveTo = null) => new()

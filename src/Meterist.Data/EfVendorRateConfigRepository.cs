@@ -75,4 +75,42 @@ public sealed class EfVendorRateConfigRepository : IVendorRateConfigRepository
             .Where(r => r.TenantId == tenantId || !tenantModelOrSkus.Contains(r.ModelOrSku))
             .ToList();
     }
+
+    public async Task<DateOnly?> FindNextEffectiveFromAsync(
+        string? tenantId,
+        Guid vendorId,
+        string? modelOrSku,
+        DateOnly afterEffectiveFrom,
+        CancellationToken cancellationToken = default)
+    {
+        var next = await _context.VendorRateConfigs
+            .Where(r => r.TenantId == tenantId
+                && r.VendorId == vendorId
+                && r.ModelOrSku == modelOrSku
+                && r.EffectiveFrom > afterEffectiveFrom)
+            .OrderBy(r => r.EffectiveFrom)
+            .Select(r => (DateOnly?)r.EffectiveFrom)
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+
+        return next;
+    }
+
+    public async Task<IReadOnlyList<VendorRateConfig>> FindOverlappingRatesAsync(
+        string? tenantId,
+        Guid vendorId,
+        string? modelOrSku,
+        DateOnly effectiveFrom,
+        DateOnly? effectiveTo,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveToOrMax = effectiveTo ?? DateOnly.MaxValue;
+
+        return await _context.VendorRateConfigs
+            .Where(r => r.TenantId == tenantId
+                && r.VendorId == vendorId
+                && r.ModelOrSku == modelOrSku
+                && r.EffectiveFrom <= effectiveToOrMax
+                && (r.EffectiveTo == null || r.EffectiveTo >= effectiveFrom))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

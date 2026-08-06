@@ -237,3 +237,20 @@ expected behavior, not a data gap to investigate.
    automated report generation, the already-planned `meterist audit`
    command (now scoped to optionally diff against a spreadsheet baseline
    too), seat-count drift detection, and CLI support for backdating rates.
+10. ~~CLI support for backdating rates~~ — **done 2026-08-06**. The backlog
+    item's premise didn't hold up on inspection: `rates set` already had an
+    `--effective-to` flag, so a single command could already insert a
+    historical rate next to an existing later one without the manual
+    `sqlite3 DELETE` + chronologically-ordered re-insertion this session had
+    used. The real gaps were (1) having to hand-compute the boundary date,
+    and (2) no validation at all against overlapping rate windows (the
+    schema's index is intentionally non-unique, so nothing else catches a
+    bad boundary). Added `IVendorRateConfigRepository.FindNextEffectiveFromAsync`
+    (auto-caps a backdated rate's `EffectiveTo` to the day before whatever
+    already exists in that scope, printing a confirmation message the same
+    way the existing renewal auto-close does) and `FindOverlappingRatesAsync`
+    (a general guard, run after `CloseOpenEndedRateAsync`, that rejects any
+    `rates set` whose resolved date range collides with an existing row —
+    not just backfills). See `docs/architecture.md` §8 and
+    `docs/user-guide.md`'s rate-configuration section for the resulting
+    behavior.

@@ -303,6 +303,22 @@ vendor adapter or pricing-engine code.
   set` call rather than a manual two-step "close the old row, then add the
   new one" — without it, two open-ended rows for the same scope would leave
   `GetApplicableRatesAsync`'s per-day lookup with an undefined tie-break.
+- **`FindNextEffectiveFromAsync`/`FindOverlappingRatesAsync` — added
+  2026-08-06** to support backdating a rate without hand-computing its
+  boundary date. `FindNextEffectiveFromAsync` returns the earliest
+  `EffectiveFrom` already on file for the scope that's later than a given
+  date; `rates set` uses it to auto-cap a backdated row's `EffectiveTo` to
+  the day before, when `--effective-to` is omitted — the same kind of
+  derivation `CloseOpenEndedRateAsync` already does for the forward-renewal
+  case, just running the other direction. `FindOverlappingRatesAsync` is a
+  general safety net run right before `AddAsync` (after
+  `CloseOpenEndedRateAsync`, so a legitimate renewal's freshly-closed
+  predecessor doesn't false-positive against itself): the schema has no
+  unique constraint preventing two rows in the same scope from overlapping
+  (the index at `MeteristDbContext.OnModelCreating` is intentionally
+  non-unique, to support the public-default-null-`TenantId` semantics), so
+  this is the only thing that stops a bad boundary date from silently
+  producing two ambiguous rows.
 - **Corrected claim:** this was originally scoped as "not in the critical
   path for vendors whose API returns dollar cost directly," listing ChatGPT
   Enterprise Cost API among them. That assumption didn't survive contact

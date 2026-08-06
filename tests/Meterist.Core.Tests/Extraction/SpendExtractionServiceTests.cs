@@ -222,6 +222,16 @@ public class SpendExtractionServiceTests
             ReceivedPeriod = period;
             return Task.FromResult(_ratesToReturn);
         }
+
+        public Task<DateOnly?> FindNextEffectiveFromAsync(
+            string? tenantId, Guid vendorId, string? modelOrSku, DateOnly afterEffectiveFrom,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<DateOnly?>(null);
+
+        public Task<IReadOnlyList<VendorRateConfig>> FindOverlappingRatesAsync(
+            string? tenantId, Guid vendorId, string? modelOrSku, DateOnly effectiveFrom, DateOnly? effectiveTo,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<VendorRateConfig>>([]);
     }
 
     private sealed class FakeRawExtractionRepository : IRawExtractionRepository

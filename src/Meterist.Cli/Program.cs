@@ -204,23 +204,46 @@ static Command BuildRatesCommand(IHost host)
             cadence = parsedCadence;
         }
 
+        var tenantIdValue = parseResult.GetValue(tenantOption);
+        var modelOrSkuValue = parseResult.GetValue(modelOrSkuOption);
+        var effectiveFromDate = DateOnly.FromDateTime(parseResult.GetValue(effectiveFromOption));
         var effectiveToValue = parseResult.GetValue(effectiveToOption);
-
-        var rate = new VendorRateConfig
-        {
-            TenantId = parseResult.GetValue(tenantOption),
-            VendorId = vendor.Id,
-            RateType = parseResult.GetValue(rateTypeOption)!,
-            ModelOrSku = parseResult.GetValue(modelOrSkuOption),
-            Rate = parseResult.GetValue(rateOption),
-            SeatCount = parseResult.GetValue(seatsOption),
-            BillingCadence = cadence,
-            EffectiveFrom = DateOnly.FromDateTime(parseResult.GetValue(effectiveFromOption)),
-            EffectiveTo = effectiveToValue is { } effectiveTo ? DateOnly.FromDateTime(effectiveTo) : null,
-        };
 
         using var scope = host.Services.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IVendorRateConfigRepository>();
+
+        DateOnly? resolvedEffectiveTo = effectiveToValue is { } effectiveTo
+            ? DateOnly.FromDateTime(effectiveTo)
+            : null;
+
+        // A backdated rate (no --effective-to) that predates a rate already on
+        // file for this scope should end the day before that later rate starts,
+        // rather than requiring the caller to compute that boundary by hand.
+        if (resolvedEffectiveTo is null)
+        {
+            var nextEffectiveFrom = await repository.FindNextEffectiveFromAsync(
+                tenantIdValue, vendor.Id, modelOrSkuValue, effectiveFromDate, cancellationToken);
+            if (nextEffectiveFrom is { } next)
+            {
+                resolvedEffectiveTo = next.AddDays(-1);
+                AnsiConsole.MarkupLine(
+                    $"[yellow]Capped this rate's EffectiveTo to {resolvedEffectiveTo:yyyy-MM-dd} -- a later "
+                    + $"rate for this scope already starts {next:yyyy-MM-dd}.[/]");
+            }
+        }
+
+        var rate = new VendorRateConfig
+        {
+            TenantId = tenantIdValue,
+            VendorId = vendor.Id,
+            RateType = parseResult.GetValue(rateTypeOption)!,
+            ModelOrSku = modelOrSkuValue,
+            Rate = parseResult.GetValue(rateOption),
+            SeatCount = parseResult.GetValue(seatsOption),
+            BillingCadence = cadence,
+            EffectiveFrom = effectiveFromDate,
+            EffectiveTo = resolvedEffectiveTo,
+        };
 
         // Closes out any previous open-ended rate in the same scope before
         // adding the new one, so a contract renewal never leaves two
@@ -228,6 +251,24 @@ static Command BuildRatesCommand(IHost host)
         // model-or-sku) — see IVendorRateConfigRepository's doc comment.
         var closedCount = await repository.CloseOpenEndedRateAsync(
             rate.TenantId, rate.VendorId, rate.ModelOrSku, rate.EffectiveFrom, cancellationToken);
+
+        // Runs after the close above, not before -- a legitimate renewal's
+        // superseded row needs its EffectiveTo already updated, or every
+        // ordinary renewal would false-positive against its own predecessor.
+        var overlaps = await repository.FindOverlappingRatesAsync(
+            rate.TenantId, rate.VendorId, rate.ModelOrSku, rate.EffectiveFrom, rate.EffectiveTo, cancellationToken);
+        if (overlaps.Count > 0)
+        {
+            AnsiConsole.MarkupLine("[red]This rate would overlap existing row(s) for this scope:[/]");
+            foreach (var overlap in overlaps)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  {overlap.EffectiveFrom:yyyy-MM-dd} to "
+                    + $"{overlap.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open-ended"}");
+            }
+
+            return 1;
+        }
 
         await repository.AddAsync(rate, cancellationToken);
 
