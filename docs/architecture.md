@@ -116,6 +116,10 @@ vendor/tenant combinations, not an extraction failure.
 
 ## 5. Data Model — REVISED (2026-07-22): daily grain, not weekly
 
+For the actual live SQLite schema (exact column types, keys, indexes) rather
+than this section's conceptual view, see
+[`docs/database-schema.md`](database-schema.md).
+
 Stakeholders confirmed a need for timespan-based extraction (e.g. "backfill
 the last 4 months") rather than one-week-at-a-time, so **daily is the
 canonical stored grain**. Weekly, monthly, and annual views (Annual
