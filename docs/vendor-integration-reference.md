@@ -200,6 +200,25 @@ tickets for a specific vendor adapter should point for implementation detail.
   full historical export; there's no self-service backfill beyond 30 days
   (OpenAI support can do a manual "rehydration" for `CONVERSATION_MESSAGE`
   specifically, but that offer wasn't stated to cover `COSTS`).
+  - **⚠️ Confirmed 2026-08-21: this retention window actively destroys
+    already-correct historical data on re-extraction, it doesn't just limit
+    how far back a *first* pull can reach.** The window is 29 days from
+    whenever extraction actually *runs*, not from the requested period
+    start. `ExtractAllThroughToday.ps1` always re-pulls from a fixed
+    `2026-07-01`, and extraction upserts by `(TenantId, VendorId, Date)` —
+    so a day that was correctly captured in an earlier pull gets
+    **silently overwritten with `$0`** once it ages past 29 days old,
+    because the vendor now legitimately returns nothing for it and nothing
+    in the pipeline distinguishes "vendor confirms zero" from "vendor can no
+    longer tell us." One pull erased ~$2,374 of real usage across two
+    tenants this way before it was caught by manually diffing against the
+    prior report — `RawDailyExtractionRecords` is also latest-pull-only
+    (see `docs/database-schema.md`), so there's no backup copy anywhere in
+    the database once this happens. **Fix needed** (tracked as an urgent
+    item in `product-design-document.md` §7, ahead of the normal backlog):
+    the extractor should skip re-requesting a day once it's confirmed
+    outside the retention window, rather than write a vendor-returned-empty
+    result over a row that may already hold real data.
 - **Latency:** OpenAI states 3–5 hours for `COSTS` specifically (other log
   types target a p99 <30min SLA — costs are explicitly slower). Events use
   an "at least once" contract — **de-duplicate on `event_id`** before

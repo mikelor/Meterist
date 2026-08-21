@@ -254,3 +254,19 @@ expected behavior, not a data gap to investigate.
     not just backfills). See `docs/architecture.md` §8 and
     `docs/user-guide.md`'s rate-configuration section for the resulting
     behavior.
+11. **🔴 Open, urgent (found 2026-08-21):** ChatGPT Enterprise's extractor
+    silently destroys already-correct historical usage data on every
+    re-run. OpenAI's `COSTS` export retains 29 days *from whenever
+    extraction runs*, not from the requested `--from` date; since
+    `ExtractAllThroughToday.ps1` always re-pulls from a fixed `2026-07-01`
+    and extraction upserts by day, a day that ages past 29 days old gets
+    overwritten with `$0` the next time extraction runs, even though it was
+    correctly captured before. One pull erased ~$2,374 of real usage across
+    both tenants before it was caught by manually diffing the report
+    against the prior pull — see `docs/vendor-integration-reference.md`'s
+    ChatGPT Enterprise section and the urgent row atop
+    `docs/product-design-document.md` §7. Not yet fixed — the current live
+    report has restored the affected weeks from the prior pull as a
+    stopgap, but the underlying extractor still needs to stop
+    re-requesting/overwriting a day once it's aged out of the vendor's
+    retention window.
