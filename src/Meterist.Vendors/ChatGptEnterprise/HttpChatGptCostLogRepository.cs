@@ -48,7 +48,7 @@ public sealed class HttpChatGptCostLogRepository : IChatGptCostLogRepository
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> QueryCostRowsAsync(
+    public async Task<ChatGptCostQueryResult> QueryCostRowsAsync(
         ChatGptCredential credential, DateRange period, CancellationToken cancellationToken = default)
     {
         var earliestRetrievable = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-RetentionDays));
@@ -118,7 +118,7 @@ public sealed class HttpChatGptCostLogRepository : IChatGptCostLogRepository
             + "{RowCount} billing-line row(s) for {PeriodStart} to {PeriodEnd}.",
             files.Count, seenEventIds.Count, rows.Count, period.Start, period.End);
 
-        return rows;
+        return new ChatGptCostQueryResult(effectiveStart, rows);
     }
 
     private async Task<List<ComplianceLogFileMetadataDto>> ListFilesAsync(

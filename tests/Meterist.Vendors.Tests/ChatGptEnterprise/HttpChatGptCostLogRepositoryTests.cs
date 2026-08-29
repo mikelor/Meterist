@@ -78,7 +78,7 @@ public class HttpChatGptCostLogRepositoryTests
         var credential = new ChatGptCredential { OrganizationId = OrganizationId, AdminApiKey = AdminApiKey };
 
         var repository = CreateRepository(server);
-        var rows = await repository.QueryCostRowsAsync(credential, period, TestContext.Current.CancellationToken);
+        var rows = (await repository.QueryCostRowsAsync(credential, period, TestContext.Current.CancellationToken)).Rows;
 
         Assert.Equal(3, rows.Count); // evt-A once, evt-B, evt-C — not 4
         Assert.Contains(rows, r => (string?)r[ChatGptCostRowFields.EventId] == "evt-B"
@@ -137,10 +137,54 @@ public class HttpChatGptCostLogRepositoryTests
         var credential = new ChatGptCredential { OrganizationId = OrganizationId, AdminApiKey = AdminApiKey };
 
         var repository = CreateRepository(server);
-        var rows = await repository.QueryCostRowsAsync(credential, period, TestContext.Current.CancellationToken);
+        var rows = (await repository.QueryCostRowsAsync(credential, period, TestContext.Current.CancellationToken)).Rows;
 
         var row = Assert.Single(rows);
         Assert.Equal("evt-in", row[ChatGptCostRowFields.EventId]);
+    }
+
+    [Fact]
+    public async Task QueryCostRowsAsync_ClampsEffectiveStart_WhenPeriodPredatesRetentionWindow()
+    {
+        using var server = WireMockServer.Start();
+        RegisterEmptyFileList(server);
+
+        // Decades in the past — guaranteed to predate the 29-day window
+        // regardless of when this test actually runs.
+        var period = new DateRange(new DateOnly(2000, 1, 1), new DateOnly(2000, 1, 31));
+        var credential = new ChatGptCredential { OrganizationId = OrganizationId, AdminApiKey = AdminApiKey };
+
+        var repository = CreateRepository(server);
+        var result = await repository.QueryCostRowsAsync(credential, period, TestContext.Current.CancellationToken);
+
+        var expectedEffectiveStart = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-29));
+        Assert.Equal(expectedEffectiveStart, result.EffectiveStart);
+    }
+
+    [Fact]
+    public async Task QueryCostRowsAsync_EffectiveStartEqualsRequestedStart_WhenWithinRetentionWindow()
+    {
+        using var server = WireMockServer.Start();
+        RegisterEmptyFileList(server);
+
+        var period = new DateRange(
+            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)), DateOnly.FromDateTime(DateTime.UtcNow));
+        var credential = new ChatGptCredential { OrganizationId = OrganizationId, AdminApiKey = AdminApiKey };
+
+        var repository = CreateRepository(server);
+        var result = await repository.QueryCostRowsAsync(credential, period, TestContext.Current.CancellationToken);
+
+        Assert.Equal(period.Start, result.EffectiveStart);
+    }
+
+    private static void RegisterEmptyFileList(WireMockServer server)
+    {
+        server
+            .Given(Request.Create().WithPath($"/v1/compliance/organizations/{OrganizationId}/logs").UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody("""{"data": [], "has_more": false, "last_end_time": null}"""));
     }
 
     private static void RegisterRedirectingDownload(WireMockServer server, string fileId)

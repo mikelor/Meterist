@@ -68,6 +68,42 @@ public class ChatGptEnterpriseSpendExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_DoesNotGapFillDaysBeforeEffectiveStart_WhenVendorClampedThePeriod()
+    {
+        var credential = new ChatGptCredential
+        {
+            OrganizationId = "org-abc123",
+            AdminApiKey = "admin-key-xyz",
+        };
+
+        var secretStore = new FakeSecretStore();
+        await secretStore.SetCredentialAsync(
+            "ecosync", VendorCatalog.ChatGptEnterprise.Id, JsonSerializer.Serialize(credential),
+            TestContext.Current.CancellationToken);
+
+        // Period is Jul 19-25 (7 days); simulate the vendor's retention window
+        // clamping the effective start to Jul 22 -- as if Jul 19-21 aged out.
+        var clampedEffectiveStart = new DateOnly(2026, 7, 22);
+        var repository = new FakeChatGptCostLogRepository([], clampedEffectiveStart);
+
+        var extractor = new ChatGptEnterpriseSpendExtractor(
+            secretStore, repository, NullLogger<ChatGptEnterpriseSpendExtractor>.Instance);
+        var result = await extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken);
+
+        // The pre-clamp days must be entirely absent -- not present with an
+        // empty row set -- so an existing DailySpendRecord for them is never
+        // touched by the upsert that follows normalization.
+        Assert.DoesNotContain(new DateOnly(2026, 7, 19), result.RecordsByDate.Keys);
+        Assert.DoesNotContain(new DateOnly(2026, 7, 20), result.RecordsByDate.Keys);
+        Assert.DoesNotContain(new DateOnly(2026, 7, 21), result.RecordsByDate.Keys);
+
+        // Post-clamp days still get gap-filled as before.
+        Assert.Equal(4, result.RecordsByDate.Count);
+        Assert.Empty(result.RecordsByDate[new DateOnly(2026, 7, 22)]);
+        Assert.Empty(result.RecordsByDate[new DateOnly(2026, 7, 25)]);
+    }
+
+    [Fact]
     public async Task ExtractAsync_WithNoCredentialConfigured_ThrowsInvalidOperation()
     {
         var extractor = new ChatGptEnterpriseSpendExtractor(

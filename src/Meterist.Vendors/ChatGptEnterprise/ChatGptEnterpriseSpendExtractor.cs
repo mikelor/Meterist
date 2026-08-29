@@ -53,9 +53,10 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             "Resolved ChatGPT Enterprise credential for tenant '{TenantId}': organization '{OrganizationId}'.",
             tenantId, credential.OrganizationId);
 
-        var rows = await _costLogRepository
+        var queryResult = await _costLogRepository
             .QueryCostRowsAsync(credential, period, cancellationToken)
             .ConfigureAwait(false);
+        var rows = queryResult.Rows;
 
         var recordsByDate = rows
             .GroupBy(row => (DateOnly)row[ChatGptCostRowFields.RecordDate]!)
@@ -66,8 +67,17 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         // A day with zero billed activity returns no rows at all from the COSTS
         // export — without this, that day would never reach the normalizer,
         // silently dropping its SeatFee too (seats accrue daily regardless of
-        // usage). Every day in the requested period needs a key.
-        foreach (var date in period.EnumerateDays())
+        // usage). Every day needs a key — but only from EffectiveStart onward:
+        // a day before that was silently clamped away by the vendor's 29-day
+        // retention window, not confirmed zero-activity, and must never get a
+        // synthesized $0 record that would overwrite a day that may already
+        // hold real data from an earlier, unclamped pull (extraction upserts
+        // by date, so a phantom zero here is a silent data-loss bug, not a
+        // harmless default). When EffectiveStart is past period.End — the
+        // whole requested period predates retention — this range is empty and
+        // nothing gets gap-filled at all, which is exactly correct too.
+        var gapFillRange = new DateRange(queryResult.EffectiveStart, period.End);
+        foreach (var date in gapFillRange.EnumerateDays())
         {
             recordsByDate.TryAdd(date, Array.Empty<IReadOnlyDictionary<string, object?>>());
         }
