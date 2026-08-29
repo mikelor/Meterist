@@ -254,19 +254,65 @@ expected behavior, not a data gap to investigate.
     not just backfills). See `docs/architecture.md` §8 and
     `docs/user-guide.md`'s rate-configuration section for the resulting
     behavior.
-11. **🔴 Open, urgent (found 2026-08-21):** ChatGPT Enterprise's extractor
-    silently destroys already-correct historical usage data on every
-    re-run. OpenAI's `COSTS` export retains 29 days *from whenever
-    extraction runs*, not from the requested `--from` date; since
-    `ExtractAllThroughToday.ps1` always re-pulls from a fixed `2026-07-01`
-    and extraction upserts by day, a day that ages past 29 days old gets
-    overwritten with `$0` the next time extraction runs, even though it was
-    correctly captured before. One pull erased ~$2,374 of real usage across
-    both tenants before it was caught by manually diffing the report
-    against the prior pull — see `docs/vendor-integration-reference.md`'s
-    ChatGPT Enterprise section and the urgent row atop
-    `docs/product-design-document.md` §7. Not yet fixed — the current live
-    report has restored the affected weeks from the prior pull as a
-    stopgap, but the underlying extractor still needs to stop
-    re-requesting/overwriting a day once it's aged out of the vendor's
-    retention window.
+11. ~~Fix: ChatGPT extractor overwrites aged-out days with `$0`~~ — **done
+    2026-08-21**, same day it was found. OpenAI's `COSTS` export retains 29
+    days *from whenever extraction runs*, not from the requested `--from`
+    date; since `ExtractAllThroughToday.ps1` always re-pulls from a fixed
+    `2026-07-01` and extraction upserted by day, a day that aged past 29
+    days old got overwritten with `$0` on every subsequent run, even though
+    it was correctly captured before. One pull erased ~$2,374 of real usage
+    across both tenants before it was caught by manually diffing the report
+    against the prior pull. **Fix:** `IChatGptCostLogRepository.QueryCostRowsAsync`
+    now returns a `ChatGptCostQueryResult` carrying the actual
+    `EffectiveStart` the query used (already computed for the clamp
+    warning, previously discarded) alongside the rows;
+    `ChatGptEnterpriseSpendExtractor` gap-fills only from that date
+    forward, so a day older than it never gets a key in `RecordsByDate` at
+    all and never reaches the upsert. Verified live against zelleri: days
+    right at the retention boundary that still held real usage survived a
+    re-extraction unchanged. Note this only stops *further* damage — days
+    already overwritten before this fix don't get resurrected; see
+    `docs/vendor-integration-reference.md`'s ChatGPT Enterprise section.
+12. **🔴 Open, urgent, unresolved (found 2026-08-22):** while live-verifying
+    item 11's fix, discovered that a day being extracted **for the first
+    time** may not actually get persisted, even though `extract` reports
+    `Succeeded` with the correct record count. Reproduced 3 times for
+    zelleri/ChatGPT Enterprise across different `--to` dates — each time
+    the newest, never-before-seen trailing day(s) were simply absent from
+    both `DailySpendRecords` and `RawDailyExtractionRecords` afterward,
+    while every already-existing day updated normally. Ruled out: the day
+    being incomplete/in-progress, anything specific to it being
+    `period.End`, and a stale process holding a file lock (inspected all 7
+    `dotnet` processes running on the machine via full command lines —
+    none were connected to this database). Not yet tested against any
+    other tenant or vendor. **Until root-caused, don't trust `extract`'s
+    success message as proof a new day's data was actually saved** — always
+    spot-check via `sqlite3` after extracting a genuinely new date range.
+    See the urgent row atop `docs/product-design-document.md` §7. Not
+    fixed — recommend a dedicated debugging session (ideally with a
+    debugger attached) rather than more live `extract` runs against real
+    tenant data, since each attempt risks another accidental write.
+    **Update 2026-08-29:** re-tested via a normal `ExtractAllThroughToday.ps1`
+    run (not a rapid debugging loop) — four consecutive brand-new days
+    (Aug 26–29) persisted correctly across all 8 tenant/vendor
+    combinations. This specific failure did not recur, but one clean run
+    doesn't close it: still unresolved, still worth a dedicated debugging
+    session before trusting `extract`'s success message unconditionally.
+13. **🟡 Open, unresolved (found 2026-08-29):** while re-verifying item 11's
+    fix stayed solid, found a subtler, related problem it doesn't cover.
+    A ChatGPT week still nominally *inside* the 29-day retention window
+    (not yet clamped away entirely) can lose usage across successive
+    pulls — monotonically, never gaining it back. zelleri's Jul 22–28 week
+    read $337.43 → $325.35 → $319.97 usage across three pulls (2026-08-05,
+    -20, -29), the last two both taken with item 11's fix already deployed
+    and active. Consistent with OpenAI trimming a day's rows before the
+    full 29 days are up (event/file-level retention, not a clean day
+    cutoff) — not with the fix failing; the fix only guards against a day
+    *fully* outside the window, not one still nominally inside it
+    returning fewer real rows on a later pull. See the dated addendum in
+    `docs/vendor-integration-reference.md` and the new row in
+    `docs/product-design-document.md` §7. Current mitigation (in the
+    reconciliation report, not in code yet): always use the *earliest*
+    captured figure per ChatGPT week, since these figures only ever shrink
+    pull-over-pull. Possible real fix: never let a re-pull replace an
+    existing day's `UsageOrOverage` with a lower value.

@@ -200,25 +200,52 @@ tickets for a specific vendor adapter should point for implementation detail.
   full historical export; there's no self-service backfill beyond 30 days
   (OpenAI support can do a manual "rehydration" for `CONVERSATION_MESSAGE`
   specifically, but that offer wasn't stated to cover `COSTS`).
-  - **⚠️ Confirmed 2026-08-21: this retention window actively destroys
-    already-correct historical data on re-extraction, it doesn't just limit
-    how far back a *first* pull can reach.** The window is 29 days from
-    whenever extraction actually *runs*, not from the requested period
-    start. `ExtractAllThroughToday.ps1` always re-pulls from a fixed
-    `2026-07-01`, and extraction upserts by `(TenantId, VendorId, Date)` —
-    so a day that was correctly captured in an earlier pull gets
-    **silently overwritten with `$0`** once it ages past 29 days old,
-    because the vendor now legitimately returns nothing for it and nothing
-    in the pipeline distinguishes "vendor confirms zero" from "vendor can no
+  - **⚠️ Confirmed 2026-08-21, fixed 2026-08-21: this retention window
+    actively destroyed already-correct historical data on re-extraction —
+    it doesn't just limit how far back a *first* pull can reach.** The
+    window is 29 days from whenever extraction actually *runs*, not from
+    the requested period start. `ExtractAllThroughToday.ps1` always
+    re-pulls from a fixed `2026-07-01`, and extraction upserts by
+    `(TenantId, VendorId, Date)` — so a day that was correctly captured in
+    an earlier pull got **silently overwritten with `$0`** once it aged
+    past 29 days old, because the vendor legitimately returns nothing for
+    it and nothing distinguished "vendor confirms zero" from "vendor can no
     longer tell us." One pull erased ~$2,374 of real usage across two
     tenants this way before it was caught by manually diffing against the
     prior report — `RawDailyExtractionRecords` is also latest-pull-only
-    (see `docs/database-schema.md`), so there's no backup copy anywhere in
-    the database once this happens. **Fix needed** (tracked as an urgent
-    item in `product-design-document.md` §7, ahead of the normal backlog):
-    the extractor should skip re-requesting a day once it's confirmed
-    outside the retention window, rather than write a vendor-returned-empty
-    result over a row that may already hold real data.
+    (see `docs/database-schema.md`), so there was no backup copy anywhere
+    in the database. **Fix:** `IChatGptCostLogRepository.QueryCostRowsAsync`
+    now returns a `ChatGptCostQueryResult` carrying the *actual* effective
+    start date the query used (already computed internally for the clamp,
+    previously discarded before reaching the caller) alongside the rows.
+    `ChatGptEnterpriseSpendExtractor` gap-fills only from that
+    `EffectiveStart` forward — a day older than it never gets a key in
+    `RecordsByDate` at all, so it never reaches the upsert and any existing
+    row for it is left completely untouched. Note this fix stops *further*
+    damage; it doesn't resurrect data already overwritten by pulls before
+    2026-08-21 — those days' real figures survive only in the report
+    history/chat transcript, not the live database.
+  - **⚠️ New, found 2026-08-29, unresolved: a subtler erosion pattern
+    survives the fix.** A week still nominally *inside* the 29-day window
+    (not yet clamped away entirely) can lose usage across successive pulls,
+    monotonically — never gains it back. zelleri's Jul 22–28 week read
+    $337.43 usage (pull of 2026-08-05) → $325.35 (2026-08-20) → $319.97
+    (2026-08-29), each pull strictly lower than the last, while the fix
+    above was already deployed and active for the later two pulls. This is
+    consistent with OpenAI trimming a day's rows before the full 29 days
+    are up (event-level or file-level retention, not a clean day boundary),
+    not with the `EffectiveStart` fix failing — the fix only prevents the
+    complete overwrite-with-`$0` case once a day is *fully* outside the
+    window; it does nothing to stop a day still nominally inside the
+    window from returning fewer real rows on a later pull than an earlier
+    one did. Until this is addressed, the reconciliation report keeps using
+    the *earliest* captured figure for each ChatGPT week as the most
+    complete one on record, on the empirically-observed rule that these
+    figures only ever shrink pull-over-pull, never grow. A possible future
+    fix: extend the extractor to never let a re-pull's `UsageOrOverage`
+    replace an existing `DailySpendRecord` with a *lower* value — only ever
+    increase it — as a second safeguard layered on top of the
+    `EffectiveStart` gap-fill.
 - **Latency:** OpenAI states 3–5 hours for `COSTS` specifically (other log
   types target a p99 <30min SLA — costs are explicitly slower). Events use
   an "at least once" contract — **de-duplicate on `event_id`** before
