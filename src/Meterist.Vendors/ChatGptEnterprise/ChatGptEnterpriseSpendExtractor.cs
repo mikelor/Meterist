@@ -38,6 +38,12 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
     // Gemini Enterprise where per-user cost would be a derived estimate.
     public bool SupportsPerUserBreakdown => true;
 
+    // The COSTS export's 29-day retention window can drop rows for a day still
+    // nominally inside it on a later pull — see the 2026-08-29 addendum in
+    // vendor-integration-reference.md. The daily-spend upsert must never let
+    // this vendor's UsageOrOverage decrease on re-extraction.
+    public bool RequiresMonotonicUsage => true;
+
     public async Task<RawVendorSpendData> ExtractAsync(
         string tenantId,
         DateRange period,

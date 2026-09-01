@@ -152,6 +152,22 @@ public class SpendExtractionServiceTests
         Assert.Same(expectedRates, normalizer.ReceivedApplicableRates);
     }
 
+    [Fact]
+    public async Task ExtractAsync_PassesExtractorsRequiresMonotonicUsage_ToDailySpendRepository()
+    {
+        var vendorId = Guid.NewGuid();
+        var extractor = new FakeExtractor(vendorId, EmptyRawData(vendorId)) { RequiresMonotonicUsage = true };
+        var normalizer = new FakeNormalizer(vendorId, []);
+        var dailyRepo = new FakeDailySpendRepository();
+
+        var service = new SpendExtractionService(
+            [extractor], [normalizer], new FakeRawExtractionRepository(), dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+        await service.ExtractAsync("ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(true, dailyRepo.ReceivedRequiresMonotonicUsage);
+    }
+
     private static RawVendorSpendData EmptyRawData(Guid vendorId) => new()
     {
         VendorId = vendorId,
@@ -168,6 +184,8 @@ public class SpendExtractionServiceTests
 
         public bool SupportsPerUserBreakdown => true;
 
+        public bool RequiresMonotonicUsage { get; init; }
+
         public Task<RawVendorSpendData> ExtractAsync(
             string tenantId, DateRange period, CancellationToken cancellationToken = default) =>
             Task.FromResult(dataToReturn);
@@ -180,6 +198,8 @@ public class SpendExtractionServiceTests
         public bool SupportsOverage => true;
 
         public bool SupportsPerUserBreakdown => true;
+
+        public bool RequiresMonotonicUsage => false;
 
         public Task<RawVendorSpendData> ExtractAsync(
             string tenantId, DateRange period, CancellationToken cancellationToken = default) =>
@@ -254,9 +274,15 @@ public class SpendExtractionServiceTests
     {
         public bool WasCalled { get; private set; }
 
-        public Task UpsertAsync(IEnumerable<DailySpendRecord> records, CancellationToken cancellationToken = default)
+        public bool? ReceivedRequiresMonotonicUsage { get; private set; }
+
+        public Task UpsertAsync(
+            IEnumerable<DailySpendRecord> records,
+            bool requiresMonotonicUsage = false,
+            CancellationToken cancellationToken = default)
         {
             WasCalled = true;
+            ReceivedRequiresMonotonicUsage = requiresMonotonicUsage;
             return Task.CompletedTask;
         }
 

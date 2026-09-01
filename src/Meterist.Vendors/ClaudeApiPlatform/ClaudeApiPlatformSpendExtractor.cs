@@ -34,6 +34,10 @@ public sealed class ClaudeApiPlatformSpendExtractor : IVendorSpendExtractor
     // not a named human user — there is no per-employee breakdown here.
     public bool SupportsPerUserBreakdown => false;
 
+    // cost_report returns real dollar cost directly with no retention/eviction
+    // quirk -- re-extraction should always overwrite with the latest pull.
+    public bool RequiresMonotonicUsage => false;
+
     public async Task<RawVendorSpendData> ExtractAsync(
         string tenantId,
         DateRange period,

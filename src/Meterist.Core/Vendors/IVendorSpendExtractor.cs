@@ -18,6 +18,15 @@ public interface IVendorSpendExtractor
 
     bool SupportsPerUserBreakdown { get; }
 
+    // True when a later pull of the same day can legitimately return LESS
+    // UsageOrOverage than an earlier pull already captured (ChatGPT Enterprise's
+    // COSTS export can drop rows for a day still nominally inside its 29-day
+    // retention window — see vendor-integration-reference.md). When true, the
+    // daily-spend upsert must never let UsageOrOverage decrease on re-extraction.
+    // False (the normal case) is last-write-wins — Claude Enterprise/Claude API
+    // Platform's own revisions to recent data should always win.
+    bool RequiresMonotonicUsage { get; }
+
     Task<RawVendorSpendData> ExtractAsync(
         string tenantId,
         DateRange period,

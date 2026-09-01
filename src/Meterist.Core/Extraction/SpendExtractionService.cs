@@ -99,7 +99,9 @@ public sealed class SpendExtractionService
                 .GetApplicableRatesAsync(tenantId, extractor.VendorId, period, cancellationToken)
                 .ConfigureAwait(false);
             var records = normalizer.Normalize(rawData, applicableRates);
-            await _dailySpendRepository.UpsertAsync(records, cancellationToken).ConfigureAwait(false);
+            await _dailySpendRepository
+                .UpsertAsync(records, extractor.RequiresMonotonicUsage, cancellationToken)
+                .ConfigureAwait(false);
 
             _logger.LogDebug(
                 "[{Vendor}] Succeeded: wrote {RecordCount} DailySpendRecord(s) for tenant '{TenantId}'.",

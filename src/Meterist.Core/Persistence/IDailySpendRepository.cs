@@ -11,7 +11,13 @@ namespace Meterist.Core.Persistence;
 /// </summary>
 public interface IDailySpendRepository
 {
-    Task UpsertAsync(IEnumerable<DailySpendRecord> records, CancellationToken cancellationToken = default);
+    // requiresMonotonicUsage: when true, an existing record's UsageOrOverage is
+    // never lowered by this upsert (see IVendorSpendExtractor.RequiresMonotonicUsage) --
+    // GrossSpend/NetSpend are recomputed consistently off whichever UsageOrOverage wins.
+    Task UpsertAsync(
+        IEnumerable<DailySpendRecord> records,
+        bool requiresMonotonicUsage = false,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DailySpendRecord>> GetAsync(
         string tenantId,

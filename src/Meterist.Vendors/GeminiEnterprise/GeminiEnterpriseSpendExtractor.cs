@@ -36,6 +36,10 @@ public sealed class GeminiEnterpriseSpendExtractor : IVendorSpendExtractor
     // such (see the future UserSpendRecord.IsEstimated flag in architecture.md §5).
     public bool SupportsPerUserBreakdown => true;
 
+    // BigQuery billing export has no retention/eviction quirk -- re-extraction
+    // should always overwrite with the latest pull.
+    public bool RequiresMonotonicUsage => false;
+
     public async Task<RawVendorSpendData> ExtractAsync(
         string tenantId,
         DateRange period,

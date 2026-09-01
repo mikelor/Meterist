@@ -37,6 +37,10 @@ public sealed class ClaudeEnterpriseSpendExtractor : IVendorSpendExtractor
     // Real vendor-reported per-user dollar cost (actor.user_id/email/name).
     public bool SupportsPerUserBreakdown => true;
 
+    // The Analytics API's revision window means a later pull legitimately
+    // updates recent data -- re-extraction should always overwrite.
+    public bool RequiresMonotonicUsage => false;
+
     public async Task<RawVendorSpendData> ExtractAsync(
         string tenantId,
         DateRange period,
