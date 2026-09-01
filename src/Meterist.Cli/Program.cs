@@ -3,6 +3,7 @@ using System.Net.Http;
 using Meterist.Core.Extraction;
 using Meterist.Core.Models;
 using Meterist.Core.Persistence;
+using Meterist.Core.Reporting;
 using Meterist.Core.Secrets;
 using Meterist.Core.Vendors;
 using Meterist.Data;
@@ -62,6 +63,7 @@ builder.Services.AddSingleton<IVendorSpendExtractor, ChatGptEnterpriseSpendExtra
 builder.Services.AddSingleton<IVendorSpendExtractor, GeminiEnterpriseSpendExtractor>();
 
 builder.Services.AddScoped<SpendExtractionService>();
+builder.Services.AddScoped<ReportDataAggregator>();
 
 using var host = builder.Build();
 
@@ -74,6 +76,7 @@ var rootCommand = new RootCommand("Meterist — AI vendor spend extraction tool"
 rootCommand.Subcommands.Add(BuildCredentialsCommand(host));
 rootCommand.Subcommands.Add(BuildRatesCommand(host));
 rootCommand.Subcommands.Add(BuildExtractCommand(host));
+rootCommand.Subcommands.Add(BuildReportCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -411,4 +414,57 @@ static Command BuildExtractCommand(IHost host)
     });
 
     return extractCommand;
+}
+
+static Command BuildReportCommand(IHost host)
+{
+    var tenantOption = new Option<string[]>("--tenant")
+    {
+        Description = "Tenant identifier to include (repeat for multiple tenants)",
+        Required = true,
+    };
+    var fromOption = new Option<DateTime>("--from") { Description = "Start of the report period", Required = true };
+    var toOption = new Option<DateTime>("--to") { Description = "End of the report period (inclusive)", Required = true };
+    var outOption = new Option<string>("--out")
+    {
+        Description = "Output HTML file path",
+        DefaultValueFactory = _ => "artifacts/client-spend-benchmark-report.html",
+    };
+
+    var generateCommand = new Command("generate", "Generate the Client Spend & Benchmark Report as HTML");
+    generateCommand.Options.Add(tenantOption);
+    generateCommand.Options.Add(fromOption);
+    generateCommand.Options.Add(toOption);
+    generateCommand.Options.Add(outOption);
+
+    generateCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantIds = parseResult.GetValue(tenantOption)!;
+        var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
+        var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
+        var outPath = parseResult.GetValue(outOption)!;
+
+        AnsiConsole.MarkupLine(
+            $"[bold]Meterist[/] — generating report for [yellow]{string.Join(", ", tenantIds)}[/], "
+            + $"{from:yyyy-MM-dd} to {to:yyyy-MM-dd}");
+
+        using var scope = host.Services.CreateScope();
+        var aggregator = scope.ServiceProvider.GetRequiredService<ReportDataAggregator>();
+        var data = await aggregator.AggregateAsync(tenantIds, new DateRange(from, to), cancellationToken);
+        var htmlContent = ClientBenchmarkReportRenderer.Render(data);
+
+        var outDirectory = Path.GetDirectoryName(Path.GetFullPath(outPath));
+        if (!string.IsNullOrEmpty(outDirectory))
+        {
+            Directory.CreateDirectory(outDirectory);
+        }
+        await File.WriteAllTextAsync(outPath, htmlContent, cancellationToken);
+
+        AnsiConsole.MarkupLine($"[green]Wrote[/] {outPath}");
+        return 0;
+    });
+
+    var reportCommand = new Command("report", "Report generation commands");
+    reportCommand.Subcommands.Add(generateCommand);
+    return reportCommand;
 }
