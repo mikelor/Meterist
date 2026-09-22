@@ -44,7 +44,8 @@ param(
 
     # Override for testing against fixture data -- leave unset for a real
     # import, which restores to the real %LOCALAPPDATA%\Meterist.
-    [string]$MeteristDataDir
+    [string]$MeteristDataDir,
+    [string]$ClaudeHomeDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -132,6 +133,33 @@ try {
     Write-Host "Restoring env/ and artifacts/..."
     Restore-Item (Join-Path $staging 'env') (Join-Path $RepoRoot 'env') 'env/'
     Restore-Item (Join-Path $staging 'artifacts') (Join-Path $RepoRoot 'artifacts') 'artifacts/'
+
+    $claudeCodeDir = Join-Path $staging 'claude-code'
+    if (Test-Path $claudeCodeDir) {
+        Write-Host "Restoring Claude Code context..."
+        if (-not $ClaudeHomeDir) { $ClaudeHomeDir = Join-Path $HOME '.claude' }
+        $claudeProjectSlug = ((Resolve-Path $RepoRoot).Path -replace '[:\\]', '-')
+        $claudeProjectDir = Join-Path $ClaudeHomeDir "projects\$claudeProjectSlug"
+
+        Restore-Item (Join-Path $claudeCodeDir 'project-settings.local.json') (Join-Path $RepoRoot '.claude\settings.local.json') '.claude/settings.local.json'
+        Restore-Item (Join-Path $claudeCodeDir 'settings.json') (Join-Path $ClaudeHomeDir 'settings.json') 'global settings.json'
+        Restore-Item (Join-Path $claudeCodeDir 'mcp.json') (Join-Path $ClaudeHomeDir 'mcp.json') 'global mcp.json'
+        Restore-Item (Join-Path $claudeCodeDir 'memory') (Join-Path $claudeProjectDir 'memory') 'project memory'
+
+        $sessionsDir = Join-Path $claudeCodeDir 'sessions'
+        if (Test-Path $sessionsDir) {
+            New-Item -ItemType Directory -Path $claudeProjectDir -Force | Out-Null
+            foreach ($t in Get-ChildItem $sessionsDir -Filter '*.jsonl') {
+                $dest = Join-Path $claudeProjectDir $t.Name
+                if ((Test-Path $dest) -and -not $Force) {
+                    Write-Host "  Skipping $($t.Name) -- already exists (pass -Force to overwrite)" -ForegroundColor Yellow
+                } else {
+                    Copy-Item $t.FullName $dest -Force
+                    Write-Host "  Restored session transcript $($t.Name) (best-effort -- try 'claude --resume' after)"
+                }
+            }
+        }
+    }
 
     Write-Host ""
     if ($manifest.RestoreCredentials.Count -eq 0) {

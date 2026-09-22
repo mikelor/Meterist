@@ -20,6 +20,13 @@
     directory. Point this directly at your thumbdrive if you want
     (e.g. -OutputPath E:\Meterist-Migration.zip).
 
+.PARAMETER IncludeClaudeCodeContext
+    Also bundle this project's Claude Code memory, this session's raw
+    transcript (best-effort -- Claude Code's own internal format, not
+    guaranteed stable across versions), and global settings.json/mcp.json.
+    Deliberately excludes ~/.claude/.credentials.json (your login token) --
+    log in fresh on the new machine instead. Default true.
+
 .NOTES
     Why the encrypted secrets store is included anyway: it's already
     ciphertext, so bundling it costs nothing and is a harmless fallback in
@@ -35,7 +42,10 @@ param(
     # %LOCALAPPDATA%\Meterist paths and this repo's real env/artifacts.
     [string]$MeteristDataDir,
     [string]$EnvDir,
-    [string]$ArtifactsDir
+    [string]$ArtifactsDir,
+
+    [bool]$IncludeClaudeCodeContext = $true,
+    [string]$ClaudeHomeDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +59,11 @@ $secretsDir = Join-Path $MeteristDataDir 'secrets'
 $keysDir = Join-Path $MeteristDataDir 'keys'
 $envDir = if ($EnvDir) { $EnvDir } else { Join-Path $repoRoot 'env' }
 $artifactsDir = if ($ArtifactsDir) { $ArtifactsDir } else { Join-Path $repoRoot 'artifacts' }
+if (-not $ClaudeHomeDir) { $ClaudeHomeDir = Join-Path $HOME '.claude' }
+# Claude Code derives a project folder name from the repo's absolute path by
+# replacing ':' and '\' with '-' -- e.g. C:\Users\me\repo -> C--Users-me-repo.
+$claudeProjectSlug = ($repoRoot.Path -replace '[:\\]', '-')
+$claudeProjectDir = Join-Path $ClaudeHomeDir "projects\$claudeProjectSlug"
 
 Write-Host "Meterist migration export" -ForegroundColor Cyan
 Write-Host "Repo root: $repoRoot"
@@ -98,6 +113,47 @@ try {
         Write-Host "No artifacts/ folder found -- skipping (nothing generated yet)." -ForegroundColor Yellow
     }
 
+    if ($IncludeClaudeCodeContext) {
+        Write-Host "Copying Claude Code context (memory, global settings, session transcript)..."
+        New-Item -ItemType Directory -Path (Join-Path $staging 'claude-code') | Out-Null
+
+        $projectSettingsLocal = Join-Path $repoRoot '.claude\settings.local.json'
+        if (Test-Path $projectSettingsLocal) {
+            Copy-Item $projectSettingsLocal (Join-Path $staging 'claude-code\project-settings.local.json')
+        }
+
+        $globalSettings = Join-Path $ClaudeHomeDir 'settings.json'
+        if (Test-Path $globalSettings) {
+            Copy-Item $globalSettings (Join-Path $staging 'claude-code\settings.json')
+        }
+        $globalMcp = Join-Path $ClaudeHomeDir 'mcp.json'
+        if (Test-Path $globalMcp) {
+            Copy-Item $globalMcp (Join-Path $staging 'claude-code\mcp.json')
+        }
+
+        $memoryDir = Join-Path $claudeProjectDir 'memory'
+        if ((Test-Path $memoryDir) -and (Get-ChildItem $memoryDir -ErrorAction SilentlyContinue)) {
+            Copy-Item $memoryDir (Join-Path $staging 'claude-code\memory') -Recurse
+        } else {
+            Write-Host "  (no project memory files found -- skipping)" -ForegroundColor Yellow
+        }
+
+        # Best-effort: Claude Code's own session storage, not a stable public
+        # format. Copied as-is; whether a fresh install on the new machine can
+        # resume from it depends on the Claude Code version there.
+        if (Test-Path $claudeProjectDir) {
+            $transcripts = Get-ChildItem $claudeProjectDir -Filter '*.jsonl' -ErrorAction SilentlyContinue
+            if ($transcripts) {
+                New-Item -ItemType Directory -Path (Join-Path $staging 'claude-code\sessions') | Out-Null
+                foreach ($t in $transcripts) {
+                    Copy-Item $t.FullName (Join-Path $staging "claude-code\sessions\$($t.Name)")
+                }
+            }
+        }
+        # Deliberately NOT copied: ~/.claude/.credentials.json (your login
+        # token) -- log in fresh on the new machine instead.
+    }
+
     # Discover which tenants actually have credential files, rather than
     # hardcoding zelleri/ecosync -- keeps this working if a tenant is added
     # or removed later.
@@ -137,6 +193,7 @@ try {
             "database/meterist.db is the live SQLite store -- restores cleanly, no machine binding."
             "database/secrets and database/keys are DPAPI-protected and will almost certainly NOT decrypt on a different machine/profile -- do not rely on them."
             "env/ holds the raw credential materials used to re-run 'credentials set' on the new machine -- see RestoreCredentials above for the exact tenant/vendor/file mapping."
+            "claude-code/ (if present) holds this project's Claude Code memory, global settings.json/mcp.json, and a best-effort copy of session transcripts. .credentials.json (the login token) is never included -- log in fresh on the new machine."
         )
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $staging 'manifest.json') -Encoding utf8
