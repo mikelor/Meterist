@@ -61,8 +61,9 @@ public static class ClientBenchmarkReportRenderer
         html.Append($"      <span>Tracked extraction window: {FormatDate(data.Period.Start)} – {FormatDate(data.Period.End)}</span>\n");
         html.Append($"      <span>Tenants: {string.Join(", ", data.Tenants.Select(t => Encode(t.TenantId)))}</span>\n");
         html.Append($"      <span>Vendors: {string.Join(", ", VendorCatalog.All.Select(v => Encode(v.DisplayName)))}</span>\n");
+        html.Append("    </div>\n");
+        html.Append($"    <div class=\"generated-at\">Generated {data.GeneratedAt.ToString("MMM d, yyyy 'at' h:mm tt", Culture)}</div>\n");
         html.Append("""
-                </div>
                 <div class="tick-rule"></div>
               </header>
 

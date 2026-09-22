@@ -106,7 +106,7 @@ internal static class ReportStyles
     }
 
     .page {
-      max-width: 840px;
+      max-width: 1200px;
       margin: 0 auto;
       padding: 48px 28px 64px;
       display: flex;
@@ -169,6 +169,11 @@ internal static class ReportStyles
       color: var(--line-strong);
     }
     .masthead-meta span:first-child::before { content: ""; }
+    .generated-at {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-faint);
+    }
 
     .tick-rule {
       height: 7px;
@@ -307,7 +312,7 @@ internal static class ReportStyles
     .risk-flag { color: var(--risk); background: var(--risk-bg); border: 1px solid var(--risk); }
     .good-flag { color: var(--good); background: var(--good-bg); border: 1px solid var(--good); }
 
-    .audit-intro { color: var(--text-dim); max-width: 68ch; margin: 0; }
+    .audit-intro { color: var(--text-dim); margin: 0; }
 
     .subsection-tenant {
       font-family: var(--font-mono);
@@ -325,7 +330,7 @@ internal static class ReportStyles
     .weekly-table td.note { word-wrap: break-word; }
     tr.total-row th, tr.total-row td { font-weight: 600; border-top: 2px solid var(--line-strong); }
     tr.cumulative-row th, tr.cumulative-row td { color: var(--text-faint); font-style: italic; font-size: 12.5px; }
-    .small-note { font-size: 12px; color: var(--text-faint); margin: 0; max-width: 68ch; }
+    .small-note { font-size: 12px; color: var(--text-faint); margin: 0; }
     h3.section-sub {
       font-family: var(--font-display);
       font-weight: 400;
@@ -390,7 +395,6 @@ internal static class ReportStyles
     .footnote li {
       font-size: 13px;
       color: var(--text-dim);
-      max-width: 68ch;
     }
     .footnote li b { color: var(--text); font-weight: 600; }
     .colophon {

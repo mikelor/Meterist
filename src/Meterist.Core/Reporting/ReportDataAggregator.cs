@@ -30,6 +30,7 @@ public sealed class ReportDataAggregator
     public async Task<ReportData> AggregateAsync(
         IReadOnlyList<string> tenantIds,
         DateRange period,
+        DateTime? generatedAt = null,
         CancellationToken cancellationToken = default)
     {
         var anchor = WeeklyBucketer.AnchorWednesdayOnOrBefore(period.Start);
@@ -66,6 +67,12 @@ public sealed class ReportDataAggregator
             tenantReports.Add(new TenantReportData { TenantId = tenantId, Vendors = vendorReports });
         }
 
-        return new ReportData { Period = period, WeekAnchor = anchor, Tenants = tenantReports };
+        return new ReportData
+        {
+            Period = period,
+            WeekAnchor = anchor,
+            Tenants = tenantReports,
+            GeneratedAt = generatedAt ?? DateTime.Now,
+        };
     }
 }

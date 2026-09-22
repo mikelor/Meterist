@@ -10,4 +10,6 @@ public sealed class ReportData
     public required DateOnly WeekAnchor { get; init; }
 
     public required IReadOnlyList<TenantReportData> Tenants { get; init; }
+
+    public required DateTime GeneratedAt { get; init; }
 }

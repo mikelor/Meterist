@@ -15,7 +15,7 @@ public class ReportDataAggregatorTests
         var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), new FakeVendorRateConfigRepository());
 
         var data = await aggregator.AggregateAsync(
-            ["zelleri", "ecosync"], Period, TestContext.Current.CancellationToken);
+            ["zelleri", "ecosync"], Period, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, data.Tenants.Count);
         Assert.All(data.Tenants, t => Assert.Equal(VendorCatalog.All.Count, t.Vendors.Count));
@@ -32,7 +32,8 @@ public class ReportDataAggregatorTests
             ]);
         var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
 
-        var data = await aggregator.AggregateAsync(["zelleri"], Period, TestContext.Current.CancellationToken);
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
 
         var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
         Assert.True(chatGpt.Weeks[0].ExcludeFromProjection);
@@ -60,11 +61,24 @@ public class ReportDataAggregatorTests
         ]);
         var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), rateConfigRepo);
 
-        var data = await aggregator.AggregateAsync(["zelleri"], Period, TestContext.Current.CancellationToken);
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
 
         var gemini = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == vendorId);
         var rate = Assert.Single(gemini.CurrentRates);
         Assert.Equal(20m, rate.Rate);
+    }
+
+    [Fact]
+    public async Task AggregateAsync_UsesTheSuppliedGeneratedAt_RatherThanTheWallClock()
+    {
+        var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), new FakeVendorRateConfigRepository());
+        var fixedTimestamp = new DateTime(2026, 8, 29, 14, 30, 0);
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, generatedAt: fixedTimestamp, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(fixedTimestamp, data.GeneratedAt);
     }
 
     private sealed class FakeDailySpendRepository(

@@ -450,7 +450,8 @@ static Command BuildReportCommand(IHost host)
 
         using var scope = host.Services.CreateScope();
         var aggregator = scope.ServiceProvider.GetRequiredService<ReportDataAggregator>();
-        var data = await aggregator.AggregateAsync(tenantIds, new DateRange(from, to), cancellationToken);
+        var data = await aggregator.AggregateAsync(
+            tenantIds, new DateRange(from, to), cancellationToken: cancellationToken);
         var htmlContent = ClientBenchmarkReportRenderer.Render(data);
 
         var outDirectory = Path.GetDirectoryName(Path.GetFullPath(outPath));
