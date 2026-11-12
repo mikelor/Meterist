@@ -36,10 +36,10 @@ Useful switches:
 
 ## Restore (on the new machine)
 
-1. Install prerequisites: git, the **.NET 10 preview SDK** (matching what
-   `dotnet --list-sdks` shows on the old machine — this is a preview SDK, not
-   something the script installs for you), and the `gh` CLI if you use the
-   PR workflow.
+1. Install prerequisites: git, the **.NET 11 release-candidate SDK** (matching
+   what `dotnet --list-sdks` shows on the old machine — this is a
+   release-candidate SDK, not something the script installs for you), and
+   the `gh` CLI if you use the PR workflow.
 2. Clone the repo and copy the zip off the thumbdrive.
 3. Run:
 
