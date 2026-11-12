@@ -6,7 +6,7 @@ implementation not yet started.
 
 ## 1. Overview
 
-Meterist is a .NET 10 C# application that replaces a manual Excel workbook
+Meterist is a .NET 11 C# application that replaces a manual Excel workbook
 (`AI_Vendor_Weekly_Spend_Model.xlsx`) currently used to track weekly AI
 vendor spend by hand. It pulls spend data programmatically from each
 vendor's API instead of requiring a weekly manual login + CSV export per

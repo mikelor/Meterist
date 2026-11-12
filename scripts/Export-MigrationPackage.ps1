@@ -208,7 +208,7 @@ try {
     Write-Host ""
     Write-Host "Next steps:"
     Write-Host "  1. Copy this zip to your thumbdrive."
-    Write-Host "  2. On the new machine: git clone the repo, install the .NET 10 preview SDK, then run"
+    Write-Host "  2. On the new machine: git clone the repo, install the .NET 11 release-candidate SDK, then run"
     Write-Host "     scripts\Import-MigrationPackage.ps1 -PackagePath <path-to-zip>"
 }
 finally {

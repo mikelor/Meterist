@@ -5,8 +5,8 @@
     default) the commands to re-provision vendor credentials.
 
 .DESCRIPTION
-    Run this AFTER cloning the repo and installing the .NET 10 preview SDK
-    on the new machine. By default this only PRINTS the 'credentials set'
+    Run this AFTER cloning the repo and installing the .NET 11 release-candidate
+    SDK on the new machine. By default this only PRINTS the 'credentials set'
     commands it would run -- pass -ApplyCredentials to actually execute
     them, since these are live vendor API keys and the mapping is worth a
     quick eyeball first.
@@ -59,8 +59,8 @@ Write-Host "Repo root: $RepoRoot"
 Write-Host ""
 
 $sdks = & dotnet --list-sdks 2>$null
-if (-not ($sdks | Select-String '^10\.')) {
-    Write-Host "Warning: no .NET 10 SDK found via 'dotnet --list-sdks' -- 'dotnet build' below will likely fail until it's installed." -ForegroundColor Yellow
+if (-not ($sdks | Select-String '^11\.')) {
+    Write-Host "Warning: no .NET 11 SDK found via 'dotnet --list-sdks' -- 'dotnet build' below will likely fail until it's installed." -ForegroundColor Yellow
 }
 
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) "MeteristMigrationRestore-$([Guid]::NewGuid())"
