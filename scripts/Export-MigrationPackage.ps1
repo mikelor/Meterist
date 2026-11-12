@@ -156,9 +156,18 @@ try {
 
     # Discover which tenants actually have credential files, rather than
     # hardcoding zelleri/ecosync -- keeps this working if a tenant is added
-    # or removed later.
-    $tenantIds = Get-ChildItem $envDir -Filter '*-chatgpt-credential.json' |
-        ForEach-Object { $_.Name -replace '-chatgpt-credential\.json$', '' }
+    # or removed later. Scans for ANY of $credentialMap's file patterns, not
+    # just ChatGPT's -- a tenant with only e.g. a Claude API Platform
+    # credential (no ChatGPT credential yet) must still be discovered here,
+    # or it silently has no credential-restore commands in the manifest even
+    # though its raw file is still copied as part of env/ wholesale above.
+    $tenantIds = foreach ($entry in $credentialMap) {
+        $glob = $entry.FilePattern -replace '\{0\}', '*'
+        $suffixPattern = [regex]::Escape(($entry.FilePattern -replace '\{0\}', '')) + '$'
+        Get-ChildItem $envDir -Filter $glob -File -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Name -replace $suffixPattern, '' }
+    }
+    $tenantIds = $tenantIds | Sort-Object -Unique
 
     $restoreEntries = foreach ($tenantId in $tenantIds) {
         foreach ($entry in $credentialMap) {
