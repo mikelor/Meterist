@@ -1,0 +1,51 @@
+<Project>
+
+  <!-- Central package management: every NuGet version in the repo is set here,
+       and PackageReference items in project files carry no Version attribute.
+       To change a version, edit it once below. If one project genuinely needs a
+       different version, use VersionOverride on that reference and say why. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- Framework-tracking packages: keep these on the same 11.0.x line as the SDK. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="11.0.0" />
+  </ItemGroup>
+
+  <!-- EF Core 11 requires 3.0.5 or later of this bundle. -->
+  <ItemGroup>
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Google.Apis.Auth" Version="1.75.0" />
+    <PackageVersion Include="Google.Cloud.BigQuery.V2" Version="3.12.0" />
+    <PackageVersion Include="Spectre.Console" Version="0.57.2" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+  </ItemGroup>
+
+  <!-- Test-only packages. -->
+  <ItemGroup>
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="WireMock.Net" Version="2.13.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+
+</Project>

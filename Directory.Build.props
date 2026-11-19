@@ -1,0 +1,12 @@
+<Project>
+
+  <!-- Settings shared by every project in the repo. Per-project files should
+       only declare what is specific to that project (OutputType, references,
+       and so on). Package versions live in Directory.Packages.props. -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

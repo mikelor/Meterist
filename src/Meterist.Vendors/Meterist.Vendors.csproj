@@ -5,15 +5,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
-    <PackageReference Include="Google.Cloud.BigQuery.V2" Version="3.12.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="11.0.0" />
+    <PackageReference Include="Google.Apis.Auth" />
+    <PackageReference Include="Google.Cloud.BigQuery.V2" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
 
 </Project>
