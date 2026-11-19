@@ -130,6 +130,46 @@ public class ChatGptEnterpriseSpendExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_CostsOnlyFallback_DoesNotKeyADayBeforeEffectiveStartEvenWhenARowCameBackForIt()
+    {
+        var credential = new ChatGptCredential { OrganizationId = "org-abc123", AdminApiKey = "admin-key-xyz" };
+        var secretStore = new FakeSecretStore();
+        await secretStore.SetCredentialAsync(
+            "ecosync", VendorCatalog.ChatGptEnterprise.Id, JsonSerializer.Serialize(credential),
+            TestContext.Current.CancellationToken);
+
+        // The export clamped to Jul 22, but it lists files by write time and filters events
+        // against the *requested* start, so a sliver of Jul 21 (a day that mostly aged out)
+        // can still come back. It must not create a key for that day: a partial figure would
+        // be written as if it were the whole day.
+        var edgeDay = new DateOnly(2026, 7, 21);
+        var firstFullDay = new DateOnly(2026, 7, 22);
+        var repository = new FakeChatGptCostLogRepository(
+            [
+                new Dictionary<string, object?>
+                {
+                    [ChatGptCostRowFields.RecordDate] = edgeDay,
+                    [ChatGptCostRowFields.CostValue] = 3m,
+                },
+                new Dictionary<string, object?>
+                {
+                    [ChatGptCostRowFields.RecordDate] = firstFullDay,
+                    [ChatGptCostRowFields.CostValue] = 9m,
+                },
+            ],
+            effectiveStartOverride: firstFullDay);
+
+        var extractor = new ChatGptEnterpriseSpendExtractor(
+            secretStore, repository, new FakeChatGptDailyUsageRepository(),
+            NullLogger<ChatGptEnterpriseSpendExtractor>.Instance);
+
+        var result = await extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(edgeDay, result.RecordsByDate.Keys);
+        Assert.Single(result.RecordsByDate[firstFullDay]);
+    }
+
+    [Fact]
     public async Task ExtractAsync_WithNoCredentialConfigured_ThrowsInvalidOperation()
     {
         var extractor = new ChatGptEnterpriseSpendExtractor(

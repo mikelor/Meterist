@@ -123,8 +123,11 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
 
                 // The Daily Usage API had nothing for a day that COSTS shows
                 // activity on. Use what is known rather than record no usage,
-                // but say so: it is the two sources disagreeing.
-                if (rawData.PrimarySource == DailySpendSources.DailyUsageApi)
+                // but say so: it is the two sources disagreeing. Not for the day
+                // still in progress: COSTS can show activity before that day's
+                // Daily Usage row has posted, which is lag rather than a
+                // disagreement. The usage is still recorded either way.
+                if (rawData.PrimarySource == DailySpendSources.DailyUsageApi && date < today)
                 {
                     costsOnlyDays.Add(date);
                 }

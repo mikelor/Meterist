@@ -175,6 +175,57 @@ public class ChatGptEnterpriseDailyUsageNormalizerTests
     }
 
     [Fact]
+    public void Normalize_CostsOnlyDayThatIsStillInProgress_StillUsesCostsButRaisesNoWarning()
+    {
+        var logger = new CapturingLogger<ChatGptEnterpriseSpendNormalizer>();
+        var duringTheDay = new FixedTimeProvider(new DateTimeOffset(Day.ToDateTime(new TimeOnly(15, 0)), TimeSpan.Zero));
+
+        // Today: COSTS already shows activity, and the Daily Usage row may simply not
+        // have posted yet. That is lag, not the sources disagreeing.
+        var record = Single(Normalize(
+            RawData(Day, [CostsRow(100m)]),
+            [SeatRate(), CreditRate(0.04m)], logger, duringTheDay));
+
+        // The known usage is still recorded; only the alarm is withheld.
+        Assert.Equal(100m * 0.04m, record.UsageOrOverage);
+        Assert.Equal(DailySpendSources.CostsExport, record.Source);
+        Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
+    public void Normalize_CorrectRateOnAPartialInProgressDay_RaisesNoRateWarning()
+    {
+        var logger = new CapturingLogger<ChatGptEnterpriseSpendNormalizer>();
+        var duringTheDay = new FixedTimeProvider(new DateTimeOffset(Day.ToDateTime(new TimeOnly(15, 0)), TimeSpan.Zero));
+
+        // Real shape from the live API for a day in progress: the vendor computes the
+        // estimate from the same partial credits, so credits * rate matches it to within
+        // rounding (783.8162375 * 0.04 = 31.3526 against an estimate of 31.35). An incomplete
+        // day therefore does not, by itself, make the rate look wrong.
+        Normalize(
+            RawData(Day, [UsageRow(credits: 783.8162375m, costUsd: null, estimated: 31.35m)]),
+            [SeatRate(), CreditRate(0.04m)], logger, duringTheDay);
+
+        Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
+    public void Normalize_StaleRateOnTheInProgressDay_IsStillFlagged()
+    {
+        var logger = new CapturingLogger<ChatGptEnterpriseSpendNormalizer>();
+        var duringTheDay = new FixedTimeProvider(new DateTimeOffset(Day.ToDateTime(new TimeOnly(15, 0)), TimeSpan.Zero));
+
+        // Deliberately not guarded by "date < today": the two figures come from the same
+        // row, so a disagreement here is a real signal about the rate, and the current day
+        // is the earliest chance to see it.
+        Normalize(
+            RawData(Day, [UsageRow(credits: 1000m, costUsd: null, estimated: 40m)]),
+            [SeatRate(), CreditRate(0.07m)], logger, duringTheDay);
+
+        Assert.Contains("rate may be stale", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
     public void Normalize_LegacyUntaggedCostsRows_StillNormalizeExactlyAsBefore()
     {
         // Raw records stored before the Daily Usage API existed have no Source tag.

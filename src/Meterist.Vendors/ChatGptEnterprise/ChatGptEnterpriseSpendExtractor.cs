@@ -223,7 +223,14 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         var queryResult = await _costLogRepository
             .QueryCostRowsAsync(credential, period, cancellationToken)
             .ConfigureAwait(false);
-        var rows = queryResult.Rows;
+        // Rows from before EffectiveStart are dropped, not just left un-gap-filled
+        // (see below). The repository filters events against the *requested* start,
+        // and the export is listed by file write time, so the day just before its
+        // retention cutoff comes back as a sliver of that day. Grouping that sliver
+        // would key the day and write a fraction of its usage as if it were the whole.
+        var rows = queryResult.Rows
+            .Where(row => (DateOnly)row[ChatGptCostRowFields.RecordDate]! >= queryResult.EffectiveStart)
+            .ToList();
 
         var recordsByDate = rows
             .GroupBy(row => (DateOnly)row[ChatGptCostRowFields.RecordDate]!)
