@@ -413,7 +413,7 @@ static Command BuildExtractCommand(IHost host)
         using var scope = host.Services.CreateScope();
         var extractionService = scope.ServiceProvider.GetRequiredService<SpendExtractionService>();
         var results = await extractionService.ExtractAsync(
-            tenantId, new DateRange(from, to), vendorFilter, dryRun, cancellationToken);
+            tenantId, new DateRange(from, to), vendorFilter, cancellationToken, dryRun);
 
         var table = new Table()
             .AddColumn("Vendor")

@@ -69,6 +69,28 @@ public class SpendExtractionServiceTests
     }
 
     [Fact]
+    public async Task ExtractAsync_PositionalCallWithTheOriginalFourArguments_StillBindsAndWrites()
+    {
+        // Guards the signature: (tenantId, period, vendorFilter, cancellationToken) was the
+        // shape before dryRun existed, and a positional caller must keep compiling and
+        // behaving the same (a real run, not a dry one).
+        var vendorId = Guid.NewGuid();
+        var rawRepo = new FakeRawExtractionRepository();
+        var dailyRepo = new FakeDailySpendRepository();
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            rawRepo, dailyRepo, new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var results = await service.ExtractAsync("ecosync", Period, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, Assert.Single(results).Status);
+        Assert.True(rawRepo.WasCalled);
+        Assert.True(dailyRepo.WasCalled);
+        Assert.False(dailyRepo.PlanWasCalled);
+    }
+
+    [Fact]
     public async Task ExtractAsync_DryRun_WritesNothingAndReportsThePlannedChanges()
     {
         var vendorId = Guid.NewGuid();

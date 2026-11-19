@@ -131,7 +131,15 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 ## Appendix: verbatim schema dump
 
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
-live database, 2026-08-06:
+live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied):
+
+> **Why `DailySpendRecords` ends with `, "Source" TEXT NULL);` on its own
+> line.** That is not a typo and not hand-edited: it is exactly how SQLite
+> records a column added after a table was created (`ALTER TABLE ... ADD
+> COLUMN` splices the new column in before the closing parenthesis). It is
+> valid SQL, and it is kept verbatim so a diff against `DumpSchema.cmd`
+> output stays meaningful. Columns that were part of a table's original
+> `CREATE TABLE` don't look like this.
 
 ```sql
 CREATE TABLE IF NOT EXISTS "__EFMigrationsLock" (

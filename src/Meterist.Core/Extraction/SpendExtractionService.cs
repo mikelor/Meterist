@@ -47,8 +47,8 @@ public sealed class SpendExtractionService
         string tenantId,
         DateRange period,
         Guid? vendorFilter = null,
-        bool dryRun = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool dryRun = false)
     {
         var extractorsToRun = vendorFilter is null
             ? _extractors
