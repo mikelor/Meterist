@@ -5,8 +5,8 @@
     default) the commands to re-provision vendor credentials.
 
 .DESCRIPTION
-    Run this AFTER cloning the repo and installing the .NET 11 release-candidate
-    SDK on the new machine. By default this only PRINTS the 'credentials set'
+    Run this AFTER cloning the repo and installing the .NET 11 SDK on the
+    new machine. By default this only PRINTS the 'credentials set'
     commands it would run -- pass -ApplyCredentials to actually execute
     them, since these are live vendor API keys and the mapping is worth a
     quick eyeball first.
