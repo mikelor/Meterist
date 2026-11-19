@@ -222,6 +222,106 @@ public class HttpChatGptDailyUsageRepositoryTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    public async Task QueryDailyUsageAsync_HasMoreWithBlankCursor_ThrowsWithoutSendingAnotherRequest(string cursor)
+    {
+        using var server = WireMockServer.Start();
+        RespondInSequence(server, PageBody(Oct1, hasMore: true, nextPage: cursor));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server)
+            .QueryDailyUsageAsync(Credential(), TwoDays, ChatGptUsageGrouping.Workspace, TestContext.Current.CancellationToken));
+
+        Assert.Contains("blank", ex.Message);
+        // The blank cursor must be rejected, not sent as an empty page parameter.
+        Assert.Single(server.LogEntries);
+    }
+
+    [Fact]
+    public async Task QueryDailyUsageAsync_RepeatedCursor_ThrowsOnTheRepeatNotAfterThePageCap()
+    {
+        using var server = WireMockServer.Start();
+        // Page 1 hands out cursor "A"; the page fetched with "A" hands out "A" again.
+        RespondInSequence(server,
+            PageBody(Oct1, hasMore: true, nextPage: "A"),
+            PageBody(Oct2, hasMore: true, nextPage: "A"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server)
+            .QueryDailyUsageAsync(Credential(), TwoDays, ChatGptUsageGrouping.Workspace, TestContext.Current.CancellationToken));
+
+        Assert.Contains("already returned", ex.Message);
+        Assert.Equal(2, server.LogEntries.Count());
+    }
+
+    [Fact]
+    public async Task QueryDailyUsageAsync_CursorCycle_ThrowsWhenAnEarlierCursorComesBack()
+    {
+        using var server = WireMockServer.Start();
+        // A -> B -> A: no two consecutive cursors are equal, so only remembering
+        // every cursor seen (not just the last one) catches this.
+        RespondInSequence(server,
+            PageBody(Oct1, hasMore: true, nextPage: "A"),
+            PageBody(Oct1, hasMore: true, nextPage: "B"),
+            PageBody(Oct2, hasMore: true, nextPage: "A"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server)
+            .QueryDailyUsageAsync(Credential(), TwoDays, ChatGptUsageGrouping.Workspace, TestContext.Current.CancellationToken));
+
+        Assert.Contains("already returned", ex.Message);
+        Assert.Equal(3, server.LogEntries.Count());
+    }
+
+    [Fact]
+    public async Task QueryDailyUsageAsync_DistinctCursorsAcrossManyPages_StillSucceeds()
+    {
+        using var server = WireMockServer.Start();
+        RespondInSequence(server,
+            PageBody(Oct1, hasMore: true, nextPage: "A"),
+            PageBody(Oct1, hasMore: true, nextPage: "B"),
+            PageBody(Oct2, hasMore: false, nextPage: null));
+
+        var rows = await CreateRepository(server)
+            .QueryDailyUsageAsync(Credential(), TwoDays, ChatGptUsageGrouping.Workspace, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(3, server.LogEntries.Count());
+    }
+
+    // Serves the given bodies one per request, in order, via a WireMock scenario.
+    private static void RespondInSequence(WireMockServer server, params string[] bodies)
+    {
+        for (var i = 0; i < bodies.Length; i++)
+        {
+            var mapping = server.Given(Request.Create().WithPath(UsagePath).UsingGet()).InScenario("pages");
+            if (i > 0)
+            {
+                mapping = mapping.WhenStateIs($"page-{i}");
+            }
+
+            mapping.WillSetStateTo($"page-{i + 1}").RespondWith(Json(bodies[i]));
+        }
+    }
+
+    private static string PageBody(long startTime, bool hasMore, string? nextPage) =>
+        System.Text.Json.JsonSerializer.Serialize(new
+        {
+            @object = "page",
+            data = new[]
+            {
+                new
+                {
+                    start_time = startTime,
+                    user_id = (string?)null,
+                    actor = (object?)null,
+                    totals = new { chats = 1, messages = 1, credits = 1.5 },
+                },
+            },
+            has_more = hasMore,
+            next_page = nextPage,
+        });
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

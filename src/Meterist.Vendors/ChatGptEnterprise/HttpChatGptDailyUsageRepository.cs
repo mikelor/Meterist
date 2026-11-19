@@ -62,6 +62,7 @@ public sealed class HttpChatGptDailyUsageRepository : IChatGptDailyUsageReposito
 
         var rows = new List<ChatGptDailyUsageRow>();
         string? page = null;
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
 
         for (var pageNumber = 0; pageNumber < MaxPages; pageNumber++)
         {
@@ -93,9 +94,25 @@ public sealed class HttpChatGptDailyUsageRepository : IChatGptDailyUsageReposito
                 return rows;
             }
 
-            page = result.NextPage
-                ?? throw new InvalidOperationException(
-                    "ChatGPT Enterprise Daily Usage reported has_more but gave no next_page cursor.");
+            // All three failures below are checked before another request goes
+            // out: a blank cursor would be sent as an empty page parameter, and
+            // a cursor the server has already handed us means it is looping.
+            // Either way the result would be incomplete or never end, so fail
+            // now instead of after MaxPages wasted calls.
+            if (string.IsNullOrWhiteSpace(result.NextPage))
+            {
+                throw new InvalidOperationException(
+                    "ChatGPT Enterprise Daily Usage reported has_more but gave a missing or blank next_page cursor.");
+            }
+
+            if (!seenCursors.Add(result.NextPage))
+            {
+                throw new InvalidOperationException(
+                    "ChatGPT Enterprise Daily Usage returned a next_page cursor it had already returned; "
+                    + "refusing to loop and returning no partial result.");
+            }
+
+            page = result.NextPage;
         }
 
         throw new InvalidOperationException(
