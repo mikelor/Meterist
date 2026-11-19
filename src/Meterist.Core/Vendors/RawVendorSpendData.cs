@@ -19,4 +19,12 @@ public sealed class RawVendorSpendData
     public required DateRange Period { get; init; }
 
     public required IReadOnlyDictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>> RecordsByDate { get; init; }
+
+    /// <summary>
+    /// For vendors with more than one data source: the source this pull treated
+    /// as the source of record (a <see cref="Models.DailySpendSources"/> value).
+    /// It labels days that came back with no rows at all, which otherwise carry
+    /// nothing to say where "no usage" was learned from. Null for single-source vendors.
+    /// </summary>
+    public string? PrimarySource { get; init; }
 }

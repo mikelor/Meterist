@@ -156,11 +156,43 @@ dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-i
 ```
 
 **Required before extracting — configure rates.** Unlike Gemini, ChatGPT
-Enterprise's `COSTS` export has no seat/subscription line and no reliable
-dollar figure for usage — both have to come from rates you enter yourself.
-See [Configuring rates](#configuring-rates) below; skipping this step means
-`extract` will still succeed, but every day's `SeatFee` will be `0` and
-`UsageOrOverage` will be `0` for any credit-denominated usage.
+Enterprise has no seat/subscription line in either of its data sources and no
+reliable dollar figure for usage — both have to come from rates you enter
+yourself. See [Configuring rates](#configuring-rates) below; skipping this
+step means `extract` will still succeed, but every day's `SeatFee` will be `0`
+and `UsageOrOverage` will be `0` for any credit-denominated usage.
+
+**Which data source Meterist uses.** ChatGPT Enterprise has two:
+
+- **The Daily Usage API** is the source of record whenever the credential has
+  a `WorkspaceId`. It is a plain query API with months of history, so it
+  returns days the other source has already lost, and a normal extraction over
+  a long range backfills them. Usage is credits times your configured
+  `credit-usd` rate (the rate is versioned, so a day is priced under the rate
+  in effect that day), plus any natively USD-priced usage as dollars. If no
+  rate is configured it falls back to the vendor's own estimated USD, with a
+  warning.
+- **The `COSTS` compliance-log export** (about 29 days of history, and it can
+  drop or shrink days inside that window) is fetched alongside as a
+  cross-check. Its rows are kept in raw storage and compared with the Daily
+  Usage figures; a day where the two disagree on credits beyond a small
+  tolerance is logged, and **`COSTS` never overrides a Daily Usage figure**. If
+  fetching it fails, the extraction still succeeds on Daily Usage alone.
+
+Usage is never lowered by a re-extraction, so a day that either source once
+reported higher keeps the higher figure (each day's `Source` says which one).
+When this overrides a figure just pulled, a warning logs the dates and both
+numbers. On real data the two sources differed by less than half a percent of
+total usage over four months, with `COSTS` slightly higher on some days (about
+$0.03 a day, and more on Mondays), so a handful of days keep their `COSTS`
+figure; that is expected, not an error.
+
+**If the Daily Usage call fails** (the admin key lacks "Enterprise analytics
+API: Read", the `WorkspaceId` belongs to a different workspace, an outage),
+the ChatGPT extraction **fails with a message saying so**; it does not quietly
+fall back to `COSTS`, since that is the source known to lose data. Fix the
+permission or ID and re-run. A tenant with **no** `WorkspaceId` stored does
+fall back to `COSTS` alone, with a warning, so add one as described above.
 
 ### Claude API Platform
 
@@ -379,10 +411,17 @@ with a single source leave it empty. See
   Read** scope — recreate it per the [ChatGPT Enterprise](#chatgpt-enterprise)
   setup section above.
 - **ChatGPT Enterprise: expect data from more than ~29 days ago and it's
-  missing:** the compliance log export has a hard 30-day retention window —
-  older days simply aren't retrievable from this vendor's API at all, not a
-  Meterist bug. The extractor logs a warning when it clamps a request to
-  stay inside that window.
+  missing:** that only happens for a tenant with no `WorkspaceId` stored, which
+  falls back to the `COSTS` compliance-log export and its hard 30-day
+  retention window — not a Meterist bug. The extractor logs a warning when it
+  clamps a request to stay inside that window. Add a `WorkspaceId` (see
+  [ChatGPT Enterprise](#chatgpt-enterprise)) and re-extract: the Daily Usage
+  API reaches back months.
+- **ChatGPT Enterprise: `extract` fails mentioning "Enterprise analytics API"
+  or `WorkspaceId`:** the Daily Usage API returned 401, 403 or 404. Check the
+  admin key has **Enterprise analytics API → Read** and that `WorkspaceId` is
+  the workspace this key belongs to (a key gets a 403 for another
+  workspace's ID).
 - **Claude API Platform: `extract` fails with a 401:** the Admin API key is
   invalid, expired, or isn't actually an Admin key (`sk-ant-admin01-...`) —
   a regular Claude API key won't work for these endpoints. Recreate it per
