@@ -29,4 +29,23 @@ public sealed class DailySpendRecord
     public decimal CreditsApplied { get; init; }
 
     public decimal NetSpend { get; init; }
+
+    /// <summary>
+    /// Which data source supplied this day's figures, for vendors that have
+    /// more than one (see <see cref="DailySpendSources"/>), so reports can
+    /// disclose it. Null for vendors with a single source, where there is
+    /// nothing to disclose. When a monotonic upsert keeps an earlier, higher
+    /// usage figure, this stays the source of that figure.
+    /// </summary>
+    public string? Source { get; init; }
+}
+
+/// <summary>Well-known values for <see cref="DailySpendRecord.Source"/>.</summary>
+public static class DailySpendSources
+{
+    /// <summary>ChatGPT Enterprise's COSTS compliance-log export (30-day file retention).</summary>
+    public const string CostsExport = "costs-export";
+
+    /// <summary>ChatGPT Enterprise's Daily Usage API.</summary>
+    public const string DailyUsageApi = "daily-usage-api";
 }

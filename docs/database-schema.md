@@ -4,8 +4,8 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, a single migration,
-`20260722033812_InitialCreate`.
+`src/Meterist.Data/Migrations/` — as of this writing, two migrations:
+`20260722033812_InitialCreate` and `20261119172104_AddDailySpendRecordSource`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -47,6 +47,7 @@ query-time aggregations over this table, not separately stored.
 | `GrossSpend` | `TEXT` | No | `decimal(18,4)` — `SeatFee + UsageOrOverage`. |
 | `CreditsApplied` | `TEXT` | No | `decimal(18,4)` — promo/credit-grant offsets, currently always `0` in practice (no vendor adapter populates this yet). |
 | `NetSpend` | `TEXT` | No | `decimal(18,4)` — `GrossSpend - CreditsApplied`. |
+| `Source` | `TEXT` | Yes | Which data source supplied the day, for vendors with more than one, so reports can disclose it. Values (`DailySpendSources` in `Meterist.Core.Models`): `costs-export` (ChatGPT Enterprise's COSTS compliance-log export) or `daily-usage-api` (its Daily Usage API). `NULL` for vendors with a single source. Added by `AddDailySpendRecordSource`, which labelled every existing ChatGPT Enterprise row `costs-export` (all of them came from that export). When the never-lower rule keeps an earlier, higher usage figure, `Source` stays the source of that figure. |
 
 **Primary key:** `Id` (surrogate).
 **Natural key / unique index:** `IX_DailySpendRecords_TenantId_VendorId_Date`
@@ -130,7 +131,15 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 ## Appendix: verbatim schema dump
 
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
-live database, 2026-08-06:
+live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied):
+
+> **Why `DailySpendRecords` ends with `, "Source" TEXT NULL);` on its own
+> line.** That is not a typo and not hand-edited: it is exactly how SQLite
+> records a column added after a table was created (`ALTER TABLE ... ADD
+> COLUMN` splices the new column in before the closing parenthesis). It is
+> valid SQL, and it is kept verbatim so a diff against `DumpSchema.cmd`
+> output stays meaningful. Columns that were part of a table's original
+> `CREATE TABLE` don't look like this.
 
 ```sql
 CREATE TABLE IF NOT EXISTS "__EFMigrationsLock" (
@@ -151,7 +160,7 @@ CREATE TABLE IF NOT EXISTS "DailySpendRecords" (
     "GrossSpend" TEXT NOT NULL,
     "CreditsApplied" TEXT NOT NULL,
     "NetSpend" TEXT NOT NULL
-);
+, "Source" TEXT NULL);
 CREATE TABLE sqlite_sequence(name,seq);
 CREATE TABLE IF NOT EXISTS "RawDailyExtractionRecords" (
     "Id" INTEGER NOT NULL CONSTRAINT "PK_RawDailyExtractionRecords" PRIMARY KEY AUTOINCREMENT,

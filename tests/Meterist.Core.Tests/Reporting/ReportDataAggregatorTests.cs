@@ -84,11 +84,17 @@ public class ReportDataAggregatorTests
     private sealed class FakeDailySpendRepository(
         Func<string, Guid, IReadOnlyList<DailySpendRecord>>? recordsFor = null) : IDailySpendRepository
     {
-        public Task UpsertAsync(
+        public Task<IReadOnlyList<DailySpendChange>> UpsertAsync(
             IEnumerable<DailySpendRecord> records,
             bool requiresMonotonicUsage = false,
             CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            Task.FromResult<IReadOnlyList<DailySpendChange>>([]);
+
+        public Task<IReadOnlyList<DailySpendChange>> PlanUpsertAsync(
+            IEnumerable<DailySpendRecord> records,
+            bool requiresMonotonicUsage = false,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<DailySpendChange>>([]);
 
         public Task<IReadOnlyList<DailySpendRecord>> GetAsync(
             string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>

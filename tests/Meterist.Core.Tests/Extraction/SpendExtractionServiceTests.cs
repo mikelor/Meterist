@@ -2,6 +2,7 @@ using Meterist.Core.Extraction;
 using Meterist.Core.Models;
 using Meterist.Core.Persistence;
 using Meterist.Core.Vendors;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Meterist.Core.Tests.Extraction;
@@ -34,6 +35,126 @@ public class SpendExtractionServiceTests
         Assert.Equal(1, result.RecordCount);
         Assert.True(rawRepo.WasCalled);
         Assert.True(dailyRepo.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_SucceedingVendor_DetailSummarizesWhatActuallyChanged()
+    {
+        var vendorId = Guid.NewGuid();
+        var records = new List<DailySpendRecord>
+        {
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start },
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start.AddDays(1) },
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start.AddDays(2) },
+        };
+        var dailyRepo = new FakeDailySpendRepository(list =>
+        [
+            new DailySpendChange(list[0].Date, DailySpendChangeKind.Inserted, null, list[0], list[0]),
+            new DailySpendChange(list[1].Date, DailySpendChangeKind.Unchanged, list[1], list[1], list[1]),
+            new DailySpendChange(list[2].Date, DailySpendChangeKind.Unchanged, list[2], list[2], list[2]),
+        ]);
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, records)],
+            new FakeRawExtractionRepository(), dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        // The status line can now be checked against what really changed,
+        // instead of "Succeeded, 3 records" being taken on trust.
+        Assert.Equal("1 inserted, 2 unchanged", result.Detail);
+        Assert.Equal(3, result.Changes!.Count);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_PositionalCallWithTheOriginalFourArguments_StillBindsAndWrites()
+    {
+        // Guards the signature: (tenantId, period, vendorFilter, cancellationToken) was the
+        // shape before dryRun existed, and a positional caller must keep compiling and
+        // behaving the same (a real run, not a dry one).
+        var vendorId = Guid.NewGuid();
+        var rawRepo = new FakeRawExtractionRepository();
+        var dailyRepo = new FakeDailySpendRepository();
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            rawRepo, dailyRepo, new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var results = await service.ExtractAsync("ecosync", Period, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, Assert.Single(results).Status);
+        Assert.True(rawRepo.WasCalled);
+        Assert.True(dailyRepo.WasCalled);
+        Assert.False(dailyRepo.PlanWasCalled);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DryRun_WritesNothingAndReportsThePlannedChanges()
+    {
+        var vendorId = Guid.NewGuid();
+        var records = new List<DailySpendRecord>
+        {
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start },
+        };
+        var rawRepo = new FakeRawExtractionRepository();
+        var dailyRepo = new FakeDailySpendRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, records)],
+            rawRepo, dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, dryRun: true, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.False(rawRepo.WasCalled, "a dry run must not persist raw data");
+        Assert.False(dailyRepo.WasCalled, "a dry run must not upsert daily records");
+        Assert.True(dailyRepo.PlanWasCalled);
+        Assert.Equal("dry run: 1 inserted", result.Detail);
+        Assert.Equal(DailySpendChangeKind.Inserted, Assert.Single(result.Changes!).Kind);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WhenTheNeverLowerRuleKeepsAHigherFigure_LogsAWarningWithTheNumbers()
+    {
+        var vendorId = Guid.NewGuid();
+        var date = Period.Start;
+        var incoming = new DailySpendRecord { TenantId = "ecosync", VendorId = vendorId, Date = date, UsageOrOverage = 319.97m };
+        var stored = new DailySpendRecord { TenantId = "ecosync", VendorId = vendorId, Date = date, UsageOrOverage = 337.43m };
+        var dailyRepo = new FakeDailySpendRepository(_ =>
+            [new DailySpendChange(date, DailySpendChangeKind.KeptHigherUsage, stored, stored, incoming)]);
+        var logger = new CapturingLogger<SpendExtractionService>();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, [incoming])],
+            new FakeRawExtractionRepository(), dailyRepo, new FakeVendorRateConfigRepository(), logger);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("1 kept higher usage", result.Detail);
+        var warning = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("337.43", warning.Message);
+        Assert.Contains("319.97", warning.Message);
+        Assert.Contains(date.ToString("yyyy-MM-dd"), warning.Message);
+    }
+
+    [Fact]
+    public void Summarize_OmitsZeroCountsAndHandlesNoDays()
+    {
+        var day = new DailySpendRecord { TenantId = "t", VendorId = Guid.NewGuid(), Date = Period.Start };
+
+        Assert.Equal("no days", Array.Empty<DailySpendChange>().ToList().AsReadOnly().Summarize());
+        Assert.Equal(
+            "2 updated",
+            new List<DailySpendChange>
+            {
+                new(day.Date, DailySpendChangeKind.Updated, day, day, day),
+                new(day.Date, DailySpendChangeKind.Updated, day, day, day),
+            }.AsReadOnly().Summarize());
     }
 
     [Fact]
@@ -254,6 +375,20 @@ public class SpendExtractionServiceTests
             Task.FromResult<IReadOnlyList<VendorRateConfig>>([]);
     }
 
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     private sealed class FakeRawExtractionRepository : IRawExtractionRepository
     {
         public bool WasCalled { get; private set; }
@@ -270,20 +405,41 @@ public class SpendExtractionServiceTests
         }
     }
 
-    private sealed class FakeDailySpendRepository : IDailySpendRepository
+    private sealed class FakeDailySpendRepository(
+        Func<IReadOnlyList<DailySpendRecord>, IReadOnlyList<DailySpendChange>>? changesFor = null) : IDailySpendRepository
     {
         public bool WasCalled { get; private set; }
 
+        public bool PlanWasCalled { get; private set; }
+
         public bool? ReceivedRequiresMonotonicUsage { get; private set; }
 
-        public Task UpsertAsync(
+        public Task<IReadOnlyList<DailySpendChange>> UpsertAsync(
             IEnumerable<DailySpendRecord> records,
             bool requiresMonotonicUsage = false,
             CancellationToken cancellationToken = default)
         {
             WasCalled = true;
             ReceivedRequiresMonotonicUsage = requiresMonotonicUsage;
-            return Task.CompletedTask;
+            return Task.FromResult(ChangesFor(records));
+        }
+
+        public Task<IReadOnlyList<DailySpendChange>> PlanUpsertAsync(
+            IEnumerable<DailySpendRecord> records,
+            bool requiresMonotonicUsage = false,
+            CancellationToken cancellationToken = default)
+        {
+            PlanWasCalled = true;
+            ReceivedRequiresMonotonicUsage = requiresMonotonicUsage;
+            return Task.FromResult(ChangesFor(records));
+        }
+
+        // Default: every record is a brand-new day.
+        private IReadOnlyList<DailySpendChange> ChangesFor(IEnumerable<DailySpendRecord> records)
+        {
+            var list = records.ToList();
+            return changesFor?.Invoke(list)
+                ?? list.Select(r => new DailySpendChange(r.Date, DailySpendChangeKind.Inserted, null, r, r)).ToList();
         }
 
         public Task<IReadOnlyList<DailySpendRecord>> GetAsync(

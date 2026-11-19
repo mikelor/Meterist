@@ -292,14 +292,57 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 - Add `--vendor <short-name>` to restrict the run to one vendor (useful
   while only some vendors are implemented, or to retry just the one that
   failed).
+- Add `--dry-run` to see what a run **would** do without writing anything:
+  the vendors are still queried (read-only), but no raw data and no daily
+  records are stored. Use it before a large backfill, or to check what a
+  change in a vendor's data will do to what you already hold. See
+  [Dry runs](#dry-runs) below.
 
 ### Reading the result table
 
 | Status | Meaning |
 |---|---|
-| **Succeeded** | Extraction and storage completed; Records shows how many days were written. |
+| **Succeeded** | Extraction and storage completed; Records shows how many days were processed and Detail says what actually happened to them (see below). |
 | **Not implemented** | This vendor's adapter doesn't exist yet — no v1 vendors are in this state as of 2026-07-22, all four are implemented. |
 | **Failed** | Something went wrong (bad credential, network/auth failure, etc.) — the Detail column has the specific error. |
+
+On success, **Detail** breaks the days down so you can check the result
+instead of taking "Succeeded" on trust, e.g. `3 inserted, 118 unchanged`:
+
+| Count | Meaning |
+|---|---|
+| **inserted** | No record existed for that day; a new one was stored. |
+| **updated** | A record existed and the new figures replaced it. |
+| **relabelled** | The figures are identical and only the day's `Source` label changed, for example a day first stored from one source and now confirmed by another. |
+| **kept higher usage** | A record existed with *meaningfully higher* usage than the figure just pulled (by more than half a cent), and the vendor's never-lower rule kept it (ChatGPT Enterprise only today). A warning is logged with the dates and both figures. A shortfall of half a cent or less is just the two sources agreeing to within rounding: the stored number still isn't lowered, but it isn't reported as overridden. |
+| **unchanged** | A record existed and already held exactly these figures. |
+
+A run over days you already have should normally report them as
+`unchanged`; if a run claims to have written days but you see no
+`inserted`, check the data directly (see
+[Inspecting stored data](#troubleshooting)).
+
+### Dry runs
+
+```powershell
+dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --vendor chatgpt-enterprise --from 2026-07-01 --to 2026-11-11 --dry-run
+```
+
+A dry run prints the same result table (with Detail prefixed `dry run:`),
+then, for each vendor, a table of the days that would change: new days,
+updated days, and days where the never-lower rule would keep a higher stored
+figure. It shows gross spend and usage side by side (stored versus pulled),
+plus the `Source` of the figures. Days that would be left unchanged, and days
+that would only change their source label, are counted but not listed.
+Nothing is written, including raw data.
+
+### Where each day's figures came from
+
+For vendors with more than one data source (ChatGPT Enterprise), each stored
+day records which one supplied it in `DailySpendRecords.Source`
+(`costs-export` or `daily-usage-api`), so reports can disclose it. Vendors
+with a single source leave it empty. See
+[`database-schema.md`](database-schema.md).
 
 ## Troubleshooting
 

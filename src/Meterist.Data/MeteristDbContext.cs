@@ -40,6 +40,8 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.GrossSpend).HasPrecision(18, 4);
             entity.Property(r => r.CreditsApplied).HasPrecision(18, 4);
             entity.Property(r => r.NetSpend).HasPrecision(18, 4);
+
+            entity.Property(r => r.Source).HasMaxLength(64);
         });
 
         modelBuilder.Entity<RawDailyExtractionRecord>(entity =>

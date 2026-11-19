@@ -139,7 +139,12 @@ DailySpendRecord
 │                                       combinations, see §4
 ├── GrossSpend (decimal)
 ├── CreditsApplied (decimal)
-└── NetSpend (decimal)
+├── NetSpend (decimal)
+└── Source (string, nullable)        — which data source supplied the day, for
+                                       vendors with more than one (ChatGPT
+                                       Enterprise: costs-export or
+                                       daily-usage-api); null otherwise.
+                                       Added 2026-11-19.
 ```
 
 ```
