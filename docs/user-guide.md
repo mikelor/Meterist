@@ -41,8 +41,7 @@ silently doing nothing.
 ## Prerequisites
 
 - .NET 11 SDK installed (`dotnet --version` should report an `11.x` version
-  — `global.json` pins the exact release-candidate build this repo expects,
-  since .NET 11 hasn't GA'd yet).
+  — `global.json` pins the SDK version this repo expects).
 - Run all commands from the repo root; the examples below use
   `dotnet run --project src/Meterist.Cli --` as the entry point.
 
