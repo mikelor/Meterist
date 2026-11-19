@@ -43,6 +43,11 @@ builder.Services.AddHttpClient<IChatGptCostLogRepository, HttpChatGptCostLogRepo
         client.BaseAddress = new Uri("https://api.chatgpt.com/");
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<IChatGptDailyUsageRepository, HttpChatGptDailyUsageRepository>(client =>
+    {
+        client.BaseAddress = new Uri("https://api.chatgpt.com/");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IVendorSpendNormalizer, ChatGptEnterpriseSpendNormalizer>();
 
 builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReportRepository>(client =>
