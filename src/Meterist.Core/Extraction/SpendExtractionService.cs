@@ -37,10 +37,17 @@ public sealed class SpendExtractionService
         _logger = logger;
     }
 
+    /// <param name="dryRun">
+    /// When true, vendors are still queried and normalized (read-only), but
+    /// nothing is written: raw data is not persisted and daily records are not
+    /// upserted. Each result's <see cref="VendorExtractionResult.Changes"/>
+    /// then holds what the real run would do.
+    /// </param>
     public async Task<IReadOnlyList<VendorExtractionResult>> ExtractAsync(
         string tenantId,
         DateRange period,
         Guid? vendorFilter = null,
+        bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
         var extractorsToRun = vendorFilter is null
@@ -55,7 +62,7 @@ public sealed class SpendExtractionService
                 ?? extractor.VendorId.ToString();
 
             results.Add(await ExtractOneVendorAsync(
-                extractor, displayName, tenantId, period, cancellationToken).ConfigureAwait(false));
+                extractor, displayName, tenantId, period, dryRun, cancellationToken).ConfigureAwait(false));
         }
 
         return results;
@@ -66,20 +73,25 @@ public sealed class SpendExtractionService
         string displayName,
         string tenantId,
         DateRange period,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
-            "[{Vendor}] Starting extraction for tenant '{TenantId}', {PeriodStart} to {PeriodEnd}.",
-            displayName, tenantId, period.Start, period.End);
+            "[{Vendor}] Starting {Mode} for tenant '{TenantId}', {PeriodStart} to {PeriodEnd}.",
+            displayName, dryRun ? "dry-run extraction" : "extraction", tenantId, period.Start, period.End);
 
         try
         {
             var rawData = await extractor.ExtractAsync(tenantId, period, cancellationToken).ConfigureAwait(false);
 
             // Raw persisted first so it survives even if normalization throws.
-            await _rawExtractionRepository.UpsertAsync(
-                tenantId, extractor.VendorId, rawData.RecordsByDate, DateTime.UtcNow, cancellationToken)
-                .ConfigureAwait(false);
+            // A dry run writes nothing, raw data included.
+            if (!dryRun)
+            {
+                await _rawExtractionRepository.UpsertAsync(
+                    tenantId, extractor.VendorId, rawData.RecordsByDate, DateTime.UtcNow, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             // Resolved only after a successful extraction: a NotImplementedException
             // thrown by the extractor itself (the common case for a not-yet-built
@@ -99,16 +111,24 @@ public sealed class SpendExtractionService
                 .GetApplicableRatesAsync(tenantId, extractor.VendorId, period, cancellationToken)
                 .ConfigureAwait(false);
             var records = normalizer.Normalize(rawData, applicableRates);
-            await _dailySpendRepository
-                .UpsertAsync(records, extractor.RequiresMonotonicUsage, cancellationToken)
-                .ConfigureAwait(false);
+
+            var changes = dryRun
+                ? await _dailySpendRepository
+                    .PlanUpsertAsync(records, extractor.RequiresMonotonicUsage, cancellationToken)
+                    .ConfigureAwait(false)
+                : await _dailySpendRepository
+                    .UpsertAsync(records, extractor.RequiresMonotonicUsage, cancellationToken)
+                    .ConfigureAwait(false);
+
+            LogKeptHigherUsage(displayName, tenantId, changes, dryRun);
 
             _logger.LogDebug(
-                "[{Vendor}] Succeeded: wrote {RecordCount} DailySpendRecord(s) for tenant '{TenantId}'.",
-                displayName, records.Count, tenantId);
+                "[{Vendor}] Succeeded: {Verb} {RecordCount} DailySpendRecord(s) for tenant '{TenantId}' ({Summary}).",
+                displayName, dryRun ? "would write" : "wrote", records.Count, tenantId, changes.Summarize());
 
             return new VendorExtractionResult(
-                extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count, null);
+                extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count,
+                (dryRun ? "dry run: " : string.Empty) + changes.Summarize(), changes);
         }
         catch (NotImplementedException ex)
         {
@@ -122,5 +142,28 @@ public sealed class SpendExtractionService
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Failed, 0, ex.Message);
         }
+    }
+
+    // The never-lower rule used to operate silently. A day it overrides is a
+    // day where the vendor just reported less than we already hold, which is
+    // exactly the signal worth seeing, so say so, with the figures.
+    private void LogKeptHigherUsage(
+        string displayName, string tenantId, IReadOnlyList<DailySpendChange> changes, bool dryRun)
+    {
+        var kept = changes.Where(c => c.Kind == DailySpendChangeKind.KeptHigherUsage).ToList();
+        if (kept.Count == 0)
+        {
+            return;
+        }
+
+        const int Shown = 5;
+        var examples = string.Join("; ", kept.Take(Shown).Select(c =>
+            $"{c.Date:yyyy-MM-dd} kept {c.Stored.UsageOrOverage:F2}, pulled {c.Incoming.UsageOrOverage:F2}"));
+
+        _logger.LogWarning(
+            "[{Vendor}] {Mode}: {Count} day(s) for tenant '{TenantId}' kept their higher stored usage rather than "
+            + "the lower figure just pulled (usage is never lowered for this vendor): {Examples}{More}",
+            displayName, dryRun ? "Dry run" : "Extraction", kept.Count, tenantId, examples,
+            kept.Count > Shown ? $"; and {kept.Count - Shown} more" : string.Empty);
     }
 }

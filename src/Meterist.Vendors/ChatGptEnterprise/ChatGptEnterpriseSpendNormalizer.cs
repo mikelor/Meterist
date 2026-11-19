@@ -114,6 +114,7 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
                 // Gemini's BigQuery export does — a narrower schema, not a gap.
                 CreditsApplied = 0m,
                 NetSpend = grossSpend,
+                Source = DailySpendSources.CostsExport,
             });
         }
 

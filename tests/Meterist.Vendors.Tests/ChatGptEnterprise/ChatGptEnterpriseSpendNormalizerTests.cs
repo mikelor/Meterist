@@ -70,6 +70,10 @@ public class ChatGptEnterpriseSpendNormalizerTests
         Assert.Equal(0m, record.CreditsApplied);
         Assert.Equal(expectedSeatFee + expectedUsageOrOverage, record.GrossSpend);
         Assert.Equal(record.GrossSpend, record.NetSpend);
+
+        // Records from the COSTS export say so: stored days are labelled
+        // 'costs-export', and an unlabelled record would erase that label.
+        Assert.Equal(DailySpendSources.CostsExport, record.Source);
     }
 
     [Fact]

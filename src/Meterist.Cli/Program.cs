@@ -367,12 +367,18 @@ static Command BuildExtractCommand(IHost host)
     {
         Description = "Restrict extraction to one vendor short name (default: all registered vendors)",
     };
+    var dryRunOption = new Option<bool>("--dry-run")
+    {
+        Description = "Query the vendors and show what would change, without writing anything "
+            + "(no raw data and no daily records are stored)",
+    };
 
     var extractCommand = new Command("extract", "Extract spend for a tenant across a date range");
     extractCommand.Options.Add(tenantOption);
     extractCommand.Options.Add(fromOption);
     extractCommand.Options.Add(toOption);
     extractCommand.Options.Add(vendorOption);
+    extractCommand.Options.Add(dryRunOption);
 
     extractCommand.SetAction(async (parseResult, cancellationToken) =>
     {
@@ -380,6 +386,7 @@ static Command BuildExtractCommand(IHost host)
         var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
         var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
         var vendorShortName = parseResult.GetValue(vendorOption);
+        var dryRun = parseResult.GetValue(dryRunOption);
 
         Guid? vendorFilter = null;
         if (vendorShortName is not null)
@@ -396,12 +403,17 @@ static Command BuildExtractCommand(IHost host)
         }
 
         AnsiConsole.MarkupLine(
-            $"[bold]Meterist[/] — extracting for tenant [yellow]{tenantId}[/], {from:yyyy-MM-dd} to {to:yyyy-MM-dd}");
+            $"[bold]Meterist[/] — {(dryRun ? "dry run for" : "extracting for")} tenant [yellow]{tenantId}[/], "
+            + $"{from:yyyy-MM-dd} to {to:yyyy-MM-dd}");
+        if (dryRun)
+        {
+            AnsiConsole.MarkupLine("[yellow]DRY RUN — vendors are queried, but nothing is written.[/]");
+        }
 
         using var scope = host.Services.CreateScope();
         var extractionService = scope.ServiceProvider.GetRequiredService<SpendExtractionService>();
         var results = await extractionService.ExtractAsync(
-            tenantId, new DateRange(from, to), vendorFilter, cancellationToken);
+            tenantId, new DateRange(from, to), vendorFilter, dryRun, cancellationToken);
 
         var table = new Table()
             .AddColumn("Vendor")
@@ -418,14 +430,86 @@ static Command BuildExtractCommand(IHost host)
                 _ => "[red]Failed[/]",
             };
 
-            table.AddRow(result.DisplayName, statusMarkup, result.RecordCount.ToString(), result.Detail ?? string.Empty);
+            table.AddRow(
+                result.DisplayName, statusMarkup, result.RecordCount.ToString(), Markup.Escape(result.Detail ?? string.Empty));
         }
 
         AnsiConsole.Write(table);
+
+        if (dryRun)
+        {
+            WriteDryRunChanges(results);
+        }
+
         return 0;
     });
 
     return extractCommand;
+}
+
+static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
+{
+    const int MaxRows = 60;
+
+    var any = false;
+
+    foreach (var result in results)
+    {
+        var changed = (result.Changes ?? [])
+            .Where(c => c.Kind != DailySpendChangeKind.Unchanged)
+            .OrderBy(c => c.Date)
+            .ToList();
+        if (changed.Count == 0)
+        {
+            continue;
+        }
+
+        any = true;
+
+        // Gross spend is shown as well as usage: for a seat-priced vendor like
+        // Gemini, nearly all of a day's spend is the seat fee, so a usage-only
+        // table would read as zero for every new day.
+        var table = new Table()
+            .Title($"{Markup.Escape(result.DisplayName)} - days that would change")
+            .AddColumn(new TableColumn("Date").NoWrap())
+            .AddColumn("Change")
+            .AddColumn(new TableColumn("Stored gross").RightAligned())
+            .AddColumn(new TableColumn("Pulled gross").RightAligned())
+            .AddColumn(new TableColumn("Stored usage").RightAligned())
+            .AddColumn(new TableColumn("Pulled usage").RightAligned())
+            .AddColumn("Source");
+
+        foreach (var change in changed.Take(MaxRows))
+        {
+            var changeMarkup = change.Kind switch
+            {
+                DailySpendChangeKind.Inserted => "[green]new day[/]",
+                DailySpendChangeKind.Updated => "[yellow]updated[/]",
+                _ => "[red]kept higher usage[/]",
+            };
+
+            table.AddRow(
+                change.Date.ToString("yyyy-MM-dd"),
+                changeMarkup,
+                change.Previous is null ? "-" : change.Previous.GrossSpend.ToString("F2"),
+                change.Incoming.GrossSpend.ToString("F2"),
+                change.Previous is null ? "-" : change.Previous.UsageOrOverage.ToString("F2"),
+                change.Incoming.UsageOrOverage.ToString("F2"),
+                Markup.Escape(change.Stored.Source ?? "-"));
+        }
+
+        AnsiConsole.Write(table);
+
+        if (changed.Count > MaxRows)
+        {
+            AnsiConsole.MarkupLine($"[grey]...and {changed.Count - MaxRows} more day(s) not shown.[/]");
+        }
+    }
+
+    if (!any)
+    {
+        AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
+    }
 }
 
 static Command BuildReportCommand(IHost host)
