@@ -452,11 +452,16 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
     const int MaxRows = 60;
 
     var any = false;
+    var relabelled = 0;
 
     foreach (var result in results)
     {
+        // A day whose figures are identical and only its source label changes is
+        // counted, not listed: listing them would bury the days that really change.
+        relabelled += (result.Changes ?? []).Count(c => c.Kind == DailySpendChangeKind.Relabelled);
+
         var changed = (result.Changes ?? [])
-            .Where(c => c.Kind != DailySpendChangeKind.Unchanged)
+            .Where(c => c.Kind is not (DailySpendChangeKind.Unchanged or DailySpendChangeKind.Relabelled))
             .OrderBy(c => c.Date)
             .ToList();
         if (changed.Count == 0)
@@ -506,7 +511,13 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
         }
     }
 
-    if (!any)
+    if (relabelled > 0)
+    {
+        AnsiConsole.MarkupLine(
+            $"[grey]{relabelled} day(s) would keep identical figures and only change their source label.[/]");
+    }
+
+    if (!any && relabelled == 0)
     {
         AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
     }

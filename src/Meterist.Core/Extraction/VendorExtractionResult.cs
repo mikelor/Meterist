@@ -47,6 +47,7 @@ public static class DailySpendChangeExtensions
 
         Add(DailySpendChangeKind.Inserted, "inserted");
         Add(DailySpendChangeKind.Updated, "updated");
+        Add(DailySpendChangeKind.Relabelled, "relabelled");
         Add(DailySpendChangeKind.KeptHigherUsage, "kept higher usage");
         Add(DailySpendChangeKind.Unchanged, "unchanged");
 

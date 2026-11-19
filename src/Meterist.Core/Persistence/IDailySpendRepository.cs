@@ -15,8 +15,16 @@ public enum DailySpendChangeKind
     Unchanged,
 
     /// <summary>
-    /// A record existed with higher usage than the incoming figure and the
-    /// monotonic rule kept it (the seat fee may still have been refreshed).
+    /// The figures are identical and only <see cref="DailySpendRecord.Source"/>
+    /// differs, for example a day first stored from one source and now
+    /// confirmed by another.
+    /// </summary>
+    Relabelled,
+
+    /// <summary>
+    /// A record existed with meaningfully higher usage than the incoming figure
+    /// (more than rounding noise) and the monotonic rule kept it; the seat fee
+    /// may still have been refreshed.
     /// </summary>
     KeptHigherUsage,
 }

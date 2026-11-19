@@ -208,7 +208,7 @@ public class EfDailySpendRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task UpsertAsync_SameFiguresButNewSource_IsAnUpdateSoTheLabelIsRecorded()
+    public async Task UpsertAsync_SameFiguresButNewSource_IsRelabelledSoTheLabelIsRecorded()
     {
         var vendorId = VendorCatalog.ChatGptEnterprise.Id;
         var date = new DateOnly(2026, 7, 22);
@@ -222,10 +222,67 @@ public class EfDailySpendRepositoryTests : IDisposable
             [UsageRecord(vendorId, date, 460.27m, 100m, DailySpendSources.DailyUsageApi)],
             requiresMonotonicUsage: true, cancellationToken: ct));
 
-        Assert.Equal(DailySpendChangeKind.Updated, change.Kind);
+        Assert.Equal(DailySpendChangeKind.Relabelled, change.Kind);
         var stored = Assert.Single(await _repository.GetAsync(
             "ecosync", vendorId, new DateRange(date, date), ct));
         Assert.Equal(DailySpendSources.DailyUsageApi, stored.Source);
+    }
+
+    [Fact]
+    public async Task UpsertAsync_MonotonicShortfallThatIsOnlyRoundingNoise_IsNotReportedAsOverridden()
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        var date = new DateOnly(2026, 7, 24);
+        var ct = TestContext.Current.CancellationToken;
+
+        // Real data: a day captured in full by both sources. The COSTS-derived figure
+        // and credits-times-rate differed by 0.00000000006.
+        await _repository.UpsertAsync(
+            [UsageRecord(vendorId, date, 65.75m, 193.3862930334m, DailySpendSources.CostsExport)],
+            requiresMonotonicUsage: true, cancellationToken: ct);
+
+        var change = Assert.Single(await _repository.UpsertAsync(
+            [UsageRecord(vendorId, date, 65.75m, 193.386293033336m, DailySpendSources.DailyUsageApi)],
+            requiresMonotonicUsage: true, cancellationToken: ct));
+
+        // Not "kept higher usage": that would be a false alarm. The number is never lowered,
+        // and the day takes the source of record's label.
+        Assert.Equal(DailySpendChangeKind.Relabelled, change.Kind);
+        var stored = Assert.Single(await _repository.GetAsync("ecosync", vendorId, new DateRange(date, date), ct));
+        Assert.Equal(193.3862930334m, stored.UsageOrOverage);
+        Assert.Equal(DailySpendSources.DailyUsageApi, stored.Source);
+
+        // And the next run finds nothing left to do.
+        var again = Assert.Single(await _repository.UpsertAsync(
+            [UsageRecord(vendorId, date, 65.75m, 193.386293033336m, DailySpendSources.DailyUsageApi)],
+            requiresMonotonicUsage: true, cancellationToken: ct));
+        Assert.Equal(DailySpendChangeKind.Unchanged, again.Kind);
+    }
+
+    [Theory]
+    [InlineData(100.005, 100.000, DailySpendChangeKind.Relabelled)]    // exactly half a cent: noise
+    [InlineData(100.0051, 100.000, DailySpendChangeKind.KeptHigherUsage)] // just over: the vendor reported less
+    [InlineData(100.01, 99.99, DailySpendChangeKind.KeptHigherUsage)]
+    public async Task UpsertAsync_MonotonicNoiseTolerance_IsHalfACent(
+        double storedUsage, double pulledUsage, DailySpendChangeKind expected)
+    {
+        var vendorId = VendorCatalog.ChatGptEnterprise.Id;
+        var date = new DateOnly(2026, 7, 24);
+        var ct = TestContext.Current.CancellationToken;
+
+        await _repository.UpsertAsync(
+            [UsageRecord(vendorId, date, 10m, (decimal)storedUsage, DailySpendSources.CostsExport)],
+            requiresMonotonicUsage: true, cancellationToken: ct);
+
+        var change = Assert.Single(await _repository.UpsertAsync(
+            [UsageRecord(vendorId, date, 10m, (decimal)pulledUsage, DailySpendSources.DailyUsageApi)],
+            requiresMonotonicUsage: true, cancellationToken: ct));
+
+        Assert.Equal(expected, change.Kind);
+
+        // Whichever side of the line it falls, the stored usage is never lowered.
+        var stored = Assert.Single(await _repository.GetAsync("ecosync", vendorId, new DateRange(date, date), ct));
+        Assert.Equal((decimal)storedUsage, stored.UsageOrOverage);
     }
 
     [Fact]

@@ -7,6 +7,10 @@ namespace Meterist.Data;
 
 public sealed class EfDailySpendRepository : IDailySpendRepository
 {
+    // Half a cent. A pulled usage figure this far below (or less than) what is
+    // stored is the sources agreeing to within rounding, not the vendor reporting less.
+    private const decimal NoiseTolerance = 0.005m;
+
     private readonly MeteristDbContext _context;
 
     public EfDailySpendRepository(MeteristDbContext context)
@@ -52,37 +56,55 @@ public sealed class EfDailySpendRepository : IDailySpendRepository
                 cancellationToken).ConfigureAwait(false);
 
             var effective = record;
-            var kind = DailySpendChangeKind.Updated;
+            DailySpendChangeKind kind;
 
-            if (requiresMonotonicUsage && existing is not null && existing.UsageOrOverage > record.UsageOrOverage)
-            {
-                // Pin the higher, earlier-observed usage figure; still let SeatFee refresh from
-                // the new pull (proration can legitimately change it). The figure kept is the
-                // earlier source's, so Source stays that source's too.
-                var usage = existing.UsageOrOverage;
-                var gross = record.SeatFee + usage;
-                effective = new DailySpendRecord
-                {
-                    TenantId = record.TenantId,
-                    VendorId = record.VendorId,
-                    Date = record.Date,
-                    SeatFee = record.SeatFee,
-                    UsageOrOverage = usage,
-                    GrossSpend = gross,
-                    CreditsApplied = record.CreditsApplied,
-                    NetSpend = gross - record.CreditsApplied,
-                    Source = existing.Source,
-                };
-                kind = DailySpendChangeKind.KeptHigherUsage;
-            }
-            else if (existing is null)
+            if (existing is null)
             {
                 kind = DailySpendChangeKind.Inserted;
             }
-
-            if (existing is not null && kind == DailySpendChangeKind.Updated && SameFigures(existing, effective))
+            else
             {
-                kind = DailySpendChangeKind.Unchanged;
+                kind = DailySpendChangeKind.Updated;
+
+                var lowerBy = existing.UsageOrOverage - record.UsageOrOverage;
+                if (requiresMonotonicUsage && lowerBy > 0m)
+                {
+                    // Never lower the stored usage. Pin the higher, earlier-observed figure; still
+                    // let SeatFee refresh from the new pull (proration can legitimately change it).
+                    //
+                    // A shortfall within NoiseTolerance is the two sources agreeing to within
+                    // rounding, not the vendor reporting less (real data: a day captured in full by
+                    // both differed by 0.00000000006). Those days keep the stored number but take
+                    // the new source's label, and are not reported as overridden.
+                    var vendorReportedLess = lowerBy > NoiseTolerance;
+                    var gross = record.SeatFee + existing.UsageOrOverage;
+                    effective = new DailySpendRecord
+                    {
+                        TenantId = record.TenantId,
+                        VendorId = record.VendorId,
+                        Date = record.Date,
+                        SeatFee = record.SeatFee,
+                        UsageOrOverage = existing.UsageOrOverage,
+                        GrossSpend = gross,
+                        CreditsApplied = record.CreditsApplied,
+                        NetSpend = gross - record.CreditsApplied,
+                        // The figure kept is the earlier source's, so for a real shortfall the
+                        // label stays that source's too.
+                        Source = vendorReportedLess ? existing.Source : record.Source,
+                    };
+
+                    if (vendorReportedLess)
+                    {
+                        kind = DailySpendChangeKind.KeptHigherUsage;
+                    }
+                }
+
+                if (kind == DailySpendChangeKind.Updated && SameNumbers(existing, effective))
+                {
+                    kind = string.Equals(existing.Source, effective.Source, StringComparison.Ordinal)
+                        ? DailySpendChangeKind.Unchanged
+                        : DailySpendChangeKind.Relabelled;
+                }
             }
 
             // A copy, not the entity itself: when applying, `existing` is the
@@ -124,14 +146,14 @@ public sealed class EfDailySpendRepository : IDailySpendRepository
     };
 
     // Rounded to the column's scale so a figure computed to more places than
-    // the column keeps doesn't read as a change on every run.
-    private static bool SameFigures(DailySpendRecord a, DailySpendRecord b) =>
+    // the column keeps doesn't read as a change on every run. Source is
+    // compared separately: a label-only difference is its own kind of change.
+    private static bool SameNumbers(DailySpendRecord a, DailySpendRecord b) =>
         Math.Round(a.SeatFee, 4) == Math.Round(b.SeatFee, 4)
         && Math.Round(a.UsageOrOverage, 4) == Math.Round(b.UsageOrOverage, 4)
         && Math.Round(a.GrossSpend, 4) == Math.Round(b.GrossSpend, 4)
         && Math.Round(a.CreditsApplied, 4) == Math.Round(b.CreditsApplied, 4)
-        && Math.Round(a.NetSpend, 4) == Math.Round(b.NetSpend, 4)
-        && string.Equals(a.Source, b.Source, StringComparison.Ordinal);
+        && Math.Round(a.NetSpend, 4) == Math.Round(b.NetSpend, 4);
 
     public async Task<IReadOnlyList<DailySpendRecord>> GetAsync(
         string tenantId,

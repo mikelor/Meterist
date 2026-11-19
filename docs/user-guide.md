@@ -313,7 +313,8 @@ instead of taking "Succeeded" on trust, e.g. `3 inserted, 118 unchanged`:
 |---|---|
 | **inserted** | No record existed for that day; a new one was stored. |
 | **updated** | A record existed and the new figures replaced it. |
-| **kept higher usage** | A record existed with *higher* usage than the figure just pulled, and the vendor's never-lower rule kept it (ChatGPT Enterprise only today). A warning is logged with the dates and both figures. |
+| **relabelled** | The figures are identical and only the day's `Source` label changed, for example a day first stored from one source and now confirmed by another. |
+| **kept higher usage** | A record existed with *meaningfully higher* usage than the figure just pulled (by more than half a cent), and the vendor's never-lower rule kept it (ChatGPT Enterprise only today). A warning is logged with the dates and both figures. A shortfall of half a cent or less is just the two sources agreeing to within rounding: the stored number still isn't lowered, but it isn't reported as overridden. |
 | **unchanged** | A record existed and already held exactly these figures. |
 
 A run over days you already have should normally report them as
@@ -331,8 +332,9 @@ A dry run prints the same result table (with Detail prefixed `dry run:`),
 then, for each vendor, a table of the days that would change: new days,
 updated days, and days where the never-lower rule would keep a higher stored
 figure. It shows gross spend and usage side by side (stored versus pulled),
-plus the `Source` of the figures. Days that would be left unchanged are
-counted but not listed. Nothing is written, including raw data.
+plus the `Source` of the figures. Days that would be left unchanged, and days
+that would only change their source label, are counted but not listed.
+Nothing is written, including raw data.
 
 ### Where each day's figures came from
 
