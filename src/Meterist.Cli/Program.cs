@@ -116,6 +116,13 @@ static Command BuildCredentialsCommand(IHost host)
 
         var credential = await File.ReadAllTextAsync(file.FullName, cancellationToken);
 
+        if (vendor.Id == VendorCatalog.ChatGptEnterprise.Id
+            && !ChatGptCredential.TryParse(credential, out _, out var credentialError))
+        {
+            AnsiConsole.MarkupLineInterpolated($"[red]Not stored.[/] {credentialError}");
+            return 1;
+        }
+
         using var scope = host.Services.CreateScope();
         var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
         await secretStore.SetCredentialAsync(tenantId, vendor.Id, credential, cancellationToken);

@@ -68,6 +68,31 @@ public class ChatGptEnterpriseSpendExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_WithWorkspaceIdInCredential_PassesItToTheRepository()
+    {
+        var credential = new ChatGptCredential
+        {
+            OrganizationId = "org-abc123",
+            AdminApiKey = "admin-key-xyz",
+            WorkspaceId = "11111111-2222-3333-4444-555555555555",
+        };
+
+        var secretStore = new FakeSecretStore();
+        await secretStore.SetCredentialAsync(
+            "ecosync", VendorCatalog.ChatGptEnterprise.Id, JsonSerializer.Serialize(credential),
+            TestContext.Current.CancellationToken);
+
+        var repository = new FakeChatGptCostLogRepository([]);
+        var extractor = new ChatGptEnterpriseSpendExtractor(
+            secretStore, repository, NullLogger<ChatGptEnterpriseSpendExtractor>.Instance);
+
+        await extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken);
+
+        Assert.Equal(credential, repository.ReceivedCredential);
+        Assert.Equal("11111111-2222-3333-4444-555555555555", repository.ReceivedCredential!.WorkspaceId);
+    }
+
+    [Fact]
     public async Task ExtractAsync_DoesNotGapFillDaysBeforeEffectiveStart_WhenVendorClampedThePeriod()
     {
         var credential = new ChatGptCredential
