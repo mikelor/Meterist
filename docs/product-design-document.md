@@ -47,6 +47,12 @@ programmatic audit trail or historical query capability.
   tracking, annual projection scenarios) without inheriting its structure.
 - Start with a CLI, but build the core logic so a dashboard can be layered
   on top later without a rewrite.
+- **Prefer each vendor's current API over a legacy one** wherever the
+  current API returns the same or better data. A legacy endpoint or export
+  stays only as a cross-check or fallback, not as the source of record.
+  (Added 2026-11-19 — see §7.)
+- **Report usage per individual user as well as in aggregate**, wherever
+  the vendor exposes it. (Added 2026-11-19 — see §7.)
 
 ## 4. Non-Goals (for now)
 
@@ -140,6 +146,46 @@ table's top row. Until this is root-caused, **don't treat `extract`'s
 "Succeeded, wrote N record(s)" status as proof that data was actually
 persisted** for a day being extracted for the first time.
 
+**Direction set 2026-11-19** after a research pass on the vendors' newer
+admin and analytics APIs. Two requirements now govern the backlog, and both
+are tracked as GitHub issues (six parent issues with sub-issues, in
+milestones `Sprint 1`–`Sprint 4`):
+
+1. **New APIs are preferred over legacy ones.** Where a vendor's current
+   API returns the same or better data than the one Meterist calls today,
+   Meterist moves to it and keeps the older path only as a cross-check or
+   fallback. Concretely:
+   - **ChatGPT Enterprise:** the Daily Usage API becomes the source of
+     record for daily spend and per-user usage. The `COSTS` compliance-log
+     export is kept as a cross-check only; its 30-day file expiry is the
+     cause of the retention losses recorded above.
+   - **Claude Enterprise and Claude API Platform:** the Usage and Cost
+     Analytics API (`/v1/organizations/analytics/usage` and `/cost`)
+     replaces `user_cost_report` and the Admin `cost_report`, which the
+     vendor marked legacy on 2026-10-29. Each adapter switches once a live
+     test shows the new endpoint reconciles with the old one for a full
+     month.
+   - **Gemini Enterprise:** the billing export has no newer replacement and
+     stays the source of spend; newer surfaces are added alongside it for
+     activity and seats.
+   - "Same or better" is judged on the data Meterist reports, not on
+     freshness alone: a slower-arriving daily figure is acceptable for a
+     daily-grain tool.
+2. **Per-user reporting is a requirement, not a later extra.** Every report
+   and query shows individual user usage as well as the aggregate, wherever
+   the vendor exposes it. This promotes the "Per-employee spend comparison"
+   row below out of the deferred list.
+   - Users are **named** in reports (name and email), by operator decision.
+     Reports therefore carry personal data and stay local under
+     `artifacts/` like any other populated report.
+   - Where a vendor reports per-user activity but not per-user cost
+     (Gemini Enterprise), the per-user dollar figure is an allocation and
+     is labelled as estimated everywhere it appears.
+   - Where usage attributes only to an API key rather than a person
+     (Claude API Platform workspace keys), it is reported at key level and
+     labelled as such.
+   - Every per-user view reconciles to the aggregate for the same period.
+
 | Feature | Why deferred from v1 | Depends on |
 |---|---|---|
 | **🔴 Investigate: new-date inserts may silently fail to persist** (URGENT, unresolved, not deferred) | Found 2026-08-22 while live-verifying the retention-clamp fix above. Repeated `extract` runs for zelleri/ChatGPT Enterprise, each requesting a date range whose final day(s) had never been extracted before, consistently reported `Succeeded` with the correct record count (e.g. "wrote 32 DailySpendRecord(s)") — but a fresh `sqlite3` query immediately afterward showed those newest day(s) simply absent from both `DailySpendRecords` **and** `RawDailyExtractionRecords`, with the table's row count and `MAX(Date)` unchanged from before the run. Reproduced 3 times across different `--to` dates (Aug 21, Aug 21 again a day later, Aug 22) — each time the *new* trailing day(s) failed to appear while every already-existing day updated normally. **Ruled out** as explanations: (1) the day being "incomplete"/still in progress — reproduced even after the day had fully elapsed; (2) something specific to whichever day is `period.End` — reproduced even when a later run made that same day no longer the range's end; (3) a stale process holding a file lock — inspected all 7 `dotnet` processes running on the machine at the time (`Get-CimInstance Win32_Process` with full command lines) and confirmed none were connected to Meterist's database (two were an unrelated NuGet MCP server, three were normal MSBuild node-reuse workers, one was a `dotnet run` for a completely different project). **Not yet tested**: whether this reproduces for ecosync or for any vendor other than ChatGPT Enterprise — all reproduction so far is zelleri + ChatGPT Enterprise specifically, so it's unconfirmed whether this is vendor/tenant-specific or a general `EfDailySpendRepository`/`EfRawExtractionRepository` persistence issue. One side effect from this investigation: an incidental bad write (a wrong-looking `SeatFee`, resolving to a rate shape matching a different tenant's contract) was observed on one affected day via diagnostic logging, then deleted once identified — worth relating to the primary symptom above during investigation, but not confirmed to share the same root cause. All temporary diagnostic code added during this investigation was reverted (`git diff` confirmed clean) before this write-up. **Re-tested 2026-08-29**: a normal `ExtractAllThroughToday.ps1` run (not a rapid debugging loop) persisted four consecutive brand-new days (Aug 26–29) correctly across all 8 tenant/vendor combinations — this specific failure did not recur. Not closing this on one clean run: three earlier reproductions plus this one non-reproduction don't rule out an intermittent trigger, possibly tied to the rapid-repeat conditions of the original debugging session rather than normal single-pass extraction. | A dedicated, focused investigation — ideally with a debugger attached rather than repeated live `extract` runs against real tenant data, given each attempt risks another accidental write |
@@ -149,7 +195,7 @@ persisted** for a day being extracted for the first time.
 | **Automated report generation** | New 2026-08-05, expanded 2026-08-21 with a concrete process spec from doing this by hand across several pulls. The reconciliation report's weekly Wed–Tue buckets, Flat/Trend-adjusted/Latest-week-annualized projections, and seat/usage splits were all hand-computed — this already produced one real error (a $439K/$110K trend-figure mistake, caught only by independently re-deriving the math), on top of the extractor bug above being caught only by manually diffing pulls. **Process observed, to inform the tool's design:** (1) run `ExtractAllThroughToday.ps1 -To <date>`; (2) run `QueryAllTotals.cmd`/`QueryWeeklyTotals.cmd` for per-vendor aggregate and Wed–Tue-bucketed totals with seat/usage split and `days_present`; (3) diff each vendor/week against the *previous* report's numbers before trusting them — this is how the retention-clamp overwrite bug was caught, and any automated version needs the same check, not just a fresh number each time; (4) recompute Flat (avg of complete weeks × 52), Trend-adjusted (OLS linear regression on complete weeks, projected one week forward × 52), and Latest-week-annualized (most recent complete week × 52) per vendor, excluding the trailing partial week and any vendor-specific excluded weeks (e.g. ChatGPT's retention-clamped week); (5) update every dependent section together — KPI totals, the vendor ledger, concentration percentages (and bar segment order, which can flip), the headline finding's ratio, both weekly tables, both projection tables, the methodology section's worked example (it cites a live figure), and the audit table's day-counts — missing one produces an internally-inconsistent report. Move steps 2–5 into C# against the existing `DailySpendRecord` query surface; once anomalous-period flagging exists, have it auto-exclude flagged weeks instead of requiring a human to remember which weeks are safe. | Anomalous-period flagging (for unattended, correct exclusion) — bucketing/computation logic itself can be sequenced first |
 | **`meterist audit` reconciliation command** | Already planned as P0 (see the live report's own Audit section). New 2026-08-05 note: the spreadsheet reconciliation found real value in a byte-level compare, so the same command could optionally diff against an exported CSV/xlsx baseline, not only a vendor's own reported total. | Core extraction pipeline (already in place) |
 | **Seat-count drift detection** | New 2026-08-05. `VendorRateConfig.SeatCount` is manually entered and only updated when someone remembers to run `rates set` after a contract change — this session found ecosync's Claude Enterprise seat count had risen 20→24→29 via real invoiced proration events, caught only because the user happened to supply an invoice. Several vendors expose a members/seats listing independent of the cost/usage endpoints already integrated; a periodic check flagging (not auto-correcting) a mismatch against the vendor's actual current seat count would catch a stale rate card early. | Per-vendor research spike (not yet done) to confirm each members/seats API surface |
-| **Per-employee spend comparison** (leaderboard/benchmarking within a tenant) | Asymmetric vendor support — native for Claude Enterprise & ChatGPT Enterprise, estimated-only for Gemini, not applicable to Claude API Platform. Real value, but shouldn't block v1's org-level core. | v1 data model + per-vendor adapters already in place |
+| **Per-employee spend comparison** (leaderboard/benchmarking within a tenant) — **promoted 2026-11-19, no longer deferred; see "Direction set 2026-11-19" above** | Asymmetric vendor support — native for Claude Enterprise & ChatGPT Enterprise, estimated-only for Gemini, not applicable to Claude API Platform. Real value, but shouldn't block v1's org-level core. | v1 data model + per-vendor adapters already in place |
 | **Cross-tenant benchmarking** ("Client A vs. Client B per-seat spend") | Explicitly called out as a consulting deliverable, but needs multiple tenants with real v1 data first before comparison is meaningful. | Multiple tenants live on v1 |
 | **Web dashboard** | Confirmed requirement to build toward, but CLI-first was the explicit sequencing decision — core logic must not be coupled to CLI presentation. This is the point where the full **.NET Aspire AppHost** gets adopted (see [`architecture.md`](architecture.md) §9) to orchestrate the dashboard + worker + database as separate services. | Core library stable, output target decided |
 | **Client-facing login** (client stakeholders view their own tenant's data directly) | Not a v1 requirement — v1 is operator-only, clients receive output rather than logging in. Direction set 2026-07-21: **Entra ID via Microsoft.Identity.Web**, not Duende IdentityServer (licensing cost + not clearly needed for this use case — see [`architecture.md`](architecture.md) §12 for the full reasoning). | Web dashboard existing; per-tenant access-control design |
