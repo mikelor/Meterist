@@ -35,7 +35,7 @@ public class CapabilityMatrixTests
         ];
         yield return [
             new ChatGptEnterpriseSpendExtractor(
-                new FakeSecretStore(), new FakeChatGptCostLogRepository(),
+                new FakeSecretStore(), new FakeChatGptCostLogRepository(), new FakeChatGptDailyUsageRepository(),
                 NullLogger<ChatGptEnterpriseSpendExtractor>.Instance),
             VendorCatalog.ChatGptEnterprise, true, true,
         ];

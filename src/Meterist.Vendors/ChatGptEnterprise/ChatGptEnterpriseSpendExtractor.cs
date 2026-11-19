@@ -1,3 +1,4 @@
+using Meterist.Core.Models;
 using Meterist.Core.Secrets;
 using Meterist.Core.Vendors;
 using Microsoft.Extensions.Logging;
@@ -5,42 +6,53 @@ using Microsoft.Extensions.Logging;
 namespace Meterist.Vendors.ChatGptEnterprise;
 
 /// <summary>
-/// ChatGPT Enterprise via the OpenAI Programmatic Admin Platform's COSTS
-/// compliance log export — see docs/vendor-integration-reference.md for
-/// setup/schema detail.
+/// ChatGPT Enterprise. The Daily Usage API is the source of record whenever
+/// the tenant's credential has a WorkspaceId: it is a plain query API with
+/// months of history, so it can return days the COSTS export has already lost.
+/// The COSTS compliance-log export (30-day file retention; can drop or shrink a
+/// day still inside its window) is then fetched as a best-effort cross-check
+/// and its rows are kept alongside in raw storage, but it never overrides a
+/// Daily Usage figure. A tenant with no WorkspaceId falls back to COSTS alone,
+/// with a warning. See docs/vendor-integration-reference.md.
 /// </summary>
 public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
 {
     private readonly ISecretStore _secretStore;
     private readonly IChatGptCostLogRepository _costLogRepository;
+    private readonly IChatGptDailyUsageRepository _dailyUsageRepository;
     private readonly ILogger<ChatGptEnterpriseSpendExtractor> _logger;
 
     public ChatGptEnterpriseSpendExtractor(
         ISecretStore secretStore,
         IChatGptCostLogRepository costLogRepository,
+        IChatGptDailyUsageRepository dailyUsageRepository,
         ILogger<ChatGptEnterpriseSpendExtractor> logger)
     {
         _secretStore = secretStore;
         _costLogRepository = costLogRepository;
+        _dailyUsageRepository = dailyUsageRepository;
         _logger = logger;
     }
 
     public Guid VendorId => VendorCatalog.ChatGptEnterprise.Id;
 
-    // True for raw credit consumption, which the COSTS export does carry.
-    // The credit-pool size and contracted overage rate are NOT API-derivable
-    // though (console/contract-only) — those must come from tenant-level
-    // config, not this extractor.
+    // True for raw credit consumption, which both sources carry. The credit-pool
+    // size and contracted overage rate are NOT API-derivable though
+    // (console/contract-only) — those must come from tenant-level config, not
+    // this extractor.
     public bool SupportsOverage => true;
 
-    // Real vendor-reported per-user dollar cost (payload.identity), unlike
-    // Gemini Enterprise where per-user cost would be a derived estimate.
+    // Real vendor-reported per-user dollar cost: COSTS carries payload.identity,
+    // and the Daily Usage API can return per-user rows. Unlike Gemini
+    // Enterprise, where per-user cost would be a derived estimate.
     public bool SupportsPerUserBreakdown => true;
 
-    // The COSTS export's 29-day retention window can drop rows for a day still
-    // nominally inside it on a later pull — see the 2026-08-29 addendum in
-    // vendor-integration-reference.md. The daily-spend upsert must never let
-    // this vendor's UsageOrOverage decrease on re-extraction.
+    // A later pull of a day can legitimately return LESS than an earlier one:
+    // the COSTS export can drop rows for a day still nominally inside its
+    // 29-day window, and Daily Usage rows for recent days are eventually
+    // consistent and can be revised. The daily-spend upsert must never let
+    // this vendor's UsageOrOverage decrease on re-extraction, and now logs
+    // each day where that rule overrides a pulled figure.
     public bool RequiresMonotonicUsage => true;
 
     public async Task<RawVendorSpendData> ExtractAsync(
@@ -59,6 +71,155 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             + "workspace '{WorkspaceId}'.",
             tenantId, credential.OrganizationId, credential.WorkspaceId ?? "(not set)");
 
+        if (string.IsNullOrWhiteSpace(credential.WorkspaceId))
+        {
+            _logger.LogWarning(
+                "ChatGPT Enterprise tenant '{TenantId}' has no WorkspaceId in its credential, so the Daily Usage API "
+                + "cannot be used. Falling back to the COSTS export alone, which reaches back only about 29 days and "
+                + "can lose or shrink days. Add WorkspaceId and run 'credentials set' again "
+                + "(see docs/user-guide.md, ChatGPT Enterprise).",
+                tenantId);
+
+            return await ExtractFromCostsOnlyAsync(tenantId, credential, period, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return await ExtractFromDailyUsageAsync(tenantId, credential, period, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<RawVendorSpendData> ExtractFromDailyUsageAsync(
+        string tenantId, ChatGptCredential credential, DateRange period, CancellationToken cancellationToken)
+    {
+        // The source of record. Not wrapped in a try: if it fails (a key without
+        // the "Enterprise analytics API: Read" permission, a wrong workspace ID,
+        // an outage), the extraction fails loudly with a message saying so,
+        // rather than quietly degrading to a source known to lose data.
+        var usageRows = await _dailyUsageRepository
+            .QueryDailyUsageAsync(credential, period, ChatGptUsageGrouping.Workspace, cancellationToken)
+            .ConfigureAwait(false);
+
+        var usageByDay = new Dictionary<DateOnly, ChatGptDailyUsageRow>();
+        foreach (var row in usageRows)
+        {
+            if (!usageByDay.TryAdd(row.Day, row))
+            {
+                throw new InvalidOperationException(
+                    $"The ChatGPT Daily Usage API returned more than one workspace-wide row for {row.Day:yyyy-MM-dd}; "
+                    + "refusing to guess which is right.");
+            }
+        }
+
+        var costsResult = await TryQueryCostsAsync(tenantId, credential, period, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Only days from the export's effective start onward. The export is listed
+        // by file write time, so the day just before its retention cutoff comes
+        // back as a sliver of that day, not the whole of it; comparing it to a
+        // complete Daily Usage day would always read as a disagreement, and using
+        // it as a fallback would record a fraction of the day's usage.
+        var costsEffectiveStart = costsResult?.EffectiveStart ?? DateOnly.MinValue;
+        var costRowsByDay = (costsResult?.Rows ?? [])
+            .Where(row => (DateOnly)row[ChatGptCostRowFields.RecordDate]! >= costsEffectiveStart)
+            .GroupBy(row => (DateOnly)row[ChatGptCostRowFields.RecordDate]!)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Every day in the period gets a key. A day with no usage returns no row
+        // from either source, but a seat accrues regardless of usage, so it must
+        // still reach the normalizer. Unlike the COSTS-only path there is no
+        // retention boundary to stop at: the API does not say where its history
+        // starts, and a day it has no row for is written as no usage. That is
+        // safe for days already stored because usage is never lowered (see
+        // RequiresMonotonicUsage), and a day before the history begins at worst
+        // gets its seat fee with usage unknown.
+        var recordsByDate = new Dictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>>();
+        foreach (var date in period.EnumerateDays())
+        {
+            var rows = new List<IReadOnlyDictionary<string, object?>>();
+
+            if (usageByDay.TryGetValue(date, out var usage))
+            {
+                rows.Add(ToRawRow(usage));
+            }
+
+            if (costRowsByDay.TryGetValue(date, out var costRows))
+            {
+                foreach (var costRow in costRows)
+                {
+                    rows.Add(new Dictionary<string, object?>(costRow)
+                    {
+                        [ChatGptDailyUsageRowFields.Source] = ChatGptRowSources.CostsExport,
+                    });
+                }
+            }
+
+            recordsByDate[date] = rows;
+        }
+
+        _logger.LogDebug(
+            "ChatGPT Enterprise extraction for tenant '{TenantId}' used the Daily Usage API: {UsageDayCount} day(s) "
+            + "with usage of {PeriodDayCount} requested; COSTS cross-check {CostsStatus}.",
+            tenantId, usageByDay.Count, recordsByDate.Count,
+            costsResult is null ? "unavailable" : $"supplied {costRowsByDay.Count} day(s)");
+
+        return new RawVendorSpendData
+        {
+            VendorId = VendorId,
+            TenantId = tenantId,
+            Period = period,
+            RecordsByDate = recordsByDate,
+            PrimarySource = DailySpendSources.DailyUsageApi,
+        };
+    }
+
+    // Best effort by design. The COSTS export is only a cross-check here, and it
+    // is the slow, retention-limited, occasionally flaky source this change moves
+    // away from, so its failure must not fail an extraction the Daily Usage API
+    // already answered.
+    private async Task<ChatGptCostQueryResult?> TryQueryCostsAsync(
+        string tenantId, ChatGptCredential credential, DateRange period, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _costLogRepository
+                .QueryCostRowsAsync(credential, period, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "The ChatGPT Enterprise COSTS cross-check for tenant '{TenantId}' failed ({Message}); continuing "
+                + "with the Daily Usage figures alone.",
+                tenantId, ex.Message);
+            return null;
+        }
+    }
+
+    private static IReadOnlyDictionary<string, object?> ToRawRow(ChatGptDailyUsageRow row) =>
+        new Dictionary<string, object?>
+        {
+            [ChatGptDailyUsageRowFields.Source] = ChatGptRowSources.DailyUsage,
+            [ChatGptDailyUsageRowFields.Chats] = row.Chats,
+            [ChatGptDailyUsageRowFields.Messages] = row.Messages,
+            [ChatGptDailyUsageRowFields.Credits] = row.Credits,
+            [ChatGptDailyUsageRowFields.CostUsd] = row.CostUsd,
+            [ChatGptDailyUsageRowFields.EstimatedCostUsd] = row.EstimatedCostUsd,
+            [ChatGptDailyUsageRowFields.UncachedTextInputTokens] = row.UncachedTextInputTokens,
+            [ChatGptDailyUsageRowFields.CachedTextInputTokens] = row.CachedTextInputTokens,
+            [ChatGptDailyUsageRowFields.TextOutputTokens] = row.TextOutputTokens,
+            [ChatGptDailyUsageRowFields.TextTotalTokens] = row.TextTotalTokens,
+        };
+
+    // The original extraction, unchanged in behavior: used when there is no
+    // WorkspaceId to address the Daily Usage API with.
+    private async Task<RawVendorSpendData> ExtractFromCostsOnlyAsync(
+        string tenantId, ChatGptCredential credential, DateRange period, CancellationToken cancellationToken)
+    {
         var queryResult = await _costLogRepository
             .QueryCostRowsAsync(credential, period, cancellationToken)
             .ConfigureAwait(false);
@@ -89,7 +250,8 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         }
 
         _logger.LogDebug(
-            "ChatGPT Enterprise extraction for tenant '{TenantId}' grouped {RowCount} row(s) into {DayCount} day(s).",
+            "ChatGPT Enterprise extraction for tenant '{TenantId}' (COSTS only) grouped {RowCount} row(s) into "
+            + "{DayCount} day(s).",
             tenantId, rows.Count, recordsByDate.Count);
 
         return new RawVendorSpendData
@@ -98,6 +260,7 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             TenantId = tenantId,
             Period = period,
             RecordsByDate = recordsByDate,
+            PrimarySource = DailySpendSources.CostsExport,
         };
     }
 
