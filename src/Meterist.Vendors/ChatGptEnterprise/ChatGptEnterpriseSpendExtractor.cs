@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Meterist.Core.Secrets;
 using Meterist.Core.Vendors;
 using Microsoft.Extensions.Logging;
@@ -56,8 +55,9 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         var credential = await LoadCredentialAsync(tenantId, cancellationToken).ConfigureAwait(false);
 
         _logger.LogDebug(
-            "Resolved ChatGPT Enterprise credential for tenant '{TenantId}': organization '{OrganizationId}'.",
-            tenantId, credential.OrganizationId);
+            "Resolved ChatGPT Enterprise credential for tenant '{TenantId}': organization '{OrganizationId}', "
+            + "workspace '{WorkspaceId}'.",
+            tenantId, credential.OrganizationId, credential.WorkspaceId ?? "(not set)");
 
         var queryResult = await _costLogRepository
             .QueryCostRowsAsync(credential, period, cancellationToken)
@@ -116,16 +116,12 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
                 $"No ChatGPT Enterprise credential configured for tenant '{tenantId}'.");
         }
 
-        try
-        {
-            return JsonSerializer.Deserialize<ChatGptCredential>(json)
-                ?? throw new InvalidOperationException(
-                    $"ChatGPT Enterprise credential for tenant '{tenantId}' deserialized to null.");
-        }
-        catch (JsonException ex)
+        if (!ChatGptCredential.TryParse(json, out var credential, out var error))
         {
             throw new InvalidOperationException(
-                $"ChatGPT Enterprise credential for tenant '{tenantId}' is not valid JSON.", ex);
+                $"ChatGPT Enterprise credential for tenant '{tenantId}' is invalid. {error}");
         }
+
+        return credential;
     }
 }

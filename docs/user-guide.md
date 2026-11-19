@@ -108,26 +108,46 @@ dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-i
 
 1. In **OpenAI Admin Console → Billing**, click **Create admin key**.
 2. Select **Restricted** permissions, and set only:
-   - **Compliance logging platform → Costs → Read**
+   - **Compliance logging platform → Costs → Read** — what `extract` uses
+     today.
+   - **Enterprise analytics API → Read** — for the Daily Usage API
+     (`/v1/analytics/workspaces/{workspace_id}/usage`), which Meterist is
+     moving to as its primary ChatGPT source. Nothing calls it yet; set it
+     now so the key doesn't have to be recreated later.
    Leave everything else (Workspace analytics, Codex analytics API, Usage
-   limits, Group Management, etc.) at `None` — Meterist only ever needs to
-   read cost data, and Read is the only permission level this scope offers
-   anyway (it's a reporting-only surface).
+   limits, Group Management, etc.) at `None` — Meterist only reads usage and
+   cost data, and Read is the only permission level these scopes offer
+   anyway (they're reporting-only surfaces).
 3. Copy the generated key immediately — it's shown once. This is the
    `AdminApiKey` value below.
-4. Find your **Organization ID** (`org-...`) under **Settings → General** —
-   this is the API Platform Organization ID, **not** the Workspace ID shown
-   just below it on the same page. The `COSTS` export is organization-scoped.
+4. From **Settings → General**, note two different IDs that sit next to each
+   other and are easy to swap:
+   - **Organization ID** (`org-...`) — the API Platform Organization ID,
+     **not** the Workspace ID. The `COSTS` export is organization-scoped.
+   - **Workspace ID** (a UUID such as `11111111-2222-3333-4444-555555555555`)
+     — the Daily Usage API is addressed by it. Optional for now; `extract`
+     works without it, but add it so the credential is ready when the Daily
+     Usage API is wired in.
 
 **Build the credential file:**
 
 ```powershell
 $credential = @{
     OrganizationId = "org-XXXXXXXXXXXXXXXXXXXXXXXX"
+    WorkspaceId    = "00000000-0000-0000-0000-000000000000"   # optional
     AdminApiKey    = "<the admin key you copied>"
 }
 $credential | ConvertTo-Json | Set-Content -Path "C:\path\to\chatgpt-credential.json"
 ```
+
+`credentials set` checks this file before storing it: it must be valid JSON
+with a non-empty `OrganizationId` and `AdminApiKey`, and if `WorkspaceId` is
+present it must be a UUID. Pasting the `org-...` Organization ID into
+`WorkspaceId` is rejected with an explanation rather than stored.
+
+**Adding the Workspace ID to an existing credential:** the stored credential
+is encrypted, so edit the source file you built it from (or rebuild it), add
+`WorkspaceId`, and run `credentials set` again — it replaces the stored value.
 
 **Store it:**
 
