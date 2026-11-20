@@ -241,6 +241,56 @@ Flagging `IsEstimated` at the schema level (rather than a documentation
 footnote) matters — any report/UI built on this later must not present an
 estimate with the same confidence as vendor-reported data.
 
+### 5.2 What counts as spend: tax and support fees — DECIDED (2026-11-20, issue #35)
+
+**Decision: Meterist's figures are usage and seat charges only. Tax and support
+fees are excluded everywhere, and the client report says so in its footnote. No
+separate non-usage category is built now.**
+
+What was found. Only the Gemini billing export carries these lines (the other three
+vendors' APIs report usage or seat cost and no tax or support), and they are not
+small. Over 2026-07-01 to 2026-11-19, for the two real tenants:
+
+| Tenant | `Invoice \| Tax` | `Support \| ...` | As a share of the Gemini figure |
+|---|---|---|---|
+| One | about 9% | none | about 9% |
+| The other | about 10% | about 16% (Enhanced Support, a minimum fee plus a variable fee) | about 26% |
+
+Both tenants also have an `Invoice | Rounding Error` line of a cent or two. Tax lands
+only on the first of each month; support accrues daily. So a Meterist total can sit
+well below the Google invoice, by more than a quarter for the tenant with a support
+plan.
+
+Why exclude them:
+- **They are not what the report measures.** The product tracks what AI usage and
+  seats cost, to compare tenants, vendors and users and to project forward. Tax
+  depends on the client's jurisdiction and whether it is recoverable (VAT often is),
+  and varies with the invoice, not with anyone's usage.
+- **Support is account-level, not Gemini-level.** A Google Cloud support plan is
+  priced on the whole billing account and covers everything on it. Charging it to
+  Gemini Enterprise would inflate that vendor's per-seat and per-user figures and make
+  it incomparable with the other three, whose APIs carry no support fee at all.
+- **One definition across vendors.** Excluding both keeps "spend" meaning the same
+  thing for every vendor, which the cross-tenant benchmarking depends on.
+- **Counting them would corrupt the projections.** Tax is a monthly spike and the
+  support fee scales with total account spend, so both would distort the weekly trend
+  and annual projections.
+
+How it is disclosed. The report footnote states that tax and support fees are not
+included and that a figure can therefore differ from an invoice. The Gemini billing
+filter already leaves them out (they match no Include rule), so the numbers are
+unchanged; this decision records that it is deliberate. Because they do not look
+Gemini-related (no watch term matches them), the "not counted" warning stays quiet
+about them by design. To see their size for a tenant, add the watch terms `invoice`,
+`support` and `tax` for one dry run (see the user guide).
+
+What would change this. If a client needs invoice-level reconciliation ("landed
+cost"), add them as a separate **non-usage** category, never inside
+`UsageOrOverage`. The per-kind child table already planned for Gemini (issue #53:
+rows of record, category and amount, created only where a charge exists) can carry
+`Tax` and `Support` categories without a new migration, so that path is open and
+cheap; it is deferred only because no one needs it yet.
+
 ## 6. Credentials — DECIDED (2026-07-21)
 
 **Decision: DPAPI-encrypted local files for v1, behind an `ISecretStore`
@@ -493,4 +543,5 @@ doesn't have to re-litigate it:
 | Eventual cloud secrets manager product (post-DPAPI) | Open, intentionally deferred (§6) | Only matters once hosted; no v1 impact |
 | Eventual cloud hosting target | Implicit lean toward Azure (via Aspire + Entra ID choices, §9) — not explicitly confirmed | Worth an explicit sign-off before any cloud-specific code is written |
 | ChatGPT Enterprise Cost API exact schema | Needs a spike with a real Admin key | ChatGPT Enterprise adapter implementation |
+| Tax and support fees in the totals | **Decided 2026-11-20** — excluded everywhere, disclosed in the report footnote; a separate non-usage category is deferred, and rides the #53 design if ever wanted (§5.2) | Nothing |
 | Ecosync Claude Enterprise "usage credits enabled?" status | Needs confirmation | Whether the Claude Enterprise adapter should expect any overage data for that tenant |

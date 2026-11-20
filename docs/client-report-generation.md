@@ -86,7 +86,9 @@ bundled into one page:
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the
    planned `meterist audit` command (insight #9).
-10. **Footnote** — methodology and caveats: what "Gross Spend" means, why
+10. **Footnote** — methodology and caveats: what "Gross Spend" means, that tax
+   and support fees are not included (so a figure can differ from an invoice;
+   see `docs/architecture.md` §5.2), why
    date ranges can differ by vendor within a tenant, which vendors are
    excluded and why, and any zero-activity vendor explained (new account vs.
    missing pull).

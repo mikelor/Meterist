@@ -151,6 +151,35 @@ The warning never fails the extraction and never changes the figures; it is a
 prompt to decide. Either the line belongs in Gemini Enterprise spend, so add an
 Include rule, or it does not, so add an Ignore rule.
 
+##### Tax and support fees are left out on purpose
+
+Google''s billing export also carries `Invoice | Tax` (once a month) and, on accounts
+with a support plan, `Support | ...` fees (every day). Meterist does **not** count
+these: they are not usage, and a support plan covers the whole billing account, not just
+Gemini Enterprise. So a Gemini total will sit below the Google invoice, by about a tenth
+for tax alone and by more than a quarter on an account with a support plan. The client
+report's footnote says so. Do not add Include rules for them: they would land in
+`UsageOrOverage` and skew the totals and projections.
+
+To see how large they are for a tenant, run a dry run with watch terms for them (the
+"not counted" warning then lists each with its total and dates). This only reads:
+
+```powershell
+$env:Meterist__Gemini__BillingFilter__Include__0__Service = "Vertex AI Search"
+$env:Meterist__Gemini__BillingFilter__Include__0__SkuLike = "%Enterprise%"
+$env:Meterist__Gemini__BillingFilter__Include__1__Service = "Vertex AI"
+$env:Meterist__Gemini__BillingFilter__Include__1__SkuLike = "%Agent Platform%"
+$env:Meterist__Gemini__BillingFilter__Include__2__Service = "Vertex AI"
+$env:Meterist__Gemini__BillingFilter__Include__2__SkuLike = "%Predictions%"
+$env:Meterist__Gemini__BillingFilter__WatchTerms__0 = "invoice"
+$env:Meterist__Gemini__BillingFilter__WatchTerms__1 = "support"
+dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --vendor gemini-enterprise --from 2026-07-01 --to 2026-11-19 --dry-run
+```
+
+Close the PowerShell window (or remove the variables) afterwards so the override does not
+stay in effect. The three Include rules are the defaults minus the two unverified
+pay-as-you-go patterns; they are only for this look.
+
 ##### Changing the rules
 
 Add a section to [`appsettings.json`](../src/Meterist.Cli/appsettings.json), or
