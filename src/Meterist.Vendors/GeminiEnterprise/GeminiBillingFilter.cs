@@ -46,25 +46,30 @@ public sealed class GeminiBillingFilter
     public List<string> WatchTerms { get; set; } = [];
 
     /// <summary>
-    /// What was verified against live billing exports on 2026-07-22 and 2026-11-19: the seat
-    /// subscription and its per-request overage bill under "Vertex AI Search" with
-    /// "Enterprise" in the SKU. Agent Platform compute and memory (Vertex AI) are pay-as-you-go
-    /// consumption, structurally closer to the Claude API Platform than to a seat product,
-    /// so they are not counted here; the watch terms make sure that is a visible decision
-    /// rather than an accident. To count them, add a rule with service "Vertex AI" and SKU
-    /// pattern "%Agent Platform%".
+    /// The seat subscription and its per-request overage bill under "Vertex AI Search" with
+    /// "Enterprise" in the SKU (verified against live exports 2026-07-22 and 2026-11-19).
+    /// Agent Platform compute and memory, raw Gemini model usage ("Predictions" SKUs) and
+    /// pay-as-you-go lines are counted too, as usage-priced spend: the client pays for them
+    /// whichever product they belong to. The pay-as-you-go SKU names have not been seen in a
+    /// live export yet, so those rules are best guesses and the watch terms still flag any
+    /// pay-as-you-go line they miss. Only "Data Index" storage is ignored. To stop counting
+    /// a category, move its rule from Include to Ignore (see the user guide).
     /// </summary>
     public static GeminiBillingFilter Default => new()
     {
-        Include = [new GeminiBillingRule { Service = "Vertex AI Search", SkuLike = "%Enterprise%" }],
-        Ignore =
+        Include =
         [
-            new GeminiBillingRule { Service = "Vertex AI Search", SkuLike = "%Data Index%" },
-            // Raw Gemini model token usage ("... Text Input - Predictions"): pay-as-you-go API
-            // consumption, a different product from the seat-licensed Gemini Enterprise.
+            new GeminiBillingRule { Service = "Vertex AI Search", SkuLike = "%Enterprise%" },
+            new GeminiBillingRule { Service = "Vertex AI", SkuLike = "%Agent Platform%" },
             new GeminiBillingRule { Service = "Vertex AI", SkuLike = "%Predictions%" },
+            new GeminiBillingRule { Service = "Vertex AI Search", SkuLike = "%Pay as you go%" },
+            new GeminiBillingRule { Service = "Vertex AI Search", SkuLike = "%Pay-as-you-go%" },
         ],
-        WatchTerms = ["Gemini", "Agent Platform", "Discovery Engine", "Vertex AI Search"],
+        Ignore = [new GeminiBillingRule { Service = "Vertex AI Search", SkuLike = "%Data Index%" }],
+        WatchTerms =
+        [
+            "Gemini", "Agent Platform", "Discovery Engine", "Vertex AI Search", "Pay as you go", "Pay-as-you-go",
+        ],
     };
 
     /// <summary>Throws if the filter could not produce a meaningful query.</summary>

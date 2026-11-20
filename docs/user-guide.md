@@ -104,15 +104,42 @@ dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-i
 
 #### Which billing lines count, and the "not counted" warning
 
-Meterist counts a billing-export line as Gemini Enterprise spend only if it
-matches an **Include** rule: a service name plus a SKU pattern. The default is
-the one verified against real exports, service `Vertex AI Search` with a SKU
-containing `Enterprise` (the seat subscription and its per-request overage).
+A Google Cloud billing export is one big table of charges. Meterist decides which
+of them are Gemini Enterprise spend using three lists of rules. Each rule is a
+**service name** (matched exactly) plus a **SKU pattern** (a SQL `LIKE` pattern
+where `%` matches any text; the match is case-sensitive).
+
+| List | What it does |
+| --- | --- |
+| **Include** | A line matching any Include rule is counted as Gemini Enterprise spend. |
+| **Ignore** | A line you knowingly leave out. It is not counted and does not trigger the warning. |
+| **WatchTerms** | Words that make an uncounted line look Gemini-related. A line with non-zero cost containing one of these (in its service or SKU, any case) that is neither included nor ignored triggers the warning. |
+
+**Defaults.** Out of the box Meterist counts:
+
+| Rule (service / SKU pattern) | What it is | Counted as |
+| --- | --- | --- |
+| `Vertex AI Search` / `%Enterprise%` | The seat subscription and its per-request overage. Verified against real exports. | Seat fee (SKUs containing "Subscription"), otherwise usage |
+| `Vertex AI` / `%Agent Platform%` | Agent Platform compute and memory (the Agent Gateway / Memory Bank family, seen from September 2026). | Usage |
+| `Vertex AI` / `%Predictions%` | Raw Gemini model token usage (for example "... Text Input - Predictions"). | Usage |
+| `Vertex AI Search` / `%Pay as you go%` and `%Pay-as-you-go%` | Pay-as-you-go usage above the edition quota (the billing model from 2026-08-17). **No such SKU has appeared in a live export yet**, so these two patterns are best guesses at the name. | Usage |
+
+The only default Ignore rule is `Vertex AI Search` / `%Data Index%` (index
+storage, not specific to the Enterprise plan). The default WatchTerms are
+`Gemini`, `Agent Platform`, `Discovery Engine`, `Vertex AI Search`,
+`Pay as you go` and `Pay-as-you-go`.
+
+Anything that is not a "Subscription" SKU is stored as usage/overage, so the
+agent, model and pay-as-you-go lines raise a tenant's usage figure, not its seat
+fee. A tenant that runs its own Gemini API workloads in the same project will
+therefore see that model usage in its Gemini Enterprise numbers. If that is not
+what you want to report, take the rule out as described below.
+
+##### The "not counted" warning
 
 Google keeps changing how this product bills, so each extraction also looks for
-charges the rules leave out. If a line with non-zero cost mentions Gemini,
-Agent Platform, Discovery Engine or Vertex AI Search and is not on the ignore
-list, the extraction logs a warning naming the service, SKU, cost and dates:
+charges the rules leave out. If it finds some, it logs one warning naming the
+service, SKU, cost and dates:
 
 ```text
 Tenant 'acme' has 2 Gemini-related billing line(s) with non-zero cost that the
@@ -122,16 +149,18 @@ Gemini Enterprise filter does not count: Vertex AI | Agent Platform Compute: 1.2
 
 The warning never fails the extraction and never changes the figures; it is a
 prompt to decide. Either the line belongs in Gemini Enterprise spend, so add an
-Include rule, or it does not, so add an Ignore rule. By default Agent Platform
-compute and memory are **not** counted: they are pay-as-you-go consumption, not
-a seat product, and the amounts seen so far are negligible. Raw Gemini model
-token usage (`... Predictions` SKUs) and `Data Index` lines are ignored by
-default.
+Include rule, or it does not, so add an Ignore rule.
 
-To change the rules, add a section to
-[`appsettings.json`](../src/Meterist.Cli/appsettings.json) (or set the matching
-environment variables). **If the section is present it replaces the defaults
-entirely**, so list every rule you want:
+##### Changing the rules
+
+Add a section to [`appsettings.json`](../src/Meterist.Cli/appsettings.json), or
+set the matching environment variables. **If the section is present it replaces
+the defaults entirely**, so list every rule you want, including the ones you are
+keeping. If you set only `Include`, the Ignore and WatchTerms lists become empty.
+An empty `Include` list is rejected when extraction starts.
+
+This is the complete default configuration, written out. Copy it as the starting
+point for any change:
 
 ```json
 {
@@ -140,22 +169,75 @@ entirely**, so list every rule you want:
       "BillingFilter": {
         "Include": [
           { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%" },
-          { "Service": "Vertex AI", "SkuLike": "%Agent Platform%" }
+          { "Service": "Vertex AI", "SkuLike": "%Agent Platform%" },
+          { "Service": "Vertex AI", "SkuLike": "%Predictions%" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay as you go%" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay-as-you-go%" }
         ],
         "Ignore": [
-          { "Service": "Vertex AI Search", "SkuLike": "%Data Index%" },
-          { "Service": "Vertex AI", "SkuLike": "%Predictions%" }
+          { "Service": "Vertex AI Search", "SkuLike": "%Data Index%" }
         ],
-        "WatchTerms": [ "Gemini", "Agent Platform", "Discovery Engine", "Vertex AI Search" ]
+        "WatchTerms": [
+          "Gemini", "Agent Platform", "Discovery Engine", "Vertex AI Search",
+          "Pay as you go", "Pay-as-you-go"
+        ]
       }
     }
   }
 }
 ```
 
-`SkuLike` is a SQL `LIKE` pattern. The rules are global, not per tenant, and
-apply to future extractions: re-run `extract` for earlier days after changing
-them. An empty `Include` list is rejected when extraction starts.
+**To stop counting a category** (for example, report only the seat product and
+keep Agent Platform and raw model usage out), move its rule from `Include` to
+`Ignore`. Moving it, rather than deleting it, keeps the warning quiet about a
+line you have decided about. This configuration puts Agent Platform and model
+usage back out of the totals, as in the first version of the filter:
+
+```json
+{
+  "Meterist": {
+    "Gemini": {
+      "BillingFilter": {
+        "Include": [
+          { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay as you go%" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay-as-you-go%" }
+        ],
+        "Ignore": [
+          { "Service": "Vertex AI Search", "SkuLike": "%Data Index%" },
+          { "Service": "Vertex AI", "SkuLike": "%Agent Platform%" },
+          { "Service": "Vertex AI", "SkuLike": "%Predictions%" }
+        ],
+        "WatchTerms": [
+          "Gemini", "Agent Platform", "Discovery Engine", "Vertex AI Search",
+          "Pay as you go", "Pay-as-you-go"
+        ]
+      }
+    }
+  }
+}
+```
+
+To drop pay-as-you-go as well, move the two `Pay` rules to `Ignore` the same way.
+To count a new SKU Google introduces, add an Include rule for its service and a
+pattern that matches its SKU name; the warning shows you the exact service and
+SKU text to copy.
+
+**Environment variables.** Arrays are numbered from zero and each field is its
+own variable, with `__` as the separator. For example, the first Include rule is:
+
+```powershell
+$env:Meterist__Gemini__BillingFilter__Include__0__Service = "Vertex AI Search"
+$env:Meterist__Gemini__BillingFilter__Include__0__SkuLike = "%Enterprise%"
+```
+
+Environment variables merge with `appsettings.json` index by index, so a leftover
+`Include__3` from an earlier experiment can survive; for anything beyond a quick
+test, prefer editing the JSON.
+
+**After you change the rules.** They apply to future extractions only. Re-run
+`extract` for the earlier days you want recalculated. Gemini days are recalculated from the billing export on each pull, so re-extracting after narrowing or widening the rules gives the new figures. To see the effect before anything is written, run `extract --dry-run` first.
+
 ### ChatGPT Enterprise
 
 **One-time Admin key setup:**

@@ -23,16 +23,19 @@ public class BigQueryGeminiBillingRepositoryTests
     {
         var filter = GeminiBillingFilter.Default;
 
-        var include = Assert.Single(filter.Include);
-        Assert.Equal("Vertex AI Search", include.Service);
-        Assert.Equal("%Enterprise%", include.SkuLike);
+        Assert.Contains(filter.Include, r => r.Service == "Vertex AI Search" && r.SkuLike == "%Enterprise%");
+        // Usage-priced Gemini spend is counted by default: agent platform, model usage, pay as you go.
+        Assert.Contains(filter.Include, r => r.Service == "Vertex AI" && r.SkuLike == "%Agent Platform%");
+        Assert.Contains(filter.Include, r => r.Service == "Vertex AI" && r.SkuLike == "%Predictions%");
+        Assert.Contains(filter.Include, r => r.SkuLike.Contains("Pay as you go"));
+        Assert.Contains(filter.Include, r => r.SkuLike.Contains("Pay-as-you-go"));
 
-        Assert.Contains(filter.Ignore, r => r.Service == "Vertex AI Search" && r.SkuLike == "%Data Index%");
-        Assert.Contains(filter.Ignore, r => r.Service == "Vertex AI" && r.SkuLike == "%Predictions%");
+        // Only data-index storage is knowingly left out.
+        var ignore = Assert.Single(filter.Ignore);
+        Assert.Equal("%Data Index%", ignore.SkuLike);
 
-        // Agent Platform SKUs are watched, not counted: a visible decision, not an accident.
         Assert.Contains("Agent Platform", filter.WatchTerms);
-        Assert.DoesNotContain(filter.Include, r => r.Service == "Vertex AI");
+        filter.Validate();
     }
 
     [Fact]
@@ -40,14 +43,27 @@ public class BigQueryGeminiBillingRepositoryTests
     {
         var sql = BigQueryGeminiBillingRepository.BuildSql(Table, GeminiBillingFilter.Default);
 
-        Assert.Contains("WHERE ((service.description = @incService0 AND sku.description LIKE @incSku0))", sql);
+        Assert.Contains("WHERE ((service.description = @incService0 AND sku.description LIKE @incSku0) OR ", sql);
         Assert.DoesNotContain("Gemini Enterprise", sql);
+    }
+
+    [Fact]
+    public void BuildSql_SingleIncludeRule_IsTheOriginalSeatOnlyFilter()
+    {
+        // What "put them back" looks like: only the seat subscription rule left in Include.
+        var filter = GeminiBillingFilter.Default;
+        filter.Include.RemoveAll(r => r.SkuLike != "%Enterprise%");
+
+        var sql = BigQueryGeminiBillingRepository.BuildSql(Table, filter);
+
+        Assert.Contains("WHERE ((service.description = @incService0 AND sku.description LIKE @incSku0))", sql);
     }
 
     [Fact]
     public void BuildSql_MultipleIncludeRules_AreOrdered_AndEachGetsItsOwnParameters()
     {
         var filter = GeminiBillingFilter.Default;
+        filter.Include.RemoveAll(r => r.SkuLike != "%Enterprise%");
         filter.Include.Add(new GeminiBillingRule { Service = "Vertex AI", SkuLike = "%Agent Platform%" });
 
         var sql = BigQueryGeminiBillingRepository.BuildSql(Table, filter);
@@ -66,8 +82,8 @@ public class BigQueryGeminiBillingRepositoryTests
     {
         var sql = BigQueryGeminiBillingRepository.BuildExcludedSql(Table, GeminiBillingFilter.Default);
 
-        Assert.Contains("NOT ((COALESCE(service.description, '') = @incService0 AND COALESCE(sku.description, '') LIKE @incSku0))", sql);
-        Assert.Contains("AND NOT ((COALESCE(service.description, '') = @ignService0 AND COALESCE(sku.description, '') LIKE @ignSku0) OR (COALESCE(service.description, '') = @ignService1", sql);
+        Assert.Contains("NOT ((COALESCE(service.description, '') = @incService0 AND COALESCE(sku.description, '') LIKE @incSku0) OR ", sql);
+        Assert.Contains("AND NOT ((COALESCE(service.description, '') = @ignService0 AND COALESCE(sku.description, '') LIKE @ignSku0))", sql);
         Assert.Contains("LOWER(COALESCE(sku.description, '')) LIKE @watch0", sql);
         Assert.Contains("HAVING SUM(cost) != 0", sql);
         // Found against live BigQuery, not by a unit test: aliasing the sum as cost makes HAVING SUM(cost)

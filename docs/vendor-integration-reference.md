@@ -577,11 +577,7 @@ not adopted.
   Claude-model SKUs have never been observed. **Implemented (issue #34):** the
   included service/SKU rules are now configuration (Meterist:Gemini:BillingFilter),
   and every extraction warns about non-zero Gemini-looking lines the rules leave
-  out. Decision: Agent Platform compute and memory are pay-as-you-go consumption,
-  not part of the seat product, so they are **not** counted by default (they are
-  watched, and can be counted by adding an Include rule). A live run found only
-  those Agent Platform lines plus a day of raw Gemini model token usage (also
-  ignored by default) outside the filter. See the user guide.
+  out. Decision (revised 2026-11-20): Agent Platform compute and memory, raw Gemini model usage (Predictions SKUs) and pay-as-you-go lines are all counted by default, as usage-priced spend; only Data Index storage is ignored. Each is a configurable Include rule that can be moved to Ignore. The pay-as-you-go SKU names are unverified guesses, and watch terms still flag any such line the rules miss. All of it lands in UsageOrOverage; the per-SKU split is kept only in the raw extraction JSON, not in DailySpendRecord or the report. See the user guide.
 - **Newer per-user and licence paths (documented 2026-07 to 2026-11, not
   used yet):**
   - A Cloud Logging **log sink** to BigQuery (Google blog, 2026-07-15) lands
