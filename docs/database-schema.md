@@ -4,8 +4,9 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, two migrations:
-`20260722033812_InitialCreate` and `20261119172104_AddDailySpendRecordSource`.
+`src/Meterist.Data/Migrations/` — as of this writing, three migrations:
+`20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource` and
+`20261120160643_AddUserDailyUsageRecords`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -55,6 +56,47 @@ on `(TenantId, VendorId, Date)`, **unique**. Re-extracting an already-stored
 day is an upsert against this index — the natural key doubles as the
 overlapping-extraction-window handling, with no special-case merge logic
 needed.
+
+### `UserDailyUsageRecords`
+
+One user's usage for one day on one vendor, the per-user companion of
+`DailySpendRecords` (`Meterist.Core.Models.UserDailyUsageRecord`). Added by
+`AddUserDailyUsageRecords`; **nothing writes to it yet**. The ChatGPT and Claude
+Enterprise adapters will populate it in later sprint issues.
+
+A row exists only for a user-day with usage, because the vendors return
+nothing for idle users. So no row means no usage, and the number of active
+users on a day is the number of distinct `UserId`s.
+
+| Column | Type (SQLite) | Nullable | Notes |
+|---|---|---|---|
+| `Id` | `INTEGER` | No | Surrogate PK, `AUTOINCREMENT`. Shadow property, same rationale as above. |
+| `TenantId` | `TEXT` | No | |
+| `VendorId` | `TEXT` | No | |
+| `Date` | `TEXT` | No | ISO `yyyy-MM-dd`. |
+| `UserId` | `TEXT` | No | The vendor's stable identifier for the user, or for the API key when the vendor attributes to a key. Max 256. Part of the natural key, so it is an id, not an email address that can be renamed. |
+| `UserEmail` | `TEXT` | Yes | Max 320. **Personal data.** |
+| `UserName` | `TEXT` | Yes | Max 256. **Personal data.** |
+| `Amount` | `TEXT` | No | `decimal(18,4)`, USD. Vendor-reported where the vendor gives a dollar figure, otherwise derived (then `IsEstimated` is `1`). |
+| `Credits` | `TEXT` | Yes | `decimal(18,4)`. Credits consumed, for vendors that bill in credits. `NULL` where the vendor has no such concept. |
+| `Requests` | `INTEGER` | Yes | Requests or messages, whichever the vendor reports. `NULL` where no count is reported. |
+| `IsEstimated` | `INTEGER` | No | `1` when `Amount` is an estimate rather than a billed figure; reports must label it. |
+| `Attribution` | `TEXT` | No | `Person`, `ApiKey` or `Allocated` (`UsageAttribution`), stored as text so it is readable in SQL and reordering the enum cannot relabel history. `ApiKey`: the vendor reported the usage against a key, not a person. `Allocated`: Meterist divided an aggregate across users. |
+
+**Primary key:** `Id` (surrogate).
+**Natural key / unique index:** `IX_UserDailyUsageRecords_TenantId_VendorId_Date_UserId`
+on `(TenantId, VendorId, Date, UserId)`, **unique**. Storing a user-day already
+stored is an upsert against this index, replacing every field. Rows absent from a
+later pull are **not** deleted: the vendors return only users with usage, so an
+absent row may just be a window edge. A single batch holding two rows for one key
+is rejected.
+
+**Personal data.** Users are named in reports by operator decision, so this table
+holds names and emails. Keep them out of logs at Information level and above and
+out of anything committed to the repository; populated reports stay under
+`artifacts/`. The model is a class with the default `ToString`, and the
+repository's error messages name only the date, so an accidental log line does
+not print a person.
 
 ### `RawDailyExtractionRecords`
 
@@ -131,7 +173,10 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 ## Appendix: verbatim schema dump
 
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
-live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied):
+live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied). The
+`UserDailyUsageRecords` table and its index at the end were added afterwards, taken
+from a freshly migrated empty database, not the live file; regenerate the whole dump
+from the live database once `AddUserDailyUsageRecords` has been applied there:
 
 > **Why `DailySpendRecords` ends with `, "Source" TEXT NULL);` on its own
 > line.** That is not a typo and not hand-edited: it is exactly how SQLite
@@ -185,4 +230,19 @@ CREATE TABLE IF NOT EXISTS "VendorRateConfigs" (
 CREATE UNIQUE INDEX "IX_DailySpendRecords_TenantId_VendorId_Date" ON "DailySpendRecords" ("TenantId", "VendorId", "Date");
 CREATE UNIQUE INDEX "IX_RawDailyExtractionRecords_TenantId_VendorId_Date" ON "RawDailyExtractionRecords" ("TenantId", "VendorId", "Date");
 CREATE INDEX "IX_VendorRateConfigs_TenantId_VendorId_ModelOrSku_EffectiveFrom" ON "VendorRateConfigs" ("TenantId", "VendorId", "ModelOrSku", "EffectiveFrom");
+CREATE TABLE IF NOT EXISTS "UserDailyUsageRecords" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_UserDailyUsageRecords" PRIMARY KEY AUTOINCREMENT,
+    "TenantId" TEXT NOT NULL,
+    "VendorId" TEXT NOT NULL,
+    "Date" TEXT NOT NULL,
+    "UserId" TEXT NOT NULL,
+    "UserEmail" TEXT NULL,
+    "UserName" TEXT NULL,
+    "Amount" TEXT NOT NULL,
+    "Credits" TEXT NULL,
+    "Requests" INTEGER NULL,
+    "IsEstimated" INTEGER NOT NULL,
+    "Attribution" TEXT NOT NULL
+);
+CREATE UNIQUE INDEX "IX_UserDailyUsageRecords_TenantId_VendorId_Date_UserId" ON "UserDailyUsageRecords" ("TenantId", "VendorId", "Date", "UserId");
 ```

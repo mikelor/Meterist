@@ -12,6 +12,8 @@ public sealed class MeteristDbContext : DbContext
 
     public DbSet<DailySpendRecord> DailySpendRecords => Set<DailySpendRecord>();
 
+    public DbSet<UserDailyUsageRecord> UserDailyUsageRecords => Set<UserDailyUsageRecord>();
+
     public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
     public DbSet<VendorRateConfig> VendorRateConfigs => Set<VendorRateConfig>();
@@ -42,6 +44,27 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.NetSpend).HasPrecision(18, 4);
 
             entity.Property(r => r.Source).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<UserDailyUsageRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            // Natural key: one row per user per day per vendor per tenant. Re-storing a day is an
+            // upsert against this index. Queries by tenant and date range use its leading columns.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.Date, r.UserId }).IsUnique();
+
+            entity.Property(r => r.UserId).HasMaxLength(256);
+            entity.Property(r => r.UserEmail).HasMaxLength(320);
+            entity.Property(r => r.UserName).HasMaxLength(256);
+
+            entity.Property(r => r.Amount).HasPrecision(18, 4);
+            entity.Property(r => r.Credits).HasPrecision(18, 4);
+
+            // Stored as text so the column is readable in ad-hoc SQL and reordering the enum
+            // cannot silently relabel history.
+            entity.Property(r => r.Attribution).HasConversion<string>().HasMaxLength(16);
         });
 
         modelBuilder.Entity<RawDailyExtractionRecord>(entity =>

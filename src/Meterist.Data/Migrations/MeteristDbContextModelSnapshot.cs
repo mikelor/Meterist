@@ -15,7 +15,7 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261119172104_AddDailySpendRecordSource";
+    public override string LastMigrationId => "20261120160643_AddUserDailyUsageRecords";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -68,6 +68,62 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
                     .IsUnique();
 
                 b.ToTable("DailySpendRecords");
+            });
+
+        modelBuilder.Entity("Meterist.Core.Models.UserDailyUsageRecord", b =>
+            {
+                b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("INTEGER");
+
+                b.Property<decimal>("Amount")
+                    .HasPrecision(18, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Attribution")
+                    .IsRequired()
+                    .HasMaxLength(16)
+                    .HasColumnType("TEXT");
+
+                b.Property<decimal?>("Credits")
+                    .HasPrecision(18, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<DateOnly>("Date")
+                    .HasColumnType("TEXT");
+
+                b.Property<bool>("IsEstimated")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long?>("Requests")
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("TenantId")
+                    .IsRequired()
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("UserEmail")
+                    .HasMaxLength(320)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("UserId")
+                    .IsRequired()
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("UserName")
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid>("VendorId")
+                    .HasColumnType("TEXT");
+
+                b.HasKey("Id");
+
+                b.HasIndex("TenantId", "VendorId", "Date", "UserId")
+                    .IsUnique();
+
+                b.ToTable("UserDailyUsageRecords");
             });
 
         modelBuilder.Entity("Meterist.Core.Models.VendorRateConfig", b =>
