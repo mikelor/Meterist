@@ -30,10 +30,11 @@ public sealed class VendorReportData
 
     /// <summary>
     /// True when the breakdown says something the weekly figures do not: a usage kind other than the seat fee,
-    /// or any non-usage charge. A vendor that is only a seat fee has nothing to add.
+    /// or any non-usage charge, that is worth at least half a cent. A vendor that is only a seat fee, or a seat
+    /// fee plus invoice rounding, has nothing to add.
     /// </summary>
     public bool HasNotableBreakdown =>
-        Breakdown.Any(b => !b.IsUsage || b.Category != Models.SpendCategories.Seat);
+        Breakdown.Any(b => !b.IsNegligible && (!b.IsUsage || b.Category != Models.SpendCategories.Seat));
 
     public decimal TotalSeatFee => Weeks.Sum(w => w.SeatFee);
 

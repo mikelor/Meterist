@@ -1022,7 +1022,7 @@ static Command BuildAuditCommand(IHost host)
             }
 
             var table = new Table().AddColumns("Kind", "In totals?", "Days with charge", "Amount", "SKUs");
-            foreach (var total in totals)
+            foreach (var total in totals.Where(t => !t.IsNegligible))
             {
                 table.AddRow(
                     Markup.Escape(total.Category),
@@ -1049,6 +1049,15 @@ static Command BuildAuditCommand(IHost host)
                     ? " [yellow]They differ: the breakdown and the daily records came from different extractions "
                       + "or rules; re-run extract for this period.[/]"
                     : string.Empty));
+
+            var negligible = totals.Where(t => t.IsNegligible).ToList();
+            if (negligible.Count > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [grey]{negligible.Count} kind(s) under half a cent are not listed ("
+                    + string.Join(", ", negligible.Select(t => Markup.Escape(t.Category)))
+                    + "); they are included in the totals.[/]");
+            }
 
             if (nonUsageTotal != 0m)
             {

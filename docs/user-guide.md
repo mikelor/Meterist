@@ -285,7 +285,9 @@ it had a charge, its amount and the SKU names behind it. Below the table it chec
 the usage kinds add up to the stored gross spend for the same days and says so if they do
 not (which means the breakdown and the daily records came from different extractions or
 rules: re-run `extract` for that period), shows the not-counted total, and counts any days
-that have spend but no breakdown rows. The client report shows the same split in its
+that have spend but no breakdown rows. A kind worth under half a cent (Google's invoice
+rounding line, for example) is not listed, since it would only read as a bare `$0.00`; a line
+under the table names it, and it is still included in every total. The client report shows the same split in its
 "Spend by kind of charge" section, for a vendor that has something beyond a seat fee or any
 not-counted charge; the weekly figures and projections do not use it.
 

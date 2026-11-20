@@ -432,7 +432,8 @@ public static class ClientBenchmarkReportRenderer
 
             foreach (var vendor in vendors)
             {
-                foreach (var kind in vendor.Breakdown)
+                // A kind under half a cent would read as a bare "$0.00" row; it stays in the subtotals below.
+                foreach (var kind in vendor.Breakdown.Where(b => !b.IsNegligible))
                 {
                     var label = kind.IsUsage ? Encode(kind.Category) : $"{Encode(kind.Category)} <span class=\"muted-dash\">(not counted)</span>";
                     html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.Vendor.DisplayName)}</th>\n            <td>{label}</td>\n            <td class=\"figure tabular\">{kind.Days}</td>\n            <td class=\"figure tabular\">{Money(kind.Amount)}</td>\n          </tr>\n");

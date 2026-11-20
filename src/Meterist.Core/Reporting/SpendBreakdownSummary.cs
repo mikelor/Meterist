@@ -8,7 +8,17 @@ namespace Meterist.Core.Reporting;
 /// shown for reconciliation and is never part of any total.
 /// </summary>
 public sealed record BreakdownCategoryTotal(
-    string Category, bool IsUsage, decimal Amount, int Days, IReadOnlyList<string> Details);
+    string Category, bool IsUsage, decimal Amount, int Days, IReadOnlyList<string> Details)
+{
+    /// <summary>Under half a cent: real, but it prints as $0.00 (an invoice's rounding line, for example).</summary>
+    public const decimal NegligibleBelow = 0.005m;
+
+    /// <summary>
+    /// True when the amount rounds to zero cents. Such a kind is left off a table, where it would only read as
+    /// a confusing "$0.00" row, but it stays in every total, which are computed from all kinds.
+    /// </summary>
+    public bool IsNegligible => Math.Abs(Amount) < NegligibleBelow;
+}
 
 public static class SpendBreakdownSummary
 {

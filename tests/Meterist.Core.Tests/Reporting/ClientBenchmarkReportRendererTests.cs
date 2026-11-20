@@ -177,6 +177,37 @@ public class ClientBenchmarkReportRendererTests
     }
 
     [Fact]
+    public void SpendByKind_HidesAKindUnderHalfACent_ButKeepsItInTheSubtotal()
+    {
+        var gemini = Vendor(VendorCatalog.GeminiEnterprise, FullWeeks(100), NoSources, breakdown:
+        [
+            new BreakdownCategoryTotal("Seat", true, 1000m, 140, ["Plus: Subscription"]),
+            new BreakdownCategoryTotal("Tax", false, 90m, 5, ["Tax"]),
+            new BreakdownCategoryTotal("Rounding", false, 0.004m, 4, ["Rounding Error"]),
+        ]);
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(TenantWith("tenant-a", gemini)));
+
+        Assert.DoesNotContain("Rounding <span", html);   // no bare "$0.00" row
+        Assert.Contains("Tax <span class=\"muted-dash\">(not counted)</span>", html);
+        Assert.Contains("$90.00", html);                // the subtotal: 90 + 0.004 rounds to 90.00
+    }
+
+    [Fact]
+    public void SpendByKind_IsLeftOut_WhenTheOnlyExtraIsInvoiceRounding()
+    {
+        var gemini = Vendor(VendorCatalog.GeminiEnterprise, FullWeeks(100), NoSources, breakdown:
+        [
+            new BreakdownCategoryTotal("Seat", true, 1000m, 140, ["Plus: Subscription"]),
+            new BreakdownCategoryTotal("Rounding", false, 0.004m, 4, ["Rounding Error"]),
+        ]);
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(TenantWith("tenant-a", gemini)));
+
+        Assert.DoesNotContain("<h2>Spend by kind of charge</h2>", html);
+    }
+
+    [Fact]
     public void SpendByKind_IsLeftOut_WhenEveryVendorIsOnlyASeatFee()
     {
         var gemini = Vendor(VendorCatalog.GeminiEnterprise, FullWeeks(100, 100, 100), NoSources, breakdown:

@@ -64,6 +64,30 @@ public class SpendBreakdownSummaryTests
         Assert.Empty(SpendBreakdownSummary.Summarize([]));
     }
 
+    [Theory]
+    [InlineData(0.0049, true)]
+    [InlineData(-0.0049, true)]
+    [InlineData(0.005, false)]
+    [InlineData(0.02, false)]
+    [InlineData(-3, false)]
+    public void IsNegligible_IsTrueOnlyBelowHalfACent(double amount, bool expected)
+    {
+        var total = new BreakdownCategoryTotal("Rounding", false, (decimal)amount, 1, []);
+
+        Assert.Equal(expected, total.IsNegligible);
+    }
+
+    [Fact]
+    public void Summarize_StillReturnsANegligibleKind_SoTotalsCanIncludeIt()
+    {
+        // Display code hides it; the summary itself must not lose it, or subtotals would drift.
+        var totals = SpendBreakdownSummary.Summarize([Row(D1, "Seat", 10m), Row(D1, "Rounding", 0.003m, isUsage: false)]);
+
+        var rounding = Assert.Single(totals, t => t.Category == "Rounding");
+        Assert.True(rounding.IsNegligible);
+        Assert.Equal(0.003m, rounding.Amount);
+    }
+
     private static DailySpendBreakdownRecord Row(
         DateOnly date, string category, decimal amount, string detail = "", bool isUsage = true) => new()
     {
