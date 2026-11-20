@@ -59,6 +59,8 @@ public sealed class GeminiEnterpriseSpendExtractor : IVendorSpendExtractor
             .QueryBillingRowsAsync(credential, period, cancellationToken)
             .ConfigureAwait(false);
 
+        await WarnAboutExcludedChargesAsync(tenantId, credential, period, cancellationToken).ConfigureAwait(false);
+
         var recordsByDate = rows
             .GroupBy(row => (DateOnly)row[GeminiBillingRowFields.RecordDate]!)
             .ToDictionary(
@@ -76,6 +78,47 @@ public sealed class GeminiEnterpriseSpendExtractor : IVendorSpendExtractor
             Period = period,
             RecordsByDate = recordsByDate,
         };
+    }
+
+    // A Gemini-looking SKU the filter does not count is either correctly out of scope or a
+    // charge we are silently missing (Google keeps adding SKUs), and only a person can tell
+    // which. So it is reported on every run, but never fails the extraction: this is a
+    // diagnostic, and the spend figures themselves do not depend on it.
+    private async Task WarnAboutExcludedChargesAsync(
+        string tenantId, GeminiCredential credential, DateRange period, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ExcludedBillingLine> excluded;
+        try
+        {
+            excluded = await _billingRepository
+                .FindExcludedChargesAsync(credential, period, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex, "Could not check tenant '{TenantId}' for Gemini-related billing lines outside the filter.", tenantId);
+            return;
+        }
+
+        if (excluded.Count == 0)
+        {
+            return;
+        }
+
+        const int Shown = 8;
+        var lines = string.Join(
+            "; ",
+            excluded.Take(Shown).Select(l =>
+                $"{l.Service} | {l.Sku}: {l.Cost:F2} ({l.FirstDate:yyyy-MM-dd} to {l.LastDate:yyyy-MM-dd})"));
+
+        _logger.LogWarning(
+            "Tenant '{TenantId}' has {Count} Gemini-related billing line(s) with non-zero cost that the Gemini Enterprise "
+            + "filter does not count: {Lines}{More}. If they belong in Gemini Enterprise spend, add an Include rule under "
+            + "{Section}; if not, add an Ignore rule to silence this.",
+            tenantId, excluded.Count, lines,
+            excluded.Count > Shown ? $"; and {excluded.Count - Shown} more" : string.Empty,
+            GeminiBillingFilter.ConfigurationSection);
     }
 
     private async Task<GeminiCredential> LoadCredentialAsync(string tenantId, CancellationToken cancellationToken)

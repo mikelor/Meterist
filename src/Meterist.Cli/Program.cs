@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.CommandLine;
 using System.Net.Http;
 using Meterist.Core.Auditing;
@@ -14,6 +15,7 @@ using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
@@ -33,6 +35,13 @@ builder.AddServiceDefaults();
 builder.Services.AddMeteristData();
 builder.Services.AddMeteristSecretStore();
 
+// Which billing lines count as Gemini Enterprise spend is configuration (appsettings), with the
+// verified defaults used when the section is absent.
+var geminiBillingSection = builder.Configuration.GetSection(GeminiBillingFilter.ConfigurationSection);
+builder.Services.AddSingleton(
+    geminiBillingSection.Exists()
+        ? geminiBillingSection.Get<GeminiBillingFilter>() ?? GeminiBillingFilter.Default
+        : GeminiBillingFilter.Default);
 builder.Services.AddSingleton<IGeminiBillingQueryRepository, BigQueryGeminiBillingRepository>();
 builder.Services.AddSingleton<IVendorSpendNormalizer, GeminiEnterpriseSpendNormalizer>();
 
@@ -611,8 +620,77 @@ static Command BuildAuditCommand(IHost host)
         return report.HasProblems ? 1 : 0;
     });
 
+    var breakdownCommand = new Command(
+        "gemini-breakdown",
+        "Split stored Gemini Enterprise spend by kind of charge (seat, overage, Agent Platform, model usage, "
+        + "pay-as-you-go), from the stored raw billing rows. Read-only.");
+    breakdownCommand.Options.Add(tenantOption);
+    breakdownCommand.Options.Add(fromOption);
+    breakdownCommand.Options.Add(toOption);
+
+    breakdownCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantIds = parseResult.GetValue(tenantOption)!;
+        var period = new DateRange(
+            DateOnly.FromDateTime(parseResult.GetValue(fromOption)),
+            DateOnly.FromDateTime(parseResult.GetValue(toOption)));
+
+        if (period.Start > period.End)
+        {
+            AnsiConsole.MarkupLine("[red]--from must not be after --to.[/]");
+            return 1;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var rawRepository = scope.ServiceProvider.GetRequiredService<IRawExtractionRepository>();
+        var dailyRepository = scope.ServiceProvider.GetRequiredService<IDailySpendRepository>();
+
+        foreach (var tenantId in tenantIds)
+        {
+            var rawByDay = await rawRepository.GetRecordsJsonAsync(
+                tenantId, VendorCatalog.GeminiEnterprise.Id, period, cancellationToken);
+            var stored = await dailyRepository.GetAsync(
+                tenantId, VendorCatalog.GeminiEnterprise.Id, period, cancellationToken);
+            var storedGross = stored.Sum(r => r.GrossSpend);
+
+            AnsiConsole.MarkupLine(
+                $"[bold]Meterist[/] — Gemini Enterprise spend by kind, [yellow]{Markup.Escape(tenantId)}[/], "
+                + $"{period.Start:yyyy-MM-dd} to {period.End:yyyy-MM-dd}");
+
+            var totals = GeminiCostBreakdown.Summarize(rawByDay.Values);
+            if (totals.Count == 0)
+            {
+                AnsiConsole.MarkupLine("  [grey]No stored Gemini billing rows in this period.[/]");
+                continue;
+            }
+
+            var table = new Table().AddColumns("Kind", "Days with charge", "Cost", "SKUs");
+            foreach (var total in totals)
+            {
+                table.AddRow(
+                    total.Category.ToString(),
+                    total.Days.ToString(CultureInfo.InvariantCulture),
+                    total.Cost.ToString("C2", CultureInfo.GetCultureInfo("en-US")),
+                    Markup.Escape(string.Join("; ", total.Skus)));
+            }
+
+            AnsiConsole.Write(table);
+
+            var breakdownTotal = totals.Sum(t => t.Cost);
+            AnsiConsole.MarkupLine(
+                $"  Breakdown total {breakdownTotal.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}; "
+                + $"stored gross spend {storedGross.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}."
+                + (Math.Abs(breakdownTotal - storedGross) > 0.005m
+                    ? " [yellow]They differ: the raw rows and the stored records were written by different "
+                      + "extractions or rules; re-run extract for this period.[/]"
+                    : string.Empty));
+        }
+
+        return 0;
+    });
     var auditCommand = new Command("audit", "Data-quality checks on the stored spend data");
     auditCommand.Subcommands.Add(coverageCommand);
+    auditCommand.Subcommands.Add(breakdownCommand);
     return auditCommand;
 }
 

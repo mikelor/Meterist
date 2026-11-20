@@ -403,6 +403,10 @@ public class SpendExtractionServiceTests
             WasCalled = true;
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyDictionary<DateOnly, string>> GetRecordsJsonAsync(
+            string tenantId, Guid vendorId, DateRange period, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<DateOnly, string>>(new Dictionary<DateOnly, string>());
     }
 
     private sealed class FakeDailySpendRepository(

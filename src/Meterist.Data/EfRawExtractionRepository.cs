@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Meterist.Core.Persistence;
+using Meterist.Core.Vendors;
 using Microsoft.EntityFrameworkCore;
 
 namespace Meterist.Data;
@@ -11,6 +12,21 @@ public sealed class EfRawExtractionRepository : IRawExtractionRepository
     public EfRawExtractionRepository(MeteristDbContext context)
     {
         _context = context;
+    }
+
+    public async Task<IReadOnlyDictionary<DateOnly, string>> GetRecordsJsonAsync(
+        string tenantId,
+        Guid vendorId,
+        DateRange period,
+        CancellationToken cancellationToken = default)
+    {
+        var rows = await _context.RawDailyExtractionRecords
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && r.VendorId == vendorId && r.Date >= period.Start && r.Date <= period.End)
+            .Select(r => new { r.Date, r.RecordsJson })
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.Date, r => r.RecordsJson);
     }
 
     public async Task UpsertAsync(

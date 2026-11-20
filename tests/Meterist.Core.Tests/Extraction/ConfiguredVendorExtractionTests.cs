@@ -145,6 +145,10 @@ public class ConfiguredVendorExtractionTests
             string tenantId, Guid vendorId,
             IReadOnlyDictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>> recordsByDate,
             DateTime extractedAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyDictionary<DateOnly, string>> GetRecordsJsonAsync(
+            string tenantId, Guid vendorId, DateRange period, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<DateOnly, string>>(new Dictionary<DateOnly, string>());
     }
 
     private sealed class NoOpDailyRepository : IDailySpendRepository
