@@ -237,8 +237,19 @@ not adopted.
       `email_address` field name (the legacy report used `email`). The beta label
       means the schema can still move, so keep the legacy endpoint as a fallback
       and cross-check rather than removing it.
-    - **Still unverified:** whether one key can carry `read:analytics`,
-      `read:members` and `read:spend_limits` together (not tested here).
+    - **Key scopes, partly settled (2026-11-20, issue #30):** the Analytics key already stored for each tenant is
+      **accepted by the member list** (`GET /v1/organizations/users`, which needs `read:members` or `read:org_audit`)
+      on both tenants, so it carries more than `read:analytics` and no second credential is needed for the roster.
+      Whether it also carries `read:spend_limits` (issue #26) is still untested.
+  - **Member roster (issue #30, 2026-11-20).** `HttpClaudeMemberRosterRepository` reads `GET /v1/organizations/users`
+    (`limit=1000`, cursor `after_id` taken from `last_id` while `has_more`) with the stored key and
+    `anthropic-version: 2023-06-01`. A member is `id`, `type`, `email`, `name`, `role` and `added_at`; there is no
+    seat type or last-activity field (last activity comes from `/analytics/users`). Roles seen live: `user`,
+    `managed`, `owner`, `membership_admin` and `primary_owner`. Name and email were present on every member of both
+    tenants, and ids were unique. Pagination fails loudly on a blank or repeated cursor, a member with no id, or
+    running out of pages, because a partial list stored as a snapshot would read as people having left; an empty
+    list is also refused (an organisation always has an owner). Stored as dated snapshots by
+    `meterist roster snapshot` (see the user guide).
 
 ### Claude API Platform (developer API — billed separately from Claude Enterprise) — IMPLEMENTED (2026-07-22)
 
@@ -799,7 +810,7 @@ none of it is stored per user yet (Sprint 2).
 
 | Vendor | Credential type | Who provisions it | Notes |
 |---|---|---|---|
-| Claude Enterprise | Analytics API key | Org primary owner only | `read:analytics` scope. Roster and spend-limit reads would need `read:members` / `read:spend_limits` (unverified whether one key can hold all three) |
+| Claude Enterprise | Analytics API key | Org primary owner only | `read:analytics` scope, and (live-tested 2026-11-20) the member list works with the same key; spend-limit reads would need `read:spend_limits` (untested) |
 | Claude API Platform | Admin API key | Org admin | Separate key from Analytics API |
 | ChatGPT Enterprise | Workspace Admin key plus the organization ID and, for the Daily Usage API, the workspace ID | Workspace owner/admin | Global Admin Console → Credentials. Scopes: Compliance logging platform → Costs (Read), and Enterprise analytics API (Read) for Daily Usage |
 | Gemini Enterprise | GCP service account (JSON key or workload identity) | GCP project owner/IAM admin | Needs BigQuery IAM roles; billing export enabled once per billing account |

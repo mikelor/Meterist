@@ -727,6 +727,33 @@ dollars are usage credits only, so read requests and days active as the activity
 signal. The output names people, so keep it out of anything you commit; reports that
 include it belong under `artifacts/`.
 
+### Rosters: who holds a seat
+
+A roster is a vendor's member list. Spend and usage say what people did; the roster says who *has* a seat, which is
+what you need to spot idle seats later. Today it works for **Claude Enterprise**, using the same key your spend
+extraction already stores (nothing new to set up).
+
+```powershell
+dotnet run --project src/Meterist.Cli -- roster snapshot --tenant <your-tenant-id> --vendor claude-enterprise --dry-run
+dotnet run --project src/Meterist.Cli -- roster snapshot --tenant <your-tenant-id> --vendor claude-enterprise
+dotnet run --project src/Meterist.Cli -- roster show --tenant <your-tenant-id> --vendor claude-enterprise
+```
+
+- **`roster snapshot`** fetches the member list and stores it as a snapshot dated today (UTC). `--dry-run` shows the
+  member count by role and what would change, writing nothing. Taking another snapshot the same day replaces that
+  day's; earlier days are kept.
+- **`roster show`** prints a stored snapshot, by name and email with each member's role and when they were added, and
+  says how many snapshots are stored. `--on-or-before 2026-10-31` shows the latest one taken on or before a date.
+- **Take snapshots regularly.** Vendors keep no membership history, so a snapshot is the only record of who was on
+  the list that day. Nothing schedules it yet; running it daily alongside the extraction is the intent.
+- **It stops rather than store a wrong list.** If the member list cannot be read in full (a cursor problem, a member
+  with no id) or comes back empty, or the vendor is unavailable (a rate limit, a server error, a timeout, an
+  unreadable response), the command prints a message saying so, exits non-zero and stores nothing, because a partial
+  snapshot would look like people leaving. A `401`/`403` means the stored key lacks the `read:members` (or `read:org_audit`)
+  scope.
+
+The output names people, so keep it out of anything you commit; it stays in the database and under `artifacts/`.
+
 ### Running extraction on a schedule
 
 Run extraction daily. ChatGPT Enterprise's cost export keeps only about 29

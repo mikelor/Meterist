@@ -4,9 +4,10 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, four migrations:
+`src/Meterist.Data/Migrations/` — as of this writing, five migrations:
 `20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
-`20261120160643_AddUserDailyUsageRecords` and `20261120183237_AddDailySpendBreakdownRecords`.
+`20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords` and
+`20261120193404_AddMemberRosterRecords`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -132,6 +133,40 @@ that are absent from the batch **removed** (Google can revise or drop a line). D
 are never touched, and a batch that is malformed (two rows for one key, a row for another tenant or vendor or
 an uncovered day, a blank category) is rejected before anything is staged.
 
+### `MemberRosterRecords`
+
+A vendor's member list as it stood on a day (`Meterist.Core.Models.MemberRosterRecord`): one row per tenant,
+vendor, snapshot date and member. Added by `AddMemberRosterRecords`; **Claude Enterprise populates it**
+(issue #30) with `roster snapshot`. ChatGPT Enterprise follows in a later issue.
+
+A roster is what a tenant *has* (who holds a seat), not what people *did*. Snapshots are dated and kept, because
+the vendors expose no membership history: a snapshot is the only record of who was on the list that day.
+
+| Column | Type (SQLite) | Nullable | Notes |
+|---|---|---|---|
+| `Id` | `INTEGER` | No | Surrogate PK, `AUTOINCREMENT`. Shadow property, same rationale as above. |
+| `TenantId` | `TEXT` | No | |
+| `VendorId` | `TEXT` | No | |
+| `SnapshotDate` | `TEXT` | No | ISO `yyyy-MM-dd`, the **UTC** date the snapshot was taken. |
+| `MemberId` | `TEXT` | No | The vendor's stable member id (max 256). Part of the natural key, so not an email address. |
+| `Email` | `TEXT` | Yes | Max 320. **Personal data.** |
+| `Name` | `TEXT` | Yes | Max 256. **Personal data.** |
+| `Role` | `TEXT` | Yes | The vendor's own role name (Claude: `user`, `managed`, `owner`, `membership_admin`, `primary_owner`). Max 64. |
+| `SeatType` | `TEXT` | Yes | The seat or licence type, for vendors that report one. Claude does not, so it is `NULL`. Max 64. |
+| `AddedAt` | `TEXT` | Yes | When the member joined, as the vendor reports it (ISO 8601, UTC). |
+
+**Primary key:** `Id` (surrogate).
+**Natural key / unique index:** `IX_MemberRosterRecords_TenantId_VendorId_SnapshotDate_MemberId` on
+`(TenantId, VendorId, SnapshotDate, MemberId)`, **unique**.
+
+**Stored as a whole.** Taking a snapshot replaces that day's rows exactly: new members added, changed fields
+updated, and members absent from the new list **removed** from that day's snapshot. Other days are never touched.
+A batch with the same member id twice, a row for another tenant, vendor or date, or a blank id is rejected before
+anything is staged, and an empty list is refused by the service rather than stored as "everyone left".
+
+**Personal data.** Names and emails stay in the database and in output under `artifacts/`, out of logs and out
+of anything committed. The model is a class with the default `ToString`, and error messages name no member.
+
 ### `RawDailyExtractionRecords`
 
 Raw, unnormalized vendor API responses, kept alongside the normalized
@@ -209,9 +244,9 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
 live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied). The
 `UserDailyUsageRecords` and `DailySpendBreakdownRecords` tables and their indexes at the end
-were added afterwards, taken from a freshly migrated empty database, not the live file;
-regenerate the whole dump from the live database once `AddDailySpendBreakdownRecords` has
-been applied there:
+were added afterwards (as was `MemberRosterRecords`), taken from a freshly migrated empty database,
+not the live file; regenerate the whole dump from the live database once
+`AddMemberRosterRecords` has been applied there:
 
 > **Why `DailySpendRecords` ends with `, "Source" TEXT NULL);` on its own
 > line.** That is not a typo and not hand-edited: it is exactly how SQLite
@@ -291,4 +326,17 @@ CREATE TABLE IF NOT EXISTS "DailySpendBreakdownRecords" (
     "IsUsage" INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX "IX_DailySpendBreakdownRecords_TenantId_VendorId_Date_Category_Detail" ON "DailySpendBreakdownRecords" ("TenantId", "VendorId", "Date", "Category", "Detail");
+CREATE TABLE IF NOT EXISTS "MemberRosterRecords" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_MemberRosterRecords" PRIMARY KEY AUTOINCREMENT,
+    "TenantId" TEXT NOT NULL,
+    "VendorId" TEXT NOT NULL,
+    "SnapshotDate" TEXT NOT NULL,
+    "MemberId" TEXT NOT NULL,
+    "Email" TEXT NULL,
+    "Name" TEXT NULL,
+    "Role" TEXT NULL,
+    "SeatType" TEXT NULL,
+    "AddedAt" TEXT NULL
+);
+CREATE UNIQUE INDEX "IX_MemberRosterRecords_TenantId_VendorId_SnapshotDate_MemberId" ON "MemberRosterRecords" ("TenantId", "VendorId", "SnapshotDate", "MemberId");
 ```
