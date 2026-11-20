@@ -254,7 +254,7 @@ not adopted.
     (see the retention notes below). In live tests its history reached back to
     April and May 2026 for the two tenants, months beyond `COSTS`, which let
     the days lost to the overwrite bug and to a missed-run gap be recovered.
-    Its exact history depth is still undocumented (issue #10).
+    See "Daily Usage history depth" below for what the live probe found (issue #10).
   - **Money semantics:** `credits` is credit-priced usage; `cost_usd` is
     natively USD-priced usage (`null` on every row for credit-billed
     workspaces, which both tenants are); `estimated_cost_usd` estimates the
@@ -266,11 +266,64 @@ not adopted.
     rather than falling back silently. Without a `WorkspaceId` it falls back to
     `COSTS` alone. Each stored day records which source supplied it
     (`DailySpendRecords.Source`).
-  - **Known differences to settle (issue #10):** `COSTS` counts slightly more
-    than Daily Usage on some days (under half a percent in total for one
-    tenant, mostly Mondays); and one tenant's May credits from the API
-    disagree substantially with the console CSV downloaded in July, so treat
-    anything before June as unconfirmed.
+  - **Daily Usage history depth and reliability (spike #10, live-probed 2026-11-20, read-only).**
+    - **History is a fixed start date per workspace, not a rolling window.**
+      Requesting from 2026-01-01 returned data from a different first day for
+      each tenant (2026-04-19 and 2026-05-25), the same first days as the
+      probe a day earlier (so no day-over-day creep), and the two spans (216
+      and 180 days) are not one fixed length. The start date looks like when
+      the workspace's analytics began. It is a property of each workspace, so
+      check it per tenant; it is not documented by the vendor.
+    - **A row exists only for a day with usage.** One tenant had a single
+      day without a row in its whole history; the other had 19, all of them
+      weekend days. Meterist writes such a day as no usage, which is correct, but
+      it means a missing row cannot be told apart from a day the API does not
+      cover. Only a day before the tenant's first day is outside coverage.
+    - **Per-user and workspace grouping agree exactly** (one tenant's May:
+      identical credit totals either way), so the daily workspace row can be
+      trusted as the sum of its users.
+    - **The earliest weeks are real but tiny, not truncated.** The first days
+      of history carry a handful of credits and ramp up over weeks, with no
+      abrupt cutoff, which looks like a workspace still being rolled out
+      rather than the API under-reporting.
+    - **Unexplained early-month gap, still open.** For one tenant, May credits
+      from the API are about 55% of the console Workspace Analytics CSV for the
+      same month (the CSV downloaded in July), while June matches to one credit.
+      Both groupings of the API agree with each other, and May is dominated by
+      Codex clients (about three quarters of that month's credits), so a
+      difference in whether the CSV counts some Codex or other usage that the
+      unified API did not record in its first weeks is the leading but unproven
+      explanation. Resolving it needs the CSV broken down by client and day.
+    - **Trust boundary, provisional:** treat the API as authoritative from the
+      first full month after a tenant's first day, and the first month as
+      unconfirmed against the console.
+  - **COSTS vs Daily Usage, explained (spike #10, 2026-11-20).** Compared per
+    day over the last 29 days for both tenants; the two sources agree to within
+    a small fraction of a percent overall, and the differences have three
+    separate causes:
+    - **`COSTS` lines with no user attached.** On one tenant, Mondays carried
+      `COSTS` lines with an empty `user_id` (model usage with no person
+      behind it). The Daily Usage API returns per-user rows only, so those
+      lines never appear in it. On the two Mondays checked in detail, the
+      unattributed lines equalled the day's whole difference to the cent. The
+      other tenant showed none. Why the lines recur on Mondays is not known
+      (a weekly scheduled or system job is the obvious candidate).
+    - **Non-token SKUs.** `COSTS` also carries lines such as `site hosting | ...`
+      (a few cents a day) that the API's per-model totals do not include. This
+      is the steady small gap on most days of the same tenant.
+    - **`COSTS` missing events, and unfinished days.** On the other tenant the
+      API was sometimes higher, by multiples of about ten credits, so a few
+      `COSTS` events were absent on some days of any weekday. The most recent
+      day in the data was far lower in `COSTS` (about 14%), consistent with the
+      export not having received that day's events yet, which is another
+      reason it is only a cross-check.
+    - **Consequence:** stored ChatGPT usage, taken from the Daily Usage API,
+      understates the invoice-relevant total by the unattributed and non-token
+      lines, around one percent or less for the tenant affected. If that ever
+      matters, the fix is to add the `COSTS`-only residual (lines with no user,
+      and non-token SKUs) as a separate reconciling amount, not to switch source.
+    - Reproduce with `scripts/QueryChatGptSourceComparison.sql` (per-day
+      totals) and `scripts/QueryChatGptMondayDetail.sql` (per user and SKU).
   - **Not yet stored:** the per-user rows are not persisted yet; the adapter
     keeps the daily total. Per-user storage is Sprint 2.
 - **Other documented surfaces (2026-11-19 research, not used yet):** the

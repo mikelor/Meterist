@@ -340,7 +340,9 @@ expected behavior, not a data gap to investigate.
     source footnote; `audit coverage`; `extract --configured-only`, a
     non-zero exit code when a vendor fails, and the scheduled daily run
     (`scripts/RunScheduledExtraction.ps1`,
-    `scripts/Register-DailyExtractionTask.ps1`). Still to do in Sprint 1:
-    the Gemini SKU-filter guard (#34) and the Daily Usage history-depth and
-    Monday-discrepancy spike (#10). The user reviews every pull request and
+    `scripts/Register-DailyExtractionTask.ps1`). The Gemini SKU-filter guard (#34) is done and merged: the filter is configurable,
+    counts Agent Platform, model usage and pay-as-you-go by default, and `audit gemini-breakdown`
+    shows the split (a stored column is #53). The Daily Usage history-depth and
+    Monday-discrepancy spike (#10) is the last Sprint 1 item; its findings are in
+    `docs/vendor-integration-reference.md`. The user reviews every pull request and
     says when to merge.

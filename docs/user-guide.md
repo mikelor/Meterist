@@ -339,7 +339,7 @@ When this overrides a figure just pulled, a warning logs the dates and both
 numbers. On real data the two sources differed by less than half a percent of
 total usage over four months, with `COSTS` slightly higher on some days (about
 $0.03 a day, and more on Mondays), so a handful of days keep their `COSTS`
-figure; that is expected, not an error.
+figure; that is expected, not an error. The extra `COSTS` amount is usage with no user attached and non-token lines such as site hosting, which the Daily Usage API does not return (see the vendor reference).
 
 **If the Daily Usage call fails** (the admin key lacks "Enterprise analytics
 API: Read", the `WorkspaceId` belongs to a different workspace, an outage),
