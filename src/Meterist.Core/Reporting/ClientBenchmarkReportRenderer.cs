@@ -407,6 +407,7 @@ public static class ClientBenchmarkReportRenderer
               <footer class="footnote">
                 <ul>
                   <li><b>Figures are Gross Spend</b> (seat fee + usage/overage), pulled live from each vendor's API through Meterist — not estimated or modeled.</li>
+                  <li><b>Tax and support fees are not included.</b> Figures are the usage and seat charges each vendor reports, so a figure can differ from the amount on that vendor's invoice. In particular, tax and cloud support fees (which Google bills on the same account as Gemini Enterprise) are left out on purpose.</li>
                   <li><b>Date ranges differ by vendor within a tenant</b> — this reflects each vendor's actual available extraction window at pull time, not a data gap.</li>
 
             """);

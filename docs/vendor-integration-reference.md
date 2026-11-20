@@ -742,8 +742,11 @@ not adopted.
   Platform Memory` rows since 2026-09-11 (the Agent Gateway / Memory Bank
   family) at a negligible total, which sit **outside** the filter. The export
   also contains `Invoice | Tax` for both tenants and `Support | ...` fees for
-  one, which Meterist leaves out by design, so Meterist totals will not match
-  the Google invoice until that is decided (issue #35). Above-quota and
+  one, which Meterist leaves out by design (decided 2026-11-20, issue #35, see
+  `docs/architecture.md` §5.2), so Meterist totals will not match the Google invoice.
+  Sized over 2026-07-01 to 2026-11-19: tax about 9% and 10% of the Gemini figure for
+  the two tenants, and one tenant's Enhanced Support (a minimum plus a variable fee)
+  about 16%, so its total sits about 26% below the invoice. Above-quota and
   Claude-model SKUs have never been observed. **Implemented (issue #34):** the
   included service/SKU rules are now configuration (Meterist:Gemini:BillingFilter),
   and every extraction warns about non-zero Gemini-looking lines the rules leave

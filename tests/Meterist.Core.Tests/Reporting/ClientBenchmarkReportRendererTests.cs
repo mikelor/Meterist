@@ -33,6 +33,16 @@ public class ClientBenchmarkReportRendererTests
     }
 
     [Fact]
+    public void Footnote_SaysTaxAndSupportFeesAreNotIncluded_SoFiguresNeedNotMatchAnInvoice()
+    {
+        var html = ClientBenchmarkReportRenderer.Render(Report(
+            Tenant("tenant-a", ChatGpt(FullWeeks(100, 100, 100), NoSources))));
+
+        Assert.Contains("Tax and support fees are not included", html);
+        Assert.Contains("differ from the amount on that vendor", html);
+    }
+
+    [Fact]
     public void Footnote_OmitsTheSourceNote_WhenNoDayCarriesASource()
     {
         var html = ClientBenchmarkReportRenderer.Render(Report(
