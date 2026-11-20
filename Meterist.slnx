@@ -10,6 +10,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Meterist.Core.Tests/Meterist.Core.Tests.csproj" />
     <Project Path="tests/Meterist.Data.Tests/Meterist.Data.Tests.csproj" />
+    <Project Path="tests/Meterist.Secrets.Tests/Meterist.Secrets.Tests.csproj" />
     <Project Path="tests/Meterist.Vendors.Tests/Meterist.Vendors.Tests.csproj" />
   </Folder>
 </Solution>

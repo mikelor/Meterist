@@ -815,6 +815,14 @@ failures. Skipped and not-implemented vendors don't count as failures.
 
 ## Troubleshooting
 
+- **"The stored credentials for tenant ... could not be read."** The tenant has a credential file, but it will not
+  decrypt (or is damaged). Credentials are encrypted for **one Windows account on one machine**, so this almost always
+  means Meterist is running as a different user (a scheduled task must run as the account that stored them) or on a
+  different machine. It is reported as a **failure**, never as "no credential": extraction shows the vendor as
+  `Failed`, roster snapshots as `Failed`, and the scheduled run exits non-zero, so a run can never look clean while
+  collecting nothing. Run as the original account, or store each vendor's credential again with `credentials set`
+  (a `set` always works, even over an unreadable file; any other vendor's credential in that file is lost and must be
+  set again).
 - **Debug logging is on by default** ([`appsettings.json`](../src/Meterist.Cli/appsettings.json)
   sets `Meterist` categories to `Debug`, while quieting EF Core's own very
   chatty SQL command logging down to `Warning`). This shows the exact

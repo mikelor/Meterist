@@ -12,6 +12,13 @@ namespace Meterist.Core.Secrets;
 /// </summary>
 public interface ISecretStore
 {
+    /// <summary>
+    /// The stored credential, or null when none is stored for this tenant and vendor.
+    /// </summary>
+    /// <exception cref="UnreadableCredentialException">
+    /// Credentials are stored for the tenant but cannot be read (they will not decrypt, or are damaged). This is never
+    /// reported as null: a caller that treated it as "no credential" would skip the vendor and report success.
+    /// </exception>
     Task<string?> GetCredentialAsync(
         string tenantId,
         Guid vendorId,

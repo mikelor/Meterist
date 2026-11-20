@@ -684,12 +684,13 @@ static Command BuildRosterCommand(IHost host)
         var tenantIds = parseResult.GetValue(tenantsOption)!;
         var dryRun = parseResult.GetValue(dryRunOption);
 
-        using var scope = host.Services.CreateScope();
-        var snapshots = scope.ServiceProvider.GetRequiredService<ConfiguredRosterSnapshots>();
         var all = new List<RosterRunResult>();
 
         foreach (var tenantId in tenantIds)
         {
+            // A scope, and so a database context, per tenant: a write that fails for one tenant cannot affect the next.
+            using var scope = host.Services.CreateScope();
+            var snapshots = scope.ServiceProvider.GetRequiredService<ConfiguredRosterSnapshots>();
             var results = await snapshots.TakeAsync(tenantId, dryRun, cancellationToken);
             all.AddRange(results);
 

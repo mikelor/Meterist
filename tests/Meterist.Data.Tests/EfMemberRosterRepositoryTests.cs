@@ -186,6 +186,64 @@ public class EfMemberRosterRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task AFailedSave_LeavesNothingStagedForTheNextSnapshotsSaveOnTheSameContext()
+    {
+        // A scheduled run shares one context across vendors. If a failed snapshot''s rows stayed tracked, the next
+        // vendor''s save would persist them: rows from a snapshot that was reported as failed.
+        var ct = TestContext.Current.CancellationToken;
+        var failOnce = new FailOnceInterceptor();
+        var options = new DbContextOptionsBuilder<MeteristDbContext>()
+            .UseSqlite(_connection)
+            .AddInterceptors(failOnce)
+            .Options;
+        await using var context = new MeteristDbContext(options);
+        var repository = new EfMemberRosterRepository(context);
+        var other = VendorCatalog.ChatGptEnterprise.Id;
+
+        // Existing data to be replaced, so a failed save would also leave a Modified and a Deleted entry behind.
+        await _repository.ReplaceSnapshotAsync("t1", Vendor, D1, [Member("keep", D1, role: "user"), Member("gone", D1)], ct);
+
+        failOnce.Arm();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.ReplaceSnapshotAsync(
+            "t1", Vendor, D1, [Member("keep", D1, role: "owner"), Member("new", D1)], ct));
+
+        // The next vendor''s snapshot goes through the same context and must store only its own rows.
+        await repository.ReplaceSnapshotAsync("t1", other, D1, [Member("other-1", D1, vendor: other)], ct);
+
+        Assert.DoesNotContain(context.ChangeTracker.Entries<MemberRosterRecord>(), e => e.State != EntityState.Unchanged);
+
+        await using var verify = new MeteristDbContext(new DbContextOptionsBuilder<MeteristDbContext>().UseSqlite(_connection).Options);
+        var stored = await new EfMemberRosterRepository(verify).GetLatestSnapshotAsync("t1", Vendor, null, ct);
+        var storedOther = await new EfMemberRosterRepository(verify).GetLatestSnapshotAsync("t1", other, null, ct);
+
+        // The failed replace changed nothing: original members and role intact, no "new", "gone" still there.
+        Assert.Equal(["gone", "keep"], stored!.Members.Select(m => m.MemberId).Order());
+        Assert.Equal("user", stored.Members.Single(m => m.MemberId == "keep").Role);
+        Assert.Equal(["other-1"], storedOther!.Members.Select(m => m.MemberId));
+    }
+
+    private sealed class FailOnceInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private bool _armed;
+
+        public void Arm() => _armed = true;
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_armed)
+            {
+                _armed = false;
+                throw new InvalidOperationException("Simulated save failure.");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task GetLatestSnapshot_OrdersMembersByNameThenEmail_FallingBackToId()
     {
         var ct = TestContext.Current.CancellationToken;

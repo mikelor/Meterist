@@ -341,6 +341,13 @@ vendor, snapshot date, member id, email, name, role, seat type, added date).
 
 ## 6. Credentials — DECIDED (2026-07-21)
 
+**Reading and writing differ when a file cannot be decrypted (2026-11-20).** An undecryptable or damaged tenant file
+is `UnreadableCredentialException` on a **read**, never `null`. `null` means "no credential stored", and callers
+treat it as "this tenant does not use that vendor": a read that returned `null` for an unreadable file made extraction
+and roster snapshots mark every vendor `Skipped` and a scheduled run exit 0 having collected nothing (the case being
+a task running as a different Windows account, which DPAPI cannot decrypt for). A **write** still recovers (treats the
+file as empty, with a warning) so an operator can always reset a tenant. `ConfiguredVendorExtraction` and
+`ConfiguredRosterSnapshots` report such a failure for that vendor and carry on with the others.
 **Decision: DPAPI-encrypted local files for v1, behind an `ISecretStore`
 interface, with the specific future cloud backend left open.** Confirmed
 requirement: four distinct credential shapes per tenant (Claude Analytics

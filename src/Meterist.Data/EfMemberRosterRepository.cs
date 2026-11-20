@@ -25,8 +25,32 @@ public sealed class EfMemberRosterRepository : IMemberRosterRepository
     {
         var result = await ResolveAsync(tenantId, vendorId, snapshotDate, members, apply: true, cancellationToken)
             .ConfigureAwait(false);
-        await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A failed save leaves its additions, changes and removals tracked. Several vendors and tenants share one
+            // context in a scheduled run, so the next snapshot's save would retry this one's rows (and fail the same
+            // way, or worse, persist rows from a snapshot that was reported as failed). Drop them.
+            DetachPendingChanges();
+            throw;
+        }
+
         return result;
+    }
+
+    private void DetachPendingChanges()
+    {
+        foreach (var entry in _context.ChangeTracker.Entries<MemberRosterRecord>().ToList())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
     }
 
     public Task<RosterSnapshotResult> PlanReplaceSnapshotAsync(

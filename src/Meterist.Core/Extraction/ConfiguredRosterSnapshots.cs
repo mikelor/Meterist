@@ -48,29 +48,35 @@ public sealed class ConfiguredRosterSnapshots
         // Catalog order, so the output and the log read the same every day.
         foreach (var vendor in VendorCatalog.All.Where(v => _sources.Any(s => s.VendorId == v.Id)))
         {
-            var credential = await _secretStore
-                .GetCredentialAsync(tenantId, vendor.Id, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (string.IsNullOrWhiteSpace(credential))
-            {
-                results.Add(new RosterRunResult(
-                    vendor.Id, vendor.DisplayName, RosterRunStatus.Skipped, "no credential stored for this tenant"));
-                continue;
-            }
-
+            // Everything for one vendor, including reading its credential and writing the snapshot, is inside the
+            // try: whatever goes wrong is that vendor's failure, and the next vendor and tenant still run.
             try
             {
+                var credential = await _secretStore
+                    .GetCredentialAsync(tenantId, vendor.Id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(credential))
+                {
+                    results.Add(new RosterRunResult(
+                        vendor.Id, vendor.DisplayName, RosterRunStatus.Skipped, "no credential stored for this tenant"));
+                    continue;
+                }
+
                 var outcome = await _service.TakeAsync(tenantId, vendor.Id, dryRun, cancellationToken).ConfigureAwait(false);
                 results.Add(new RosterRunResult(
                     vendor.Id, vendor.DisplayName, RosterRunStatus.Succeeded,
                     $"{outcome.MemberCount} member(s)", outcome));
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                // The service turns every expected failure into this type, so one vendor failing is reported and
-                // the next vendor still runs. A caller's own cancellation is not caught and stops the run.
-                results.Add(new RosterRunResult(vendor.Id, vendor.DisplayName, RosterRunStatus.Failed, ex.Message));
+                // The service already turns the expected vendor failures into an InvalidOperationException with a
+                // clear message; an unreadable credential is one too. Anything else (a database write that failed,
+                // a credential file that could not be opened) is named by its type, with its own message and not its
+                // inner exceptions, which can echo values. A caller's own cancellation is not caught and stops the run.
+                results.Add(new RosterRunResult(
+                    vendor.Id, vendor.DisplayName, RosterRunStatus.Failed,
+                    ex is InvalidOperationException ? ex.Message : $"{ex.GetType().Name}: {ex.Message}"));
             }
         }
 
