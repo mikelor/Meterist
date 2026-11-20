@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
             options.UseSqlite($"Data Source={path}"));
 
         services.AddScoped<IDailySpendRepository, EfDailySpendRepository>();
+        services.AddScoped<IUserDailyUsageRepository, EfUserDailyUsageRepository>();
         services.AddScoped<IRawExtractionRepository, EfRawExtractionRepository>();
         services.AddScoped<IVendorRateConfigRepository, EfVendorRateConfigRepository>();
 

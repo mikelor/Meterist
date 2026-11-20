@@ -198,22 +198,32 @@ every historical extraction attempt. A true append-only history is a larger,
 separate feature (unbounded growth, different retention story) and is
 deliberately not built.
 
-**Future addition (v1.x, not v1):**
+**Per-user usage — table and repository built (2026-11-20, issue #16); the
+adapters do not populate it yet:**
 
 ```
-UserSpendRecord
-├── TenantId
-├── VendorId
-├── Date
-├── UserId / Email
-├── Amount (decimal)
-└── IsEstimated (bool)    — true for Gemini Enterprise (no vendor-reported
-                             per-user $, would be a derived allocation);
-                             false for Claude Enterprise / ChatGPT Enterprise
-                             (vendor-reported natively); available for Claude API
-                             Platform only where personal or service-account
-                             keys are used (otherwise per key)
+UserDailyUsageRecord              (Meterist.Core.Models; table UserDailyUsageRecords)
+├── TenantId, VendorId, Date, UserId   — natural key; UserId is the vendor's
+│                                        stable id (or the API key's), not an email
+├── UserEmail, UserName           — nullable; personal data, never logged
+├── Amount (decimal, USD)
+├── Credits (decimal?)            — null where the vendor has no credits
+├── Requests (long?)              — requests or messages, whichever the vendor reports
+├── IsEstimated (bool)            — true when Amount is a derived or vendor-estimated
+│                                   figure (Gemini would be an allocation; ChatGPT's
+│                                   dollars are the vendor's estimate at current rates)
+└── Attribution                   — Person | ApiKey | Allocated. Claude API Platform
+                                    is Person only for personal or service-account
+                                    keys, ApiKey for legacy workspace keys
 ```
+
+`IUserDailyUsageRepository` (`Meterist.Core.Persistence`) offers `UpsertAsync`,
+`PlanUpsertAsync` (a dry run that writes nothing) and `GetAsync(tenant, vendor,
+period)`. An upsert replaces every field of an existing user-day and never
+deletes rows missing from the input, because the vendors return only users with
+usage. A row exists only for a user-day with usage, so active users are the
+distinct `UserId`s on a day. Per-user views must reconcile to the daily totals;
+the adapters that populate this table (later issues) are where that is checked.
 
 Flagging `IsEstimated` at the schema level (rather than a documentation
 footnote) matters — any report/UI built on this later must not present an
