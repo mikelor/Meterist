@@ -7,6 +7,9 @@ public enum VendorExtractionStatus
     Succeeded,
     NotImplemented,
     Failed,
+
+    /// <summary>Not attempted: the tenant has no credential stored for this vendor.</summary>
+    Skipped,
 }
 
 /// <summary>

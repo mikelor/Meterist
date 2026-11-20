@@ -375,6 +375,11 @@ static Command BuildExtractCommand(IHost host)
         Description = "Query the vendors and show what would change, without writing anything "
             + "(no raw data and no daily records are stored)",
     };
+    var configuredOnlyOption = new Option<bool>("--configured-only")
+    {
+        Description = "Skip vendors the tenant has no stored credential for, instead of reporting them "
+            + "as failed (for tenants that use only some of the vendors)",
+    };
 
     var extractCommand = new Command("extract", "Extract spend for a tenant across a date range");
     extractCommand.Options.Add(tenantOption);
@@ -382,6 +387,7 @@ static Command BuildExtractCommand(IHost host)
     extractCommand.Options.Add(toOption);
     extractCommand.Options.Add(vendorOption);
     extractCommand.Options.Add(dryRunOption);
+    extractCommand.Options.Add(configuredOnlyOption);
 
     extractCommand.SetAction(async (parseResult, cancellationToken) =>
     {
@@ -390,6 +396,7 @@ static Command BuildExtractCommand(IHost host)
         var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
         var vendorShortName = parseResult.GetValue(vendorOption);
         var dryRun = parseResult.GetValue(dryRunOption);
+        var configuredOnly = parseResult.GetValue(configuredOnlyOption);
 
         Guid? vendorFilter = null;
         if (vendorShortName is not null)
@@ -415,8 +422,35 @@ static Command BuildExtractCommand(IHost host)
 
         using var scope = host.Services.CreateScope();
         var extractionService = scope.ServiceProvider.GetRequiredService<SpendExtractionService>();
-        var results = await extractionService.ExtractAsync(
-            tenantId, new DateRange(from, to), vendorFilter, cancellationToken, dryRun);
+        var period = new DateRange(from, to);
+        IReadOnlyList<VendorExtractionResult> results;
+
+        if (configuredOnly)
+        {
+            var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            var combined = new List<VendorExtractionResult>();
+
+            foreach (var vendor in VendorCatalog.All.Where(v => vendorFilter is null || v.Id == vendorFilter))
+            {
+                var credential = await secretStore.GetCredentialAsync(tenantId, vendor.Id, cancellationToken);
+                if (string.IsNullOrWhiteSpace(credential))
+                {
+                    combined.Add(new VendorExtractionResult(
+                        vendor.Id, vendor.DisplayName, VendorExtractionStatus.Skipped, 0,
+                        "no credential stored for this tenant"));
+                    continue;
+                }
+
+                combined.AddRange(await extractionService.ExtractAsync(
+                    tenantId, period, vendor.Id, cancellationToken, dryRun));
+            }
+
+            results = combined;
+        }
+        else
+        {
+            results = await extractionService.ExtractAsync(tenantId, period, vendorFilter, cancellationToken, dryRun);
+        }
 
         var table = new Table()
             .AddColumn("Vendor")
@@ -430,6 +464,7 @@ static Command BuildExtractCommand(IHost host)
             {
                 VendorExtractionStatus.Succeeded => "[green]Succeeded[/]",
                 VendorExtractionStatus.NotImplemented => "[grey]Not implemented[/]",
+                VendorExtractionStatus.Skipped => "[grey]Skipped[/]",
                 _ => "[red]Failed[/]",
             };
 
@@ -442,6 +477,15 @@ static Command BuildExtractCommand(IHost host)
         if (dryRun)
         {
             WriteDryRunChanges(results);
+        }
+
+        // A scheduled run has to be able to tell that something broke, so a failed vendor
+        // makes the whole command fail. Skipped and not-implemented vendors are not failures.
+        var failed = results.Count(r => r.Status == VendorExtractionStatus.Failed);
+        if (failed > 0)
+        {
+            AnsiConsole.MarkupLine($"[red]{failed} vendor extraction(s) failed.[/]");
+            return 1;
         }
 
         return 0;
