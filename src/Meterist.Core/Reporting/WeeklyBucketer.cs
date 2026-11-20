@@ -22,7 +22,9 @@ public static class WeeklyBucketer
     /// derive the anchor from the report period's own start, which is always true
     /// by construction. <paramref name="excludeWeekIndices"/> marks specific
     /// week indices (0-based, relative to the anchor) as excluded from trend
-    /// projections — e.g. week 0 for ChatGPT Enterprise.
+    /// projections. ReportDataAggregator does not use it for ChatGPT Enterprise
+    /// any more (it flags incomplete weeks from <c>DaysPresent</c> instead), but
+    /// it stays as a general mechanism for flagging a known-bad week by index.
     /// </summary>
     public static IReadOnlyList<WeeklyTotal> Bucket(
         IReadOnlyList<DailySpendRecord> records,

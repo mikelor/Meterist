@@ -10,11 +10,7 @@ namespace Meterist.Core.Reporting;
 /// </summary>
 public sealed class ReportDataAggregator
 {
-    // The one hardcoded exclusion this session decided on: ChatGPT Enterprise's
-    // first week in any report period is permanently lost to the vendor's
-    // 29-day retention window and must never feed Flat/Trend/Latest-week
-    // projections. See docs/vendor-integration-reference.md.
-    private static readonly IReadOnlySet<int> ChatGptExcludedWeekIndices = new HashSet<int> { 0 };
+    private const int DaysInAWeek = 7;
 
     private readonly IDailySpendRepository _dailySpendRepository;
     private readonly IVendorRateConfigRepository _vendorRateConfigRepository;
@@ -46,10 +42,28 @@ public sealed class ReportDataAggregator
                     .GetAsync(tenantId, vendor.Id, period, cancellationToken)
                     .ConfigureAwait(false);
 
-                var excludeIndices = vendor.Id == VendorCatalog.ChatGptEnterprise.Id
-                    ? ChatGptExcludedWeekIndices
-                    : null;
-                var weeks = WeeklyBucketer.Bucket(records, anchor, excludeIndices);
+                var weeks = WeeklyBucketer.Bucket(records, anchor);
+
+                // ChatGPT Enterprise is seat-priced, so every real day has a record (the seat
+                // accrues whether or not anyone used it), which makes a week with fewer than
+                // seven recorded days genuinely incomplete: days the vendor's data no longer
+                // reaches. Such a week must not feed Flat/Trend/Latest-week projections.
+                // This replaces a blanket "week 0 is always excluded", which was written when
+                // the COSTS export's 29-day retention made that week unrecoverable; with the
+                // Daily Usage API as the source of record, a complete first week is real data.
+                // Not applied to usage-priced vendors, where a quiet day has no row at all and
+                // a short week is not evidence of missing data.
+                if (vendor.Id == VendorCatalog.ChatGptEnterprise.Id)
+                {
+                    weeks = weeks
+                        .Select(w => w with { ExcludeFromProjection = w.ExcludeFromProjection || w.DaysPresent < DaysInAWeek })
+                        .ToList();
+                }
+
+                var sourceDayCounts = records
+                    .Where(r => r.Source is not null)
+                    .GroupBy(r => r.Source!)
+                    .ToDictionary(g => g.Key, g => g.Count());
 
                 var rates = await _vendorRateConfigRepository
                     .GetApplicableRatesAsync(tenantId, vendor.Id, period, cancellationToken)
@@ -61,6 +75,7 @@ public sealed class ReportDataAggregator
                     Vendor = vendor,
                     Weeks = weeks,
                     CurrentRates = currentRates,
+                    SourceDayCounts = sourceDayCounts,
                 });
             }
 

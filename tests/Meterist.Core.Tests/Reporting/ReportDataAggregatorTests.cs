@@ -23,24 +23,85 @@ public class ReportDataAggregatorTests
     }
 
     [Fact]
-    public async Task AggregateAsync_ChatGptWeekZero_IsExcludedFromProjection_OtherVendorsAreNot()
+    public async Task AggregateAsync_ChatGptCompleteFirstWeek_IsNotExcluded()
     {
+        // Jul 1 is a Wednesday, so Jul 1-7 is week 0 and Jul 8-14 is week 1. Both full.
         var dailyRepo = new FakeDailySpendRepository(
-            recordsFor: (tenantId, vendorId) =>
-            [
-                new DailySpendRecord { TenantId = tenantId, VendorId = vendorId, Date = Period.Start },
-            ]);
+            recordsFor: (tenantId, vendorId) => DaysOf(tenantId, vendorId, Period.Start, 14));
         var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
 
         var data = await aggregator.AggregateAsync(
             ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
 
         var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
-        Assert.True(chatGpt.Weeks[0].ExcludeFromProjection);
+        Assert.Equal(7, chatGpt.Weeks[0].DaysPresent);
 
+        // The old rule excluded week 0 unconditionally. With the Daily Usage API as the source of
+        // record it is real data, so a complete week 0 now feeds the projections.
+        Assert.All(chatGpt.Weeks, w => Assert.False(w.ExcludeFromProjection));
+    }
+
+    [Fact]
+    public async Task AggregateAsync_ChatGptWeekWithMissingDays_IsExcluded_OtherVendorsWithTheSameGapAreNot()
+    {
+        // Week 0 has only 3 of its 7 days recorded; week 1 is full.
+        var dailyRepo = new FakeDailySpendRepository(
+            recordsFor: (tenantId, vendorId) =>
+                DaysOf(tenantId, vendorId, Period.Start, 14).Where(r => r.Date.Day is <= 3 or >= 8).ToList());
+        var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
+        Assert.Equal(3, chatGpt.Weeks[0].DaysPresent);
+        Assert.True(chatGpt.Weeks[0].ExcludeFromProjection);
+        Assert.False(chatGpt.Weeks[1].ExcludeFromProjection);
+
+        // A usage-priced vendor writes no row for a quiet day, so a short week is not evidence of
+        // missing data and must not be excluded.
         var gemini = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.GeminiEnterprise.Id);
+        Assert.Equal(3, gemini.Weeks[0].DaysPresent);
         Assert.False(gemini.Weeks[0].ExcludeFromProjection);
     }
+
+    [Fact]
+    public async Task AggregateAsync_CountsStoredDaysBySource_IgnoringDaysWithNoSource()
+    {
+        var dailyRepo = new FakeDailySpendRepository(
+            recordsFor: (tenantId, vendorId) => vendorId == VendorCatalog.ChatGptEnterprise.Id
+                ?
+                [
+                    Record(tenantId, vendorId, 1, DailySpendSources.DailyUsageApi),
+                    Record(tenantId, vendorId, 2, DailySpendSources.DailyUsageApi),
+                    Record(tenantId, vendorId, 3, DailySpendSources.CostsExport),
+                ]
+                : DaysOf(tenantId, vendorId, Period.Start, 3)); // no Source
+        var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
+        Assert.Equal(2, chatGpt.SourceDayCounts[DailySpendSources.DailyUsageApi]);
+        Assert.Equal(1, chatGpt.SourceDayCounts[DailySpendSources.CostsExport]);
+
+        var gemini = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.GeminiEnterprise.Id);
+        Assert.Empty(gemini.SourceDayCounts);
+    }
+
+    private static List<DailySpendRecord> DaysOf(string tenantId, Guid vendorId, DateOnly start, int count) =>
+        Enumerable.Range(0, count)
+            .Select(i => new DailySpendRecord { TenantId = tenantId, VendorId = vendorId, Date = start.AddDays(i) })
+            .ToList();
+
+    private static DailySpendRecord Record(string tenantId, Guid vendorId, int day, string source) => new()
+    {
+        TenantId = tenantId,
+        VendorId = vendorId,
+        Date = new DateOnly(2026, 7, day),
+        Source = source,
+    };
 
     [Fact]
     public async Task AggregateAsync_OnlyKeepsCurrentlyActiveRates()
