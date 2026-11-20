@@ -65,9 +65,10 @@ bundled into one page:
    text: how many days each tenant has from the Daily Usage API versus the
    `COSTS` export (from `DailySpendRecords.Source`), and which weeks, if any,
    were left out of the trend projections. A ChatGPT week is left out only
-   when it has fewer than seven recorded days (the vendor is seat-priced, so
-   every real day has a record, and a short week means days its data no
-   longer reaches); a complete first week is real data and is included.
+   when a day inside the report period has no stored record (the vendor is
+   seat-priced, so every real day has a record). A week that is short only
+   because the report starts or ends midweek is not treated as missing data,
+   and a complete first week is real data and is included.
 
 ## Data sourcing
 

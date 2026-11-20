@@ -49,6 +49,12 @@ public class ClientBenchmarkReportRendererTests
 
         Assert.Contains("No ChatGPT Enterprise week was excluded from the trend projections", html);
 
+        // It also says a week shortened by where the report starts or ends is not missing data,
+        // so a reader isn't left wondering about a short first or last week.
+        Assert.Contains("shortened by where the report starts or ends is not treated as missing data", html);
+        Assert.DoesNotContain("fewer than seven recorded days", html);
+        Assert.DoesNotContain("no longer reaches", html);
+
         // These statements were true only while the COSTS export was the sole source; leaving
         // them in would tell a client that real data was discarded when it wasn't.
         Assert.DoesNotContain("first week is always excluded", html);
@@ -73,6 +79,13 @@ public class ClientBenchmarkReportRendererTests
 
         Assert.Contains("weeks with missing days are excluded from the trend projections", html);
         Assert.Contains("Excluded: tenant-b: Jul 1–7", html);
+
+        // The report can see that a day is absent, not why, so it must not assert the vendor's
+        // data is the cause (a week can also be short for reasons that are not the vendor's).
+        Assert.Contains("has no stored record", html);
+        Assert.Contains("cannot tell why a day is absent", html);
+        Assert.DoesNotContain("no longer reaches", html);
+        Assert.DoesNotContain("fewer than seven recorded days", html);
         Assert.DoesNotContain("No ChatGPT Enterprise week was excluded", html);
         // tenant-a had nothing excluded, so it isn't named in the excluded list.
         Assert.DoesNotContain("Excluded: tenant-a", html);

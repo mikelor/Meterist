@@ -458,7 +458,8 @@ public static class ClientBenchmarkReportRenderer
         {
             html.Append(
                 "      <li><b>No ChatGPT Enterprise week was excluded from the trend projections.</b> A week is excluded only "
-                + "when it has fewer than seven recorded days, meaning days the vendor's data no longer reaches.</li>\n");
+                + "when a day inside the report period has no stored record; a week shortened by where the report starts "
+                + "or ends is not treated as missing data.</li>\n");
             return;
         }
 
@@ -468,9 +469,10 @@ public static class ClientBenchmarkReportRenderer
                 ", ", x.Weeks.Select(w => FormatWeekLabel(w.WeekStart, w.WeekEnd)))));
 
         html.Append(
-            "      <li><b>ChatGPT Enterprise weeks with missing days are excluded from the trend projections</b> — a week with "
-            + "fewer than seven recorded days means days the vendor's data no longer reaches, typically a tenant with no "
-            + "workspace ID stored, where only the COSTS export's roughly 29 days were available. "
+            "      <li><b>ChatGPT Enterprise weeks with missing days are excluded from the trend projections</b> — a week in "
+            + "which a day inside the report period has no stored record would understate a normal week. Often that is a "
+            + "tenant with no workspace ID stored, where only the COSTS export's roughly 29 days were available, but the "
+            + "report cannot tell why a day is absent, only that it is. "
             + $"Excluded: {listed}.</li>\n");
     }
 

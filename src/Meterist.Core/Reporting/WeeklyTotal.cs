@@ -12,8 +12,9 @@ namespace Meterist.Core.Reporting;
 /// is set by the caller (see <see cref="WeeklyBucketer.Bucket"/>'s
 /// excludeWeekIndices parameter) for weeks known to be unreliable for trend
 /// purposes. ReportDataAggregator uses it for ChatGPT Enterprise weeks with
-/// fewer than seven recorded days: a seat-priced vendor has a record for every
-/// real day, so a short week means days the vendor's data no longer reaches.
+/// fewer stored days than the week has inside the report period: a seat-priced
+/// vendor has a record for every real day, so a day with none is missing data. A
+/// week merely cut short by where the report starts or ends is not.
 /// </summary>
 public readonly record struct WeeklyTotal(
     int WeekIndex,

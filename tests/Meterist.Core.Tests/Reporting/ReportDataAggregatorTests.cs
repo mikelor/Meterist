@@ -66,6 +66,63 @@ public class ReportDataAggregatorTests
     }
 
     [Fact]
+    public async Task AggregateAsync_ChatGptWeekShortOnlyBecauseTheReportStartsMidweek_IsNotCalledIncomplete()
+    {
+        // The report starts on a Friday (Jul 3). Weeks are anchored to the Wednesday on or before
+        // the start (Jul 1), so week 0 is Jul 1-7 but only Jul 3-7 is inside the report: five days.
+        // Every one of those five is stored, so nothing is missing; the week is short because of
+        // where the report starts, not because of the vendor's data.
+        var midweekStart = new DateRange(new DateOnly(2026, 7, 3), new DateOnly(2026, 7, 21));
+        var dailyRepo = new FakeDailySpendRepository(
+            recordsFor: (tenantId, vendorId) => DaysOf(tenantId, vendorId, midweekStart.Start, 19));
+        var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], midweekStart, cancellationToken: TestContext.Current.CancellationToken);
+
+        var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
+        Assert.Equal(5, chatGpt.Weeks[0].DaysPresent);
+        Assert.False(chatGpt.Weeks[0].ExcludeFromProjection);
+    }
+
+    [Fact]
+    public async Task AggregateAsync_ChatGptWeekMissingDaysInsideAMidweekStartedReport_IsStillExcluded()
+    {
+        // Same Friday start, but only Jul 3-4 of the five in-report days are stored.
+        var midweekStart = new DateRange(new DateOnly(2026, 7, 3), new DateOnly(2026, 7, 21));
+        var dailyRepo = new FakeDailySpendRepository(
+            recordsFor: (tenantId, vendorId) =>
+                DaysOf(tenantId, vendorId, midweekStart.Start, 19).Where(r => r.Date.Day is <= 4 or >= 8).ToList());
+        var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], midweekStart, cancellationToken: TestContext.Current.CancellationToken);
+
+        var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
+        Assert.Equal(2, chatGpt.Weeks[0].DaysPresent);
+        Assert.True(chatGpt.Weeks[0].ExcludeFromProjection);
+    }
+
+    [Fact]
+    public async Task AggregateAsync_ChatGptTrailingPartialWeekWithAllItsDays_IsNotFlaggedAsMissingData()
+    {
+        // The report ends on a Friday (Jul 17); week 2 is Jul 15-21 with Jul 15-17 inside the report
+        // and all three stored. Projections leave it out as an incomplete week anyway (its end is
+        // past the report's), so it must not also be reported as missing data.
+        var endsMidweek = new DateRange(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 17));
+        var dailyRepo = new FakeDailySpendRepository(
+            recordsFor: (tenantId, vendorId) => DaysOf(tenantId, vendorId, endsMidweek.Start, 17));
+        var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], endsMidweek, cancellationToken: TestContext.Current.CancellationToken);
+
+        var chatGpt = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ChatGptEnterprise.Id);
+        Assert.Equal(3, chatGpt.Weeks[2].DaysPresent);
+        Assert.False(chatGpt.Weeks[2].ExcludeFromProjection);
+    }
+
+    [Fact]
     public async Task AggregateAsync_CountsStoredDaysBySource_IgnoringDaysWithNoSource()
     {
         var dailyRepo = new FakeDailySpendRepository(
