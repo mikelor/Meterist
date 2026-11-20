@@ -134,6 +134,37 @@ public class EfUserDailyUsageRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task UpsertAsync_RejectedBatch_StagesNothingForALaterSaveOnTheSameContext()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        // The duplicate comes after a valid new row, so a repository that stages as it goes would
+        // already have added "early" to the shared context when it throws.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _repository.UpsertAsync([Record("early"), Record("dup"), Record("dup")], ct));
+
+        await _repository.UpsertAsync([Record("later")], ct);
+
+        var stored = await _repository.GetAsync("t1", Vendor, new DateRange(Day, Day), ct);
+        Assert.Equal(["later"], stored.Select(r => r.UserId));
+    }
+
+    [Fact]
+    public async Task UpsertAsync_RejectedBatch_DoesNotApplyEarlierUpdatesEither()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _repository.UpsertAsync([Record("u1", amount: 1m)], ct);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _repository.UpsertAsync([Record("u1", amount: 99m), Record("dup"), Record("dup")], ct));
+
+        await _repository.UpsertAsync([Record("other")], ct);
+
+        var stored = await _repository.GetAsync("t1", Vendor, new DateRange(Day, Day), ct);
+        Assert.Equal(1m, stored.Single(r => r.UserId == "u1").Amount);
+        Assert.DoesNotContain(stored, r => r.UserId == "dup");
+    }
+    [Fact]
     public async Task SameUserOnDifferentTenantsVendorsAndDays_AreSeparateRows()
     {
         var ct = TestContext.Current.CancellationToken;

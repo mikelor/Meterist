@@ -44,56 +44,80 @@ public sealed class EfUserDailyUsageRepository : IUserDailyUsageRepository
     private async Task<UserUsageUpsertResult> ResolveAsync(
         IEnumerable<UserDailyUsageRecord> records, bool apply, CancellationToken cancellationToken)
     {
-        var inserted = 0;
-        var updated = 0;
-        var unchanged = 0;
-        var seen = new HashSet<(string, Guid, DateOnly, string)>();
-        var source = apply ? _context.UserDailyUsageRecords : _context.UserDailyUsageRecords.AsNoTracking();
+        var batch = records.ToList();
 
-        foreach (var record in records)
+        // Validate the whole batch before touching the shared context. Two rows for one key would
+        // make the outcome depend on order (and, on a first insert, violate the unique index), so
+        // refuse rather than pick one silently. Doing it up front means a rejected batch stages
+        // nothing for a later SaveChanges on the same context to persist. The message names the
+        // date only: the user is personal data.
+        var seen = new HashSet<(string, Guid, DateOnly, string)>();
+        foreach (var record in batch)
         {
-            // Two rows for one key in one batch would make the outcome depend on order (and, on a
-            // first insert, violate the unique index), so refuse rather than pick one silently.
-            // The message names the date only: the user is personal data.
             if (!seen.Add((record.TenantId, record.VendorId, record.Date, record.UserId)))
             {
                 throw new InvalidOperationException(
                     "Per-user usage batch holds more than one row for the same tenant, vendor, date and user "
                     + $"({record.Date:yyyy-MM-dd}); refusing to guess which is right.");
             }
+        }
 
-            var existing = await source.FirstOrDefaultAsync(
-                r => r.TenantId == record.TenantId
-                    && r.VendorId == record.VendorId
-                    && r.Date == record.Date
-                    && r.UserId == record.UserId,
-                cancellationToken).ConfigureAwait(false);
+        var inserted = 0;
+        var updated = 0;
+        var unchanged = 0;
+        var staged = new List<object>();
+        var source = apply ? _context.UserDailyUsageRecords : _context.UserDailyUsageRecords.AsNoTracking();
 
-            if (existing is null)
+        try
+        {
+            foreach (var record in batch)
             {
-                inserted++;
-                if (apply)
+                var existing = await source.FirstOrDefaultAsync(
+                    r => r.TenantId == record.TenantId
+                        && r.VendorId == record.VendorId
+                        && r.Date == record.Date
+                        && r.UserId == record.UserId,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (existing is null)
                 {
-                    _context.UserDailyUsageRecords.Add(record);
+                    inserted++;
+                    if (apply)
+                    {
+                        _context.UserDailyUsageRecords.Add(record);
+                        staged.Add(record);
+                    }
+                }
+                else if (IsIdentical(existing, record))
+                {
+                    unchanged++;
+                }
+                else
+                {
+                    updated++;
+                    if (apply)
+                    {
+                        _context.Entry(existing).CurrentValues.SetValues(record);
+                        staged.Add(existing);
+                    }
                 }
             }
-            else if (IsIdentical(existing, record))
+        }
+        catch
+        {
+            // A failure part-way (a cancelled or failed lookup) must not leave this batch's earlier
+            // rows tracked for the next SaveChanges. Only this batch's entries are detached, not
+            // whatever else the shared context is tracking.
+            foreach (var entity in staged)
             {
-                unchanged++;
+                _context.Entry(entity).State = EntityState.Detached;
             }
-            else
-            {
-                updated++;
-                if (apply)
-                {
-                    _context.Entry(existing).CurrentValues.SetValues(record);
-                }
-            }
+
+            throw;
         }
 
         return new UserUsageUpsertResult(inserted, updated, unchanged);
     }
-
     private static bool IsIdentical(UserDailyUsageRecord a, UserDailyUsageRecord b) =>
         a.UserEmail == b.UserEmail
         && a.UserName == b.UserName
