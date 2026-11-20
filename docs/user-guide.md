@@ -440,6 +440,30 @@ for one run. The setting applies to every tenant. Re-extract after switching: th
 two endpoints agreed in testing, so nothing should change, and `extract --dry-run`
 will show if it does.
 
+**Per-user usage.** `extract` also stores one row per user per day (their cost and
+request count) in the local database, and the result line gains a count such as
+`per-user rows: 102 inserted`. Dollars are Anthropic's own per-user figures, not
+estimates. On a seat-based plan the cost is usage credits only and is near zero, so
+a user can show `$0.00` and still have hundreds of requests: read the request count
+as activity, not the dollars. Service accounts and API actors are stored but marked
+as not people. Cost the API cannot attribute to anyone is kept under the user id
+`unattributed` so the per-user figures still add up to the daily total. As with
+ChatGPT, these rows hold email addresses, so they stay in the database and in
+reports under `artifacts/`, and are not logged.
+
+**Filling in history without calling the API.** To build per-user rows for days you
+already extracted, run:
+
+```powershell
+dotnet run --project src/Meterist.Cli -- backfill user-usage --tenant <your-tenant-id> --vendor claude-enterprise --from 2026-07-01 --to 2026-11-19 --dry-run
+```
+
+It reads the raw records already stored, so it needs no API key and no network, and
+`--dry-run` shows the count without writing. Run it again without `--dry-run` to
+store them. It is safe to repeat. Days extracted before the per-user table existed
+have raw rows from the older endpoint, which carry users and dollars but no request
+counts; a later `extract` over those days adds the request counts.
+
 ## Configuring rates
 
 Some vendors' APIs don't return a usable dollar figure for everything

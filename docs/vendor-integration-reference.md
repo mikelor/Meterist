@@ -72,9 +72,31 @@ not adopted.
   previously stored day unchanged (49 of 49 on each) plus the one new day; the
   legacy fallback returned the same. Row counts differ by design (the new
   grouping adds product), the totals do not.
-- **Not done here:** per-user storage (#18) will turn these raw rows into
-  `UserDailyUsageRecords`; the stored daily record is unchanged. `Source` is not
-  set for this vendor (both endpoints agree, so there is nothing to disclose).
+- **Per-user storage (issue #18).** `ClaudeEnterpriseUserUsageNormalizer` turns the
+  raw rows into one `UserDailyUsageRecord` per actor per day, summing dollars and
+  requests across products. Dollars are **vendor-reported** (the API's own per-actor
+  cost, after discounts and before credits), so rows are not estimated, unlike
+  ChatGPT's credit-derived figures. `Credits` is empty.
+  - **Seat-based plans:** cost is usage credits only, so a busy user can cost
+    nothing. Rows with a zero amount and a request count are kept: that is an
+    active user.
+  - **Attribution by actor type:** `user_actor` is a `Person`;
+    `service_account_actor` and `api_actor` are `ApiKey`; anything else
+    (including `federated_actor`, a cloud identity not known to be a person, or an
+    unknown type) is `Unrecognized` and named in a warning by type, never by person.
+  - **Cost with no actor** (usage the API could not attribute) is kept in one
+    synthetic bucket with user id `unattributed`, always `Unrecognized`, so per-user
+    figures add up to the daily total. It is never a person; person-level views
+    must filter on `Attribution`. One tenant showed a single such actor-day in the
+    first 19 days of November.
+  - **Older raw rows:** rows stored before the actor type was kept (from the legacy
+    per-user report) have no `ActorType` key at all and are treated as people when
+    they carry a user id; a row that has the key but no value is `Unrecognized`.
+    They carry no request count.
+  - **Backfill:** `meterist backfill user-usage` rebuilds these rows from the raw
+    records already stored, with no API call (see the user guide).
+  - The stored daily record is unchanged. `Source` is not set for this vendor
+    (both endpoints agree, so there is nothing to disclose).
 - **API:** Claude Enterprise Analytics API, verified 2026-07-22 against the
   real public reference (`platform.claude.com/docs/en/api/admin/analytics`
   and `.../manage-claude/analytics-api`, both publicly fetchable, same as

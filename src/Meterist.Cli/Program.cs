@@ -85,6 +85,7 @@ builder.Services.AddTransient<IClaudeAnalyticsCostReportRepository>(sp =>
         ? sp.GetRequiredService<HttpClaudeAnalyticsCostReportRepository>()
         : sp.GetRequiredService<HttpClaudeAnalyticsCostRepository>());
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNormalizer>();
+builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeEnterpriseUserUsageNormalizer>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeApiPlatformSpendExtractor>();
@@ -95,6 +96,7 @@ builder.Services.AddScoped<SpendExtractionService>();
 builder.Services.AddScoped<ConfiguredVendorExtraction>();
 builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
+builder.Services.AddScoped<UserUsageBackfill>();
 
 using var host = builder.Build();
 
@@ -109,6 +111,7 @@ rootCommand.Subcommands.Add(BuildRatesCommand(host));
 rootCommand.Subcommands.Add(BuildExtractCommand(host));
 rootCommand.Subcommands.Add(BuildReportCommand(host));
 rootCommand.Subcommands.Add(BuildAuditCommand(host));
+rootCommand.Subcommands.Add(BuildBackfillCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -566,6 +569,92 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
     {
         AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
     }
+}
+
+static Command BuildBackfillCommand(IHost host)
+{
+    var tenantOption = new Option<string>("--tenant") { Description = "Tenant identifier", Required = true };
+    var vendorOption = new Option<string>("--vendor")
+    {
+        Description = "Vendor short name (a vendor that stores per-user usage, such as claude-enterprise)",
+        Required = true,
+    };
+    var fromOption = new Option<DateTime>("--from") { Description = "First day to rebuild", Required = true };
+    var toOption = new Option<DateTime>("--to") { Description = "Last day to rebuild (inclusive)", Required = true };
+    var dryRunOption = new Option<bool>("--dry-run")
+    {
+        Description = "Show what would be stored without writing anything",
+    };
+
+    var userUsageCommand = new Command(
+        "user-usage",
+        "Rebuild per-user daily usage from raw extraction records already in the database, without calling "
+        + "the vendor's API. Safe to repeat.");
+    userUsageCommand.Options.Add(tenantOption);
+    userUsageCommand.Options.Add(vendorOption);
+    userUsageCommand.Options.Add(fromOption);
+    userUsageCommand.Options.Add(toOption);
+    userUsageCommand.Options.Add(dryRunOption);
+
+    userUsageCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var vendorShortName = parseResult.GetValue(vendorOption)!;
+        var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
+        var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
+        var dryRun = parseResult.GetValue(dryRunOption);
+
+        var vendor = VendorCatalog.FindByShortName(vendorShortName);
+        if (vendor is null)
+        {
+            AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(vendorShortName)}'.[/] Known vendors: "
+                + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+            return 1;
+        }
+
+        if (from > to)
+        {
+            AnsiConsole.MarkupLine("[red]--from must not be after --to.[/]");
+            return 1;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var backfill = scope.ServiceProvider.GetRequiredService<UserUsageBackfill>();
+
+        try
+        {
+            var result = await backfill.RunAsync(tenantId, vendor.Id, new DateRange(from, to), dryRun, cancellationToken);
+
+            AnsiConsole.MarkupLine(
+                $"[bold]Meterist[/] — per-user usage backfill for [yellow]{Markup.Escape(tenantId)}[/] / "
+                + $"{Markup.Escape(vendor.DisplayName)}, {from:yyyy-MM-dd} to {to:yyyy-MM-dd}"
+                + (dryRun ? " [grey](dry run: nothing written)[/]" : string.Empty));
+            AnsiConsole.MarkupLine(
+                $"  Read {result.DaysRead} stored day(s), found {result.RowsNormalized} per-user row(s): "
+                + $"{result.Upsert.Summarize()}.");
+            if (result.DaysRead == 0)
+            {
+                AnsiConsole.MarkupLine("  [yellow]No raw records are stored for this tenant, vendor and period.[/]");
+            }
+            else if (result.RowsNormalized == 0)
+            {
+                AnsiConsole.MarkupLine(
+                    "  [yellow]The stored raw rows carry no per-user detail for this vendor; re-run extract for these days "
+                    + "to fetch it.[/]");
+            }
+
+            return 0;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+    });
+
+    var backfillCommand = new Command("backfill", "Rebuild derived data from what is already stored");
+    backfillCommand.Subcommands.Add(userUsageCommand);
+    return backfillCommand;
 }
 
 static Command BuildAuditCommand(IHost host)
