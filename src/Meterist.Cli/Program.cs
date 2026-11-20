@@ -105,6 +105,7 @@ builder.Services.AddScoped<CoverageChecker>();
 builder.Services.AddScoped<UserUsageBackfill>();
 builder.Services.AddScoped<SpendBreakdownBackfill>();
 builder.Services.AddScoped<RosterSnapshotService>();
+builder.Services.AddScoped<ConfiguredRosterSnapshots>();
 builder.Services.AddScoped<UserUsageReporter>();
 
 using var host = builder.Build();
@@ -663,6 +664,69 @@ static Command BuildRosterCommand(IHost host)
         }
     });
 
+    // ---- roster snapshot-all: what the scheduled run calls
+    var tenantsOption = new Option<string[]>("--tenant")
+    {
+        Description = "Tenant identifier to snapshot (repeat for several tenants)",
+        Required = true,
+    };
+
+    var snapshotAllCommand = new Command(
+        "snapshot-all",
+        "Take the roster snapshot for every vendor that has a member list and that each tenant has a credential for, "
+        + "skipping the rest. One vendor or tenant failing does not stop the others. Exits 1 if any snapshot failed, "
+        + "so a scheduled run can tell. This is what the daily task runs.");
+    snapshotAllCommand.Options.Add(tenantsOption);
+    snapshotAllCommand.Options.Add(dryRunOption);
+
+    snapshotAllCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantIds = parseResult.GetValue(tenantsOption)!;
+        var dryRun = parseResult.GetValue(dryRunOption);
+
+        using var scope = host.Services.CreateScope();
+        var snapshots = scope.ServiceProvider.GetRequiredService<ConfiguredRosterSnapshots>();
+        var all = new List<RosterRunResult>();
+
+        foreach (var tenantId in tenantIds)
+        {
+            var results = await snapshots.TakeAsync(tenantId, dryRun, cancellationToken);
+            all.AddRange(results);
+
+            var table = new Table()
+                .Title($"{Markup.Escape(tenantId)} roster snapshot{(dryRun ? " (dry run)" : string.Empty)}")
+                .AddColumn("Vendor")
+                .AddColumn("Status")
+                .AddColumn("Detail");
+
+            foreach (var r in results)
+            {
+                var detail = r.Status == RosterRunStatus.Succeeded && r.Outcome is { } o
+                    ? $"{o.MemberCount} member(s): {string.Join(", ", o.RoleCounts.Select(kv => $"{kv.Key} {kv.Value}"))}; "
+                        + $"{(dryRun ? "would store" : "stored")} {o.Stored.Inserted} added, {o.Stored.Updated} changed, "
+                        + $"{o.Stored.Removed} removed, {o.Stored.Unchanged} unchanged"
+                    : r.Detail;
+                var status = r.Status switch
+                {
+                    RosterRunStatus.Succeeded => "[green]Succeeded[/]",
+                    RosterRunStatus.Skipped => "[grey]Skipped[/]",
+                    _ => "[red]Failed[/]",
+                };
+                table.AddRow(Markup.Escape(r.DisplayName), status, Markup.Escape(detail));
+            }
+
+            AnsiConsole.Write(table);
+        }
+
+        var failed = all.Count(r => r.Status == RosterRunStatus.Failed);
+        AnsiConsole.MarkupLine(failed == 0
+            ? $"[green]{all.Count(r => r.Status == RosterRunStatus.Succeeded)} roster snapshot(s) taken, "
+                + $"{all.Count(r => r.Status == RosterRunStatus.Skipped)} skipped.[/]"
+            : $"[red]{failed} roster snapshot(s) failed.[/]");
+
+        return RosterExitCode.For(all);
+    });
+
     // ---- roster show
     var dateOption = new Option<DateTime?>("--on-or-before")
     {
@@ -730,6 +794,7 @@ static Command BuildRosterCommand(IHost host)
 
     var rosterCommand = new Command("roster", "Vendor member lists: who holds a seat");
     rosterCommand.Subcommands.Add(snapshotCommand);
+    rosterCommand.Subcommands.Add(snapshotAllCommand);
     rosterCommand.Subcommands.Add(showCommand);
     return rosterCommand;
 }

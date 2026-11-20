@@ -324,8 +324,11 @@ Spend and usage say what people did; seat counts, idle seats and "who is near th
 vendor, snapshot date, member id, email, name, role, seat type, added date).
 
 - **Snapshots, because the vendors keep no history.** Each run records who was on the list that day; retaking one
-  the same day replaces it, and other days are never touched. Whatever cadence the operator runs
-  `meterist roster snapshot` at is the resolution of the history.
+  the same day replaces it, and other days are never touched. The scheduled daily run takes them
+  (`meterist roster snapshot-all`, after extraction and the coverage check), so the history is daily;
+  `ConfiguredRosterSnapshots` snapshots every vendor that has a roster source and that the tenant has a credential for,
+  skips the rest, and keeps going if one fails. Its failure is its own exit-code bit in the wrapper (4), independent of
+  extraction and coverage.
 - **Opt-in per vendor** through `IVendorRosterSource` (`Meterist.Core.Vendors`), the same seam style as the per-user
   and breakdown normalizers. `RosterSnapshotService` fetches, builds the dated records and stores them, with a dry
   run. Claude Enterprise registers one (the member list works with the key already stored for spend); the ChatGPT

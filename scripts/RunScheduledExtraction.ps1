@@ -1,15 +1,23 @@
 <#
 .SYNOPSIS
-    Unattended daily run: extract every tenant through yesterday, then check
-    that no seat-priced vendor has missing days. Meant for Windows Task
-    Scheduler (see Register-DailyExtractionTask.ps1).
+    Unattended daily run: extract every tenant through yesterday, check that no
+    seat-priced vendor has missing days, then take each tenant's roster
+    snapshots. Meant for Windows Task Scheduler (see Register-DailyExtractionTask.ps1).
 
 .DESCRIPTION
     Writes everything to a dated log file, extract-yyyy-MM-dd.log in -LogDir
     (a second run on the same day appends). Exits 0 only if every extraction
-    succeeded AND the coverage check found no gaps, so Task Scheduler's
-    "Last Run Result" is a real pass/fail: 0 = clean, 1 = extraction failure,
-    2 = coverage gap, 3 = both.
+    succeeded, the coverage check found no gaps AND every roster snapshot was
+    taken, so Task Scheduler's "Last Run Result" is a real pass/fail. The code is
+    a sum of independent failures: 1 = extraction failure, 2 = coverage gap,
+    4 = roster snapshot failure (so 3 = extraction and coverage, 5 = extraction
+    and roster, 6 = coverage and roster, 7 = all three).
+
+    The roster snapshot runs after extraction whether or not extraction failed:
+    it is independent of it, and vendors keep no membership history, so a day
+    skipped is a day nobody can later reconstruct. A tenant with no credential
+    for a vendor is skipped for that vendor, not failed, and one vendor failing
+    does not stop the others.
 
     Runs through yesterday, not today: today's data is not complete yet, and a
     run through today would report today as a gap on the vendors that publish
@@ -54,7 +62,11 @@ try {
     dotnet run --project $cli -- audit coverage @tenantArgs --from $From --to $to
     $coverageFailed = $LASTEXITCODE -ne 0
 
-    $result = Get-ScheduledRunResult -ExtractFailed $extractFailed -CoverageFailed $coverageFailed
+    Write-Host "`n=== Roster snapshots ===" -ForegroundColor Cyan
+    dotnet run --project $cli -- roster snapshot-all @tenantArgs
+    $rosterFailed = $LASTEXITCODE -ne 0
+
+    $result = Get-ScheduledRunResult -ExtractFailed $extractFailed -CoverageFailed $coverageFailed -RosterFailed $rosterFailed
     Write-Host ("`n[{0}] {1} (log: {2})" -f (Get-Date -Format "s"), $result.Summary, $log)
 }
 finally {
