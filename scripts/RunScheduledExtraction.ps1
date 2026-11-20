@@ -33,6 +33,8 @@ param(
     [string]$LogDir = (Join-Path $env:LOCALAPPDATA "Meterist\logs")
 )
 
+. (Join-Path $PSScriptRoot "ScheduledRunResult.ps1")
+
 $ErrorActionPreference = "Continue"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
@@ -52,20 +54,11 @@ try {
     dotnet run --project $cli -- audit coverage @tenantArgs --from $From --to $to
     $coverageFailed = $LASTEXITCODE -ne 0
 
-    $code = 0
-    if ($extractFailed) { $code += 1 }
-    if ($coverageFailed) { $code += 2 }
-
-    $summary = switch ($code) {
-        0 { "OK: all extractions succeeded and coverage is complete." }
-        1 { "FAILED: one or more vendor extractions failed." }
-        2 { "FAILED: extraction succeeded but the coverage check found missing days." }
-        3 { "FAILED: extraction failures and missing days." }
-    }
-    Write-Host ("`n[{0}] {1} (log: {2})" -f (Get-Date -Format "s"), $summary, $log)
+    $result = Get-ScheduledRunResult -ExtractFailed $extractFailed -CoverageFailed $coverageFailed
+    Write-Host ("`n[{0}] {1} (log: {2})" -f (Get-Date -Format "s"), $result.Summary, $log)
 }
 finally {
     Stop-Transcript | Out-Null
 }
 
-exit $code
+exit $result.Code

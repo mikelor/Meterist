@@ -46,10 +46,13 @@ $action = New-ScheduledTaskAction -Execute $pwsh `
     -WorkingDirectory (Split-Path $script)
 $trigger = New-ScheduledTaskTrigger -Daily -At $Time
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+# The fully qualified DOMAIN\user (or MACHINE\user) of whoever is logged on, not the bare name:
+# credentials are DPAPI-encrypted to that exact principal, so the task must run as it.
+$account = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$principal = New-ScheduledTaskPrincipal -UserId $account -LogonType Interactive
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -Settings $settings -Principal $principal -Force | Out-Null
 
-Write-Host "Registered '$taskName' to run daily at $Time as $env:USERNAME."
+Write-Host "Registered '$taskName' to run daily at $Time as $account."
 Write-Host "Test it now with:  Start-ScheduledTask -TaskName '$taskName'"

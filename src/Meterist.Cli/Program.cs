@@ -69,6 +69,7 @@ builder.Services.AddSingleton<IVendorSpendExtractor, ChatGptEnterpriseSpendExtra
 builder.Services.AddSingleton<IVendorSpendExtractor, GeminiEnterpriseSpendExtractor>();
 
 builder.Services.AddScoped<SpendExtractionService>();
+builder.Services.AddScoped<ConfiguredVendorExtraction>();
 builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
 
@@ -421,37 +422,12 @@ static Command BuildExtractCommand(IHost host)
         }
 
         using var scope = host.Services.CreateScope();
-        var extractionService = scope.ServiceProvider.GetRequiredService<SpendExtractionService>();
         var period = new DateRange(from, to);
-        IReadOnlyList<VendorExtractionResult> results;
-
-        if (configuredOnly)
-        {
-            var secretStore = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-            var combined = new List<VendorExtractionResult>();
-
-            foreach (var vendor in VendorCatalog.All.Where(v => vendorFilter is null || v.Id == vendorFilter))
-            {
-                var credential = await secretStore.GetCredentialAsync(tenantId, vendor.Id, cancellationToken);
-                if (string.IsNullOrWhiteSpace(credential))
-                {
-                    combined.Add(new VendorExtractionResult(
-                        vendor.Id, vendor.DisplayName, VendorExtractionStatus.Skipped, 0,
-                        "no credential stored for this tenant"));
-                    continue;
-                }
-
-                combined.AddRange(await extractionService.ExtractAsync(
-                    tenantId, period, vendor.Id, cancellationToken, dryRun));
-            }
-
-            results = combined;
-        }
-        else
-        {
-            results = await extractionService.ExtractAsync(tenantId, period, vendorFilter, cancellationToken, dryRun);
-        }
-
+        var results = configuredOnly
+            ? await scope.ServiceProvider.GetRequiredService<ConfiguredVendorExtraction>()
+                .ExtractAsync(tenantId, period, vendorFilter, cancellationToken, dryRun)
+            : await scope.ServiceProvider.GetRequiredService<SpendExtractionService>()
+                .ExtractAsync(tenantId, period, vendorFilter, cancellationToken, dryRun);
         var table = new Table()
             .AddColumn("Vendor")
             .AddColumn("Status")
@@ -481,14 +457,13 @@ static Command BuildExtractCommand(IHost host)
 
         // A scheduled run has to be able to tell that something broke, so a failed vendor
         // makes the whole command fail. Skipped and not-implemented vendors are not failures.
-        var failed = results.Count(r => r.Status == VendorExtractionStatus.Failed);
-        if (failed > 0)
+        var exitCode = ExtractionExitCode.For(results);
+        if (exitCode != 0)
         {
-            AnsiConsole.MarkupLine($"[red]{failed} vendor extraction(s) failed.[/]");
-            return 1;
+            AnsiConsole.MarkupLine($"[red]{results.Count(r => r.Status == VendorExtractionStatus.Failed)} vendor extraction(s) failed.[/]");
         }
 
-        return 0;
+        return exitCode;
     });
 
     return extractCommand;
