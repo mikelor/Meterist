@@ -26,10 +26,22 @@ public sealed record VendorExtractionResult(
     int RecordCount,
     string? Detail,
     IReadOnlyList<DailySpendChange>? Changes = null,
-    UserUsageUpsertResult? UserUsage = null);
+    UserUsageUpsertResult? UserUsage = null,
+    BreakdownReplaceResult? Breakdown = null);
 
 public static class DailySpendChangeExtensions
 {
+    /// <summary>One-line account of a breakdown replace, e.g. "3 inserted, 40 unchanged, 1 removed". Zero counts are left out.</summary>
+    public static string Summarize(this BreakdownReplaceResult result)
+    {
+        var parts = new List<string>();
+        if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");
+        if (result.Updated > 0) parts.Add($"{result.Updated} updated");
+        if (result.Removed > 0) parts.Add($"{result.Removed} removed");
+        if (result.Unchanged > 0) parts.Add($"{result.Unchanged} unchanged");
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
+    }
+
     /// <summary>One-line account of a per-user upsert, e.g. "2 inserted, 40 unchanged". Zero counts are left out.</summary>
     public static string Summarize(this UserUsageUpsertResult result)
     {

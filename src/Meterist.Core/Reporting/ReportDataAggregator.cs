@@ -12,13 +12,16 @@ public sealed class ReportDataAggregator
 {
     private readonly IDailySpendRepository _dailySpendRepository;
     private readonly IVendorRateConfigRepository _vendorRateConfigRepository;
+    private readonly IDailySpendBreakdownRepository? _breakdownRepository;
 
     public ReportDataAggregator(
         IDailySpendRepository dailySpendRepository,
-        IVendorRateConfigRepository vendorRateConfigRepository)
+        IVendorRateConfigRepository vendorRateConfigRepository,
+        IDailySpendBreakdownRepository? breakdownRepository = null)
     {
         _dailySpendRepository = dailySpendRepository;
         _vendorRateConfigRepository = vendorRateConfigRepository;
+        _breakdownRepository = breakdownRepository;
     }
 
     public async Task<ReportData> AggregateAsync(
@@ -75,12 +78,19 @@ public sealed class ReportDataAggregator
                     .ConfigureAwait(false);
                 var currentRates = rates.Where(r => r.EffectiveTo is null).ToList();
 
+                var breakdown = _breakdownRepository is null
+                    ? []
+                    : SpendBreakdownSummary.Summarize(await _breakdownRepository
+                        .GetAsync(tenantId, vendor.Id, period, cancellationToken)
+                        .ConfigureAwait(false));
+
                 vendorReports.Add(new VendorReportData
                 {
                     Vendor = vendor,
                     Weeks = weeks,
                     CurrentRates = currentRates,
                     SourceDayCounts = sourceDayCounts,
+                    Breakdown = breakdown,
                 });
             }
 

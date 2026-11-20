@@ -1,11 +1,9 @@
-using System.Text.Json;
-
 namespace Meterist.Vendors.GeminiEnterprise;
 
 /// <summary>
-/// Which kind of Gemini billing line a SKU is. The stored <c>DailySpendRecord</c> only separates
-/// the seat fee from "everything else"; this finer split is derived from the SKU text in the raw
-/// extraction rows, for reporting only (a stored column is tracked as a later issue).
+/// Which kind of Gemini billing line a SKU is, worked out from its text. This is only the fallback for a
+/// billing rule that names no category (and for raw rows stored before categories existed): the real
+/// classification is the configured <see cref="GeminiBillingRule.Category"/>.
 /// </summary>
 public enum GeminiCostCategory
 {
@@ -28,17 +26,14 @@ public enum GeminiCostCategory
     Other,
 }
 
-/// <summary>Total for one category over a period.</summary>
-public sealed record GeminiCategoryTotal(GeminiCostCategory Category, decimal Cost, int Days, IReadOnlyList<string> Skus);
-
-/// <summary>Splits stored raw Gemini rows into <see cref="GeminiCostCategory"/> totals.</summary>
 public static class GeminiCostBreakdown
 {
     public static GeminiCostCategory Classify(string? skuDescription)
     {
         var sku = skuDescription ?? string.Empty;
 
-        // Subscription is checked first because the normalizer decides SeatFee the same way.
+        // Subscription is checked first because it also contains "Enterprise", and a seat fee must not be
+        // mistaken for overage.
         if (Has(sku, "Subscription")) return GeminiCostCategory.Seat;
         if (Has(sku, "Agent Platform")) return GeminiCostCategory.AgentPlatform;
         if (Has(sku, "Predictions")) return GeminiCostCategory.ModelUsage;
@@ -48,53 +43,26 @@ public static class GeminiCostBreakdown
     }
 
     /// <summary>
-    /// Totals per category from each day's stored raw-rows JSON. Only categories with a
-    /// non-zero total are returned, in enum order. Cost is the gross line cost, before credits.
+    /// The category label for a raw row: the configured one when the row carries it, otherwise the SKU-text
+    /// classification. The labels match the default configuration's, so a row classified either way is
+    /// stored under the same name.
     /// </summary>
-    public static IReadOnlyList<GeminiCategoryTotal> Summarize(IEnumerable<string> recordsJsonPerDay)
+    public static string CategoryOf(IReadOnlyDictionary<string, object?> row)
     {
-        var cost = new Dictionary<GeminiCostCategory, decimal>();
-        var days = new Dictionary<GeminiCostCategory, int>();
-        var skus = new Dictionary<GeminiCostCategory, SortedSet<string>>();
-
-        foreach (var json in recordsJsonPerDay)
+        if (row.TryGetValue(GeminiBillingRowFields.Category, out var category)
+            && category is string configured
+            && !string.IsNullOrWhiteSpace(configured))
         {
-            var seenToday = new HashSet<GeminiCostCategory>();
-            using var document = JsonDocument.Parse(json);
-
-            foreach (var row in document.RootElement.EnumerateArray())
-            {
-                var sku = row.TryGetProperty(GeminiBillingRowFields.SkuDescription, out var s) && s.ValueKind == JsonValueKind.String
-                    ? s.GetString() ?? string.Empty
-                    : string.Empty;
-                var amount = row.TryGetProperty(GeminiBillingRowFields.Cost, out var c) && c.ValueKind == JsonValueKind.Number
-                    ? c.GetDecimal()
-                    : 0m;
-
-                var category = Classify(sku);
-                cost[category] = cost.GetValueOrDefault(category) + amount;
-
-                if (!skus.TryGetValue(category, out var set))
-                {
-                    skus[category] = set = [];
-                }
-
-                set.Add(sku);
-
-                if (amount != 0m && seenToday.Add(category))
-                {
-                    days[category] = days.GetValueOrDefault(category) + 1;
-                }
-            }
+            return configured;
         }
 
-        return Enum.GetValues<GeminiCostCategory>()
-            .Where(cost.ContainsKey)
-            .Where(category => cost[category] != 0m)
-            .Select(category => new GeminiCategoryTotal(
-                category, cost[category], days.GetValueOrDefault(category), [.. skus[category]]))
-            .ToList();
+        row.TryGetValue(GeminiBillingRowFields.SkuDescription, out var sku);
+        return Classify(sku as string).ToString();
     }
+
+    /// <summary>False only for a row explicitly marked as non-usage; a row with no marker is usage.</summary>
+    public static bool IsUsage(IReadOnlyDictionary<string, object?> row) =>
+        !row.TryGetValue(GeminiBillingRowFields.IsUsage, out var isUsage) || isUsage is not false;
 
     private static bool Has(string sku, string term) => sku.Contains(term, StringComparison.OrdinalIgnoreCase);
 }

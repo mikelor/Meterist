@@ -14,6 +14,8 @@ public sealed class MeteristDbContext : DbContext
 
     public DbSet<UserDailyUsageRecord> UserDailyUsageRecords => Set<UserDailyUsageRecord>();
 
+    public DbSet<DailySpendBreakdownRecord> DailySpendBreakdownRecords => Set<DailySpendBreakdownRecord>();
+
     public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
     public DbSet<VendorRateConfig> VendorRateConfigs => Set<VendorRateConfig>();
@@ -44,6 +46,20 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.NetSpend).HasPrecision(18, 4);
 
             entity.Property(r => r.Source).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<DailySpendBreakdownRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            // Natural key. Detail is never null (empty when a category has no finer line) so the key is
+            // enforceable: SQLite treats NULLs in a unique index as distinct.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.Date, r.Category, r.Detail }).IsUnique();
+
+            entity.Property(r => r.Category).HasMaxLength(64);
+            entity.Property(r => r.Detail).HasMaxLength(256).HasDefaultValue(string.Empty);
+            entity.Property(r => r.Amount).HasPrecision(18, 4);
         });
 
         modelBuilder.Entity<UserDailyUsageRecord>(entity =>

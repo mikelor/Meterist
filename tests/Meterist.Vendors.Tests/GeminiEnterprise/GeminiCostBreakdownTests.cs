@@ -18,59 +18,61 @@ public class GeminiCostBreakdownTests
         Assert.Equal(expected, GeminiCostBreakdown.Classify(sku));
 
     [Fact]
-    public void Summarize_TotalsPerCategory_CountsDaysWithCharge_AndListsSkus()
+    public void CategoryOf_PrefersTheConfiguredCategory()
     {
-        var day1 = """
-            [{"SkuDescription":"Gemini Enterprise Plus: Subscription","Cost":100.5},
-             {"SkuDescription":"Agent Platform Compute","Cost":0.02},
-             {"SkuDescription":"Agent Platform Memory","Cost":0.01}]
-            """;
-        var day2 = """
-            [{"SkuDescription":"Gemini Enterprise Plus: Subscription","Cost":100.5},
-             {"SkuDescription":"Gemini Flash Text Input - Predictions","Cost":3.25},
-             {"SkuDescription":"Agent Platform Compute","Cost":0}]
-            """;
+        // The SKU text says Subscription, but the rule that matched said Tax: the rule wins.
+        var row = new Dictionary<string, object?>
+        {
+            [GeminiBillingRowFields.SkuDescription] = "Gemini Enterprise Plus: Subscription",
+            [GeminiBillingRowFields.Category] = "Tax",
+        };
 
-        var totals = GeminiCostBreakdown.Summarize([day1, day2]);
-
-        Assert.Equal(
-            [GeminiCostCategory.Seat, GeminiCostCategory.AgentPlatform, GeminiCostCategory.ModelUsage],
-            totals.Select(t => t.Category));
-
-        var seat = totals[0];
-        Assert.Equal(201.0m, seat.Cost);
-        Assert.Equal(2, seat.Days);
-
-        var agent = totals[1];
-        Assert.Equal(0.03m, agent.Cost);
-        Assert.Equal(1, agent.Days);
-        Assert.Equal(["Agent Platform Compute", "Agent Platform Memory"], agent.Skus);
-
-        Assert.Equal(1, totals[2].Days);
+        Assert.Equal("Tax", GeminiCostBreakdown.CategoryOf(row));
     }
 
-    [Fact]
-    public void Summarize_NoRowsOrAllZero_ReturnsNothing()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void CategoryOf_FallsBackToTheSkuText_WhenTheRuleNamedNone(string? category)
     {
-        Assert.Empty(GeminiCostBreakdown.Summarize([]));
-        Assert.Empty(GeminiCostBreakdown.Summarize(["""[{"SkuDescription":"Agent Platform Compute","Cost":0}]"""]));
-    }
-
-    [Fact]
-    public void Summarize_ReadsTheKeysTheRawRepositoryActuallyWrites()
-    {
-        // Pins the stored raw-row key names so a rename in GeminiBillingRowFields cannot silently
-        // turn every category into Other/zero.
         var row = new Dictionary<string, object?>
         {
             [GeminiBillingRowFields.SkuDescription] = "Agent Platform Compute",
-            [GeminiBillingRowFields.Cost] = 1.25m,
+            [GeminiBillingRowFields.Category] = category,
         };
-        var json = System.Text.Json.JsonSerializer.Serialize(new[] { row });
 
-        var total = Assert.Single(GeminiCostBreakdown.Summarize([json]));
+        Assert.Equal("AgentPlatform", GeminiCostBreakdown.CategoryOf(row));
+    }
 
-        Assert.Equal(GeminiCostCategory.AgentPlatform, total.Category);
-        Assert.Equal(1.25m, total.Cost);
+    [Fact]
+    public void CategoryOf_ARowStoredBeforeCategoriesExisted_IsClassifiedFromItsSku()
+    {
+        // No Category key at all, as in every raw row stored before this change.
+        var row = new Dictionary<string, object?>
+        {
+            [GeminiBillingRowFields.SkuDescription] = "Gemini Enterprise Plus: Subscription - one month term",
+        };
+
+        Assert.Equal("Seat", GeminiCostBreakdown.CategoryOf(row));
+    }
+
+    [Fact]
+    public void DefaultConfigurationLabels_AreTheSameStringsTheFallbackProduces()
+    {
+        // A row classified from its SKU and one classified by the default rules must land under one name.
+        var fromConfig = GeminiBillingFilter.Default.Include.Select(r => r.Category!).Distinct();
+        var fromFallback = Enum.GetNames<GeminiCostCategory>();
+
+        Assert.All(fromConfig, label => Assert.Contains(label, fromFallback));
+    }
+
+    [Fact]
+    public void IsUsage_IsFalseOnlyForARowExplicitlyMarkedNonUsage()
+    {
+        Assert.True(GeminiCostBreakdown.IsUsage(new Dictionary<string, object?>()));
+        Assert.True(GeminiCostBreakdown.IsUsage(new Dictionary<string, object?> { [GeminiBillingRowFields.IsUsage] = true }));
+        Assert.True(GeminiCostBreakdown.IsUsage(new Dictionary<string, object?> { [GeminiBillingRowFields.IsUsage] = null }));
+        Assert.False(GeminiCostBreakdown.IsUsage(new Dictionary<string, object?> { [GeminiBillingRowFields.IsUsage] = false }));
     }
 }

@@ -104,36 +104,47 @@ dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-i
 
 #### Which billing lines count, and the "not counted" warning
 
-A Google Cloud billing export is one big table of charges. Meterist decides which
-of them are Gemini Enterprise spend using three lists of rules. Each rule is a
-**service name** (matched exactly) plus a **SKU pattern** (a SQL `LIKE` pattern
-where `%` matches any text; the match is case-sensitive).
+A Google Cloud billing export is one big table of charges. Meterist decides what to
+do with each line using four lists of rules. Each rule is a **service name** (matched
+exactly) plus a **SKU pattern** (a SQL `LIKE` pattern where `%` matches any text; the
+match is case-sensitive), and the first rule in a list that matches a line decides it.
 
 | List | What it does |
 | --- | --- |
-| **Include** | A line matching any Include rule is counted as Gemini Enterprise spend. |
-| **Ignore** | A line you knowingly leave out. It is not counted and does not trigger the warning. |
-| **WatchTerms** | Words that make an uncounted line look Gemini-related. A line with non-zero cost containing one of these (in its service or SKU, any case) that is neither included nor ignored triggers the warning. |
+| **Include** | A line matching any Include rule is counted as Gemini Enterprise spend. Its rule's **Category** says what kind of charge it is (Seat, ModelUsage...), for the breakdown. |
+| **NonUsage** | A real charge on the billing account that is not usage: tax, support, rounding. It is recorded in the breakdown, labelled not counted, and is **never part of any total**. Every NonUsage rule needs a Category. |
+| **Ignore** | A line you knowingly leave out entirely. It is neither counted nor recorded, and does not trigger the warning. |
+| **WatchTerms** | Words that make an unhandled line look Gemini-related. A line with non-zero cost containing one of these (in its service or SKU, any case) that is not included, not in NonUsage and not ignored triggers the warning. |
 
-**Defaults.** Out of the box Meterist counts:
+**Defaults.** Out of the box Meterist counts these, in this order (the order matters:
+the seat SKU contains the word "Enterprise" too, so it must be matched first):
 
-| Rule (service / SKU pattern) | What it is | Counted as |
+| Rule (service / SKU pattern) | Category | What it is |
 | --- | --- | --- |
-| `Vertex AI Search` / `%Enterprise%` | The seat subscription and its per-request overage. Verified against real exports. | Seat fee (SKUs containing "Subscription"), otherwise usage |
-| `Vertex AI` / `%Agent Platform%` | Agent Platform compute and memory (the Agent Gateway / Memory Bank family, seen from September 2026). | Usage |
-| `Vertex AI` / `%Predictions%` | Raw Gemini model token usage (for example "... Text Input - Predictions"). | Usage |
-| `Vertex AI Search` / `%Pay as you go%` and `%Pay-as-you-go%` | Pay-as-you-go usage above the edition quota (the billing model from 2026-08-17). **No such SKU has appeared in a live export yet**, so these two patterns are best guesses at the name. | Usage |
+| `Vertex AI Search` / `%Subscription%` | `Seat` | The seat subscription. Becomes the **seat fee**. Verified against real exports. |
+| `Vertex AI Search` / `%Enterprise%` | `EnterpriseOverage` | Per-request overage on the Enterprise plan. |
+| `Vertex AI` / `%Agent Platform%` | `AgentPlatform` | Agent Platform compute and memory (the Agent Gateway / Memory Bank family, seen from September 2026). |
+| `Vertex AI` / `%Predictions%` | `ModelUsage` | Raw Gemini model token usage (for example "... Text Input - Predictions"). |
+| `Vertex AI Search` / `%Pay as you go%` and `%Pay-as-you-go%` | `PayAsYouGo` | Pay-as-you-go usage above the edition quota (the billing model from 2026-08-17). **No such SKU has appeared in a live export yet**, so these two patterns are best guesses at the name. |
+
+Everything with the `Seat` category is the day's seat fee; every other counted line is
+usage/overage. So the agent, model and pay-as-you-go lines raise a tenant's usage
+figure, not its seat fee. A tenant that runs its own Gemini API workloads in the same
+project will therefore see that model usage in its Gemini Enterprise numbers. If that
+is not what you want to report, take the rule out as described below.
+
+The default **NonUsage** rules, recorded but never counted:
+
+| Rule (service / SKU pattern) | Category | What it is |
+| --- | --- | --- |
+| `Invoice` / `%Tax%` | `Tax` | Tax, once a month. |
+| `Invoice` / `%Rounding%` | `Rounding` | A cent or two of invoice rounding. |
+| `Support` / `%` | `Support` | Cloud support plan fees, on accounts that have one. |
 
 The only default Ignore rule is `Vertex AI Search` / `%Data Index%` (index
 storage, not specific to the Enterprise plan). The default WatchTerms are
 `Gemini`, `Agent Platform`, `Discovery Engine`, `Vertex AI Search`,
 `Pay as you go` and `Pay-as-you-go`.
-
-Anything that is not a "Subscription" SKU is stored as usage/overage, so the
-agent, model and pay-as-you-go lines raise a tenant's usage figure, not its seat
-fee. A tenant that runs its own Gemini API workloads in the same project will
-therefore see that model usage in its Gemini Enterprise numbers. If that is not
-what you want to report, take the rule out as described below.
 
 ##### The "not counted" warning
 
@@ -149,44 +160,39 @@ Gemini Enterprise filter does not count: Vertex AI | Agent Platform Compute: 1.2
 
 The warning never fails the extraction and never changes the figures; it is a
 prompt to decide. Either the line belongs in Gemini Enterprise spend, so add an
-Include rule, or it does not, so add an Ignore rule.
+Include rule, or it is a real charge that is not usage, so add a NonUsage rule, or it
+does not matter, so add an Ignore rule.
 
-##### Tax and support fees are left out on purpose
+##### Tax and support fees: recorded, never counted
 
-Google''s billing export also carries `Invoice | Tax` (once a month) and, on accounts
-with a support plan, `Support | ...` fees (every day). Meterist does **not** count
-these: they are not usage, and a support plan covers the whole billing account, not just
-Gemini Enterprise. So a Gemini total will sit below the Google invoice, by about a tenth
-for tax alone and by more than a quarter on an account with a support plan. The client
-report's footnote says so. Do not add Include rules for them: they would land in
-`UsageOrOverage` and skew the totals and projections.
+Google's billing export also carries tax (once a month) and, on accounts with a support
+plan, support fees (every day). Meterist records them as **NonUsage** charges but does
+**not** count them: they are not usage, and a support plan covers the whole billing
+account, not just Gemini Enterprise. So a Gemini total sits below the Google invoice, by
+about a tenth for tax alone and by more than a quarter on an account with a support plan.
+The client report's footnote says so, and its "Spend by kind of charge" section shows the
+amounts, so a reader can see why. Do not move them into Include: they would land in the
+usage figure and skew the totals and projections.
 
-To see how large they are for a tenant, run a dry run with watch terms for them (the
-"not counted" warning then lists each with its total and dates). This only reads:
-
-```powershell
-$env:Meterist__Gemini__BillingFilter__Include__0__Service = "Vertex AI Search"
-$env:Meterist__Gemini__BillingFilter__Include__0__SkuLike = "%Enterprise%"
-$env:Meterist__Gemini__BillingFilter__Include__1__Service = "Vertex AI"
-$env:Meterist__Gemini__BillingFilter__Include__1__SkuLike = "%Agent Platform%"
-$env:Meterist__Gemini__BillingFilter__Include__2__Service = "Vertex AI"
-$env:Meterist__Gemini__BillingFilter__Include__2__SkuLike = "%Predictions%"
-$env:Meterist__Gemini__BillingFilter__WatchTerms__0 = "invoice"
-$env:Meterist__Gemini__BillingFilter__WatchTerms__1 = "support"
-dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --vendor gemini-enterprise --from 2026-07-01 --to 2026-11-19 --dry-run
-```
-
-Close the PowerShell window (or remove the variables) afterwards so the override does not
-stay in effect. The three Include rules are the defaults minus the two unverified
-pay-as-you-go patterns; they are only for this look.
+To see the size of these for a tenant, extract, then run `audit gemini-breakdown`
+(below): the not-counted kinds are listed with their amounts, and a line says how much
+higher the invoice for the period would be.
 
 ##### Changing the rules
 
 Add a section to [`appsettings.json`](../src/Meterist.Cli/appsettings.json), or
 set the matching environment variables. **If the section is present it replaces
 the defaults entirely**, so list every rule you want, including the ones you are
-keeping. If you set only `Include`, the Ignore and WatchTerms lists become empty.
-An empty `Include` list is rejected when extraction starts.
+keeping. If you set only `Include`, the NonUsage, Ignore and WatchTerms lists become
+empty. An empty `Include` list is rejected when extraction starts, as is a NonUsage
+rule without a Category.
+
+A **Category** is a short label (1 to 64 characters, no leading or trailing spaces)
+that you choose. The ones above are only the defaults; a new kind of charge Google
+introduces needs a rule with its own label, not a code change or a migration. An
+Include rule may leave the Category out: the kind is then guessed from the SKU text
+(Subscription is a Seat, "Agent Platform" is AgentPlatform, and so on), which keeps an
+older configuration working, but an explicit Category is clearer.
 
 This is the complete default configuration, written out. Copy it as the starting
 point for any change:
@@ -197,11 +203,17 @@ point for any change:
     "Gemini": {
       "BillingFilter": {
         "Include": [
-          { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%" },
-          { "Service": "Vertex AI", "SkuLike": "%Agent Platform%" },
-          { "Service": "Vertex AI", "SkuLike": "%Predictions%" },
-          { "Service": "Vertex AI Search", "SkuLike": "%Pay as you go%" },
-          { "Service": "Vertex AI Search", "SkuLike": "%Pay-as-you-go%" }
+          { "Service": "Vertex AI Search", "SkuLike": "%Subscription%", "Category": "Seat" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%", "Category": "EnterpriseOverage" },
+          { "Service": "Vertex AI", "SkuLike": "%Agent Platform%", "Category": "AgentPlatform" },
+          { "Service": "Vertex AI", "SkuLike": "%Predictions%", "Category": "ModelUsage" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay as you go%", "Category": "PayAsYouGo" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay-as-you-go%", "Category": "PayAsYouGo" }
+        ],
+        "NonUsage": [
+          { "Service": "Invoice", "SkuLike": "%Tax%", "Category": "Tax" },
+          { "Service": "Invoice", "SkuLike": "%Rounding%", "Category": "Rounding" },
+          { "Service": "Support", "SkuLike": "%", "Category": "Support" }
         ],
         "Ignore": [
           { "Service": "Vertex AI Search", "SkuLike": "%Data Index%" }
@@ -220,7 +232,7 @@ point for any change:
 keep Agent Platform and raw model usage out), move its rule from `Include` to
 `Ignore`. Moving it, rather than deleting it, keeps the warning quiet about a
 line you have decided about. This configuration puts Agent Platform and model
-usage back out of the totals, as in the first version of the filter:
+usage out of the totals, as in the first version of the filter:
 
 ```json
 {
@@ -228,9 +240,15 @@ usage back out of the totals, as in the first version of the filter:
     "Gemini": {
       "BillingFilter": {
         "Include": [
-          { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%" },
-          { "Service": "Vertex AI Search", "SkuLike": "%Pay as you go%" },
-          { "Service": "Vertex AI Search", "SkuLike": "%Pay-as-you-go%" }
+          { "Service": "Vertex AI Search", "SkuLike": "%Subscription%", "Category": "Seat" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%", "Category": "EnterpriseOverage" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay as you go%", "Category": "PayAsYouGo" },
+          { "Service": "Vertex AI Search", "SkuLike": "%Pay-as-you-go%", "Category": "PayAsYouGo" }
+        ],
+        "NonUsage": [
+          { "Service": "Invoice", "SkuLike": "%Tax%", "Category": "Tax" },
+          { "Service": "Invoice", "SkuLike": "%Rounding%", "Category": "Rounding" },
+          { "Service": "Support", "SkuLike": "%", "Category": "Support" }
         ],
         "Ignore": [
           { "Service": "Vertex AI Search", "SkuLike": "%Data Index%" },
@@ -248,34 +266,54 @@ usage back out of the totals, as in the first version of the filter:
 ```
 
 To drop pay-as-you-go as well, move the two `Pay` rules to `Ignore` the same way.
-To count a new SKU Google introduces, add an Include rule for its service and a
-pattern that matches its SKU name; the warning shows you the exact service and
-SKU text to copy.
+To count a new SKU Google introduces, add an Include rule for its service, a pattern
+that matches its SKU name and a Category of your choice; the warning shows you the
+exact service and SKU text to copy. To record a new non-usage charge, add a NonUsage
+rule the same way.
 
 ##### Seeing the split by kind of charge
 
-The stored daily record only separates the seat fee from everything else, so
-Agent Platform, model usage and pay-as-you-go all sit inside the usage figure.
-To see them separately, run:
+Each extraction stores, besides the daily totals, one row per day, kind of charge and SKU
+(a "breakdown"), including the non-usage kinds. To see them:
 
 ```powershell
 dotnet run --project src/Meterist.Cli -- audit gemini-breakdown --tenant <your-tenant-id> --from 2026-07-01 --to 2026-11-19
 ```
 
-It is read-only. It groups the stored raw billing rows into Seat, Enterprise
-overage, Agent Platform, Model usage, Pay-as-you-go and Other (a SKU that matched
-an Include rule but none of those; look at its name), with the cost, the number
-of days that had a charge, and the SKU names behind each. It also compares its
-total with the stored gross spend and says so if they differ, which means the raw
-rows and the stored records come from different extractions or rules: re-run
-`extract` for that period. The split is derived from SKU text, and a stored column
-for it is planned.
+It is read-only. It lists each kind with whether it is in the totals, the number of days
+it had a charge, its amount and the SKU names behind it. Below the table it checks that
+the usage kinds add up to the stored gross spend for the same days and says so if they do
+not (which means the breakdown and the daily records came from different extractions or
+rules: re-run `extract` for that period), shows the not-counted total, and counts any days
+that have spend but no breakdown rows. A kind worth under half a cent (Google's invoice
+rounding line, for example) is not listed, since it would only read as a bare `$0.00`; a line
+under the table names it, and it is still included in every total. The client report shows the same split in its
+"Spend by kind of charge" section, for a vendor that has something beyond a seat fee or any
+not-counted charge; the weekly figures and projections do not use it.
+
+**Filling in history without calling BigQuery.** To build breakdown rows for days you
+already extracted, run:
+
+```powershell
+dotnet run --project src/Meterist.Cli -- backfill spend-breakdown --tenant <your-tenant-id> --vendor gemini-enterprise --from 2026-07-01 --to 2026-11-19 --dry-run
+```
+
+It reads the raw records already stored, needs no credentials and no network, and
+`--dry-run` shows the count without writing. Run it again without `--dry-run` to store
+them. It is safe to repeat. It can only use what the raw records hold: days pulled before
+tax and support lines were part of the query have none of them, so **re-run `extract`
+for those days** to fetch them. A day with no stored raw record is left untouched.
+
+Re-running `extract` replaces a day's breakdown rows with what the billing export says
+now, so a line Google later revises or removes does not linger.
+
 **Environment variables.** Arrays are numbered from zero and each field is its
 own variable, with `__` as the separator. For example, the first Include rule is:
 
 ```powershell
 $env:Meterist__Gemini__BillingFilter__Include__0__Service = "Vertex AI Search"
-$env:Meterist__Gemini__BillingFilter__Include__0__SkuLike = "%Enterprise%"
+$env:Meterist__Gemini__BillingFilter__Include__0__SkuLike = "%Subscription%"
+$env:Meterist__Gemini__BillingFilter__Include__0__Category = "Seat"
 ```
 
 Environment variables merge with `appsettings.json` index by index, so a leftover
@@ -283,7 +321,7 @@ Environment variables merge with `appsettings.json` index by index, so a leftove
 test, prefer editing the JSON.
 
 **After you change the rules.** They apply to future extractions only. Re-run
-`extract` for the earlier days you want recalculated. Gemini days are recalculated from the billing export on each pull, so re-extracting after narrowing or widening the rules gives the new figures. To see the effect before anything is written, run `extract --dry-run` first.
+`extract` for the earlier days you want recalculated. Gemini days are recalculated from the billing export on each pull, so re-extracting after narrowing or widening the rules gives the new figures and the new breakdown. To see the effect before anything is written, run `extract --dry-run` first.
 
 ### ChatGPT Enterprise
 

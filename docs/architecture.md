@@ -241,6 +241,35 @@ Flagging `IsEstimated` at the schema level (rather than a documentation
 footnote) matters — any report/UI built on this later must not present an
 estimate with the same confidence as vendor-reported data.
 
+### 5.1a The per-kind breakdown — BUILT (2026-11-20, issue #53)
+
+`DailySpendRecord` separates only the seat fee from usage, so the kinds of charge inside a day (seat,
+overage, Agent Platform, model usage, pay-as-you-go, and tax and support) needed somewhere to live.
+
+**Decision: a child table, `DailySpendBreakdownRecords`, of (tenant, vendor, day, category, detail, amount,
+`IsUsage`), rather than more columns on the daily record.** The two real tenants showed why: non-seat usage was
+about 0.01% of spend on one and absent on the other, so fixed columns would have been almost all zeros, and each
+new Google SKU family would have meant a migration. Rows exist only where a charge exists and the category is a
+configured label, so a new kind of charge is a configuration change.
+
+- **Classification is configuration.** Each billing rule carries a `Category`; the first matching rule decides it,
+  in SQL, by the same rule order that decides inclusion, so the two cannot disagree. A rule with no category falls
+  back to classifying the SKU text, so an older configuration and raw rows stored before categories existed keep
+  working. The seat fee is now "the rows categorised as Seat" rather than "a SKU containing Subscription".
+- **`IsUsage` separates what is counted from what is not.** Usage rows sum to the day's `GrossSpend`; tax, support
+  and rounding (a separate `NonUsage` rule list) are stored with `IsUsage` false and enter no total. This is the
+  deferred path section 5.2 anticipated, built now at the user's request, so the gap to an invoice is visible.
+- **Written by replacing the covered days**, not upserting, so a line a vendor revises or drops does not linger and
+  make the breakdown disagree with the total.
+- **Optional per vendor.** A vendor opts in by registering an `IVendorSpendBreakdownNormalizer`, the same seam as
+  the per-user rows; only Gemini does. Whether ChatGPT credit types or Claude per-model cost deserve the same
+  treatment is left open: the table is vendor-agnostic, so nothing here prevents it, but nothing needs it yet.
+- **Backfill** rebuilds the rows from raw records already stored (`backfill spend-breakdown`), with no API call;
+  tax and support exist only for days pulled since the query learned to return them.
+- **Reporting.** `audit gemini-breakdown` reads the table; the client report gains a "Spend by kind of charge"
+  section for a vendor with anything beyond a seat fee or any not-counted charge. Weekly totals and projections
+  still run on the daily records, untouched.
+
 ### 5.2 What counts as spend: tax and support fees — DECIDED (2026-11-20, issue #35)
 
 **Decision: Meterist's figures are usage and seat charges only. Tax and support
@@ -278,18 +307,15 @@ Why exclude them:
 
 How it is disclosed. The report footnote states that tax and support fees are not
 included and that a figure can therefore differ from an invoice. The Gemini billing
-filter already leaves them out (they match no Include rule), so the numbers are
-unchanged; this decision records that it is deliberate. Because they do not look
-Gemini-related (no watch term matches them), the "not counted" warning stays quiet
-about them by design. To see their size for a tenant, add the watch terms `invoice`,
-`support` and `tax` for one dry run (see the user guide).
-
-What would change this. If a client needs invoice-level reconciliation ("landed
-cost"), add them as a separate **non-usage** category, never inside
-`UsageOrOverage`. The per-kind child table already planned for Gemini (issue #53:
-rows of record, category and amount, created only where a charge exists) can carry
-`Tax` and `Support` categories without a new migration, so that path is open and
-cheap; it is deferred only because no one needs it yet.
+filter leaves them out of the figures (they match no Include rule), so the numbers are
+unchanged; this decision records that it is deliberate. The "not counted" warning does not
+mention them: they are recorded as non-usage lines (below) and so count as handled.
+Update, same day (issue #53): the non-usage category this section deferred was built, at the
+user's request, as rows of the per-kind breakdown (section 5.1a). Tax, support and rounding
+are now **recorded** with `IsUsage` false, shown in the report's "Spend by kind of charge"
+section and in `audit gemini-breakdown`, and still enter **no total or projection**: the
+decision to exclude them from the figures stands, only the invisibility is gone. They are
+never inside `UsageOrOverage`.
 
 ## 6. Credentials — DECIDED (2026-07-21)
 
@@ -543,5 +569,6 @@ doesn't have to re-litigate it:
 | Eventual cloud secrets manager product (post-DPAPI) | Open, intentionally deferred (§6) | Only matters once hosted; no v1 impact |
 | Eventual cloud hosting target | Implicit lean toward Azure (via Aspire + Entra ID choices, §9) — not explicitly confirmed | Worth an explicit sign-off before any cloud-specific code is written |
 | ChatGPT Enterprise Cost API exact schema | Needs a spike with a real Admin key | ChatGPT Enterprise adapter implementation |
-| Tax and support fees in the totals | **Decided 2026-11-20** — excluded everywhere, disclosed in the report footnote; a separate non-usage category is deferred, and rides the #53 design if ever wanted (§5.2) | Nothing |
+| Tax and support fees in the totals | **Decided 2026-11-20** — excluded from every total and projection, disclosed in the report footnote, and recorded as non-usage breakdown rows (§5.1a, §5.2) | Nothing |
+| Per-kind breakdown shape (issue #53) | **Built 2026-11-20** — a child table of (day, category, detail, amount, `IsUsage`), configured categories, Gemini only for now (§5.1a) | Whether ChatGPT credit types or Claude per-model cost want the same, not needed yet |
 | Ecosync Claude Enterprise "usage credits enabled?" status | Needs confirmation | Whether the Claude Enterprise adapter should expect any overage data for that tenant |

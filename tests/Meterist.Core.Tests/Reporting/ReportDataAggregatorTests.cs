@@ -147,6 +147,77 @@ public class ReportDataAggregatorTests
         Assert.Empty(gemini.SourceDayCounts);
     }
 
+    [Fact]
+    public async Task AggregateAsync_AttachesTheStoredBreakdown_SummarisedPerVendor()
+    {
+        var gemini = VendorCatalog.GeminiEnterprise.Id;
+        var breakdown = new FakeBreakdownRepository(
+        [
+            Breakdown("ecosync", gemini, 1, "Seat", 10m),
+            Breakdown("ecosync", gemini, 2, "Seat", 10m),
+            Breakdown("ecosync", gemini, 1, "Tax", 3m, isUsage: false),
+            Breakdown("zelleri", gemini, 1, "Seat", 7m),
+        ]);
+        var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), new FakeVendorRateConfigRepository(), breakdown);
+
+        var data = await aggregator.AggregateAsync(
+            ["ecosync", "zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var ecosync = data.Tenants.Single(t => t.TenantId == "ecosync").Vendors.Single(v => v.Vendor.Id == gemini);
+        Assert.Equal(["Seat", "Tax"], ecosync.Breakdown.Select(b => b.Category));
+        Assert.Equal(20m, ecosync.Breakdown[0].Amount);
+        Assert.False(ecosync.Breakdown[1].IsUsage);
+        Assert.True(ecosync.HasNotableBreakdown);   // a non-usage charge is worth showing
+
+        var zelleri = data.Tenants.Single(t => t.TenantId == "zelleri").Vendors.Single(v => v.Vendor.Id == gemini);
+        Assert.Equal(["Seat"], zelleri.Breakdown.Select(b => b.Category));
+        Assert.False(zelleri.HasNotableBreakdown);  // nothing but a seat fee: no table needed
+
+        // A vendor with no stored breakdown is simply empty.
+        var other = data.Tenants[0].Vendors.First(v => v.Vendor.Id != gemini);
+        Assert.Empty(other.Breakdown);
+    }
+
+    [Fact]
+    public async Task AggregateAsync_WithoutABreakdownRepository_LeavesTheBreakdownEmpty()
+    {
+        var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), new FakeVendorRateConfigRepository());
+
+        var data = await aggregator.AggregateAsync(["ecosync"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.All(data.Tenants[0].Vendors, v => Assert.Empty(v.Breakdown));
+    }
+
+    private static DailySpendBreakdownRecord Breakdown(
+        string tenantId, Guid vendorId, int day, string category, decimal amount, bool isUsage = true) => new()
+    {
+        TenantId = tenantId,
+        VendorId = vendorId,
+        Date = Period.Start.AddDays(day - 1),
+        Category = category,
+        Amount = amount,
+        IsUsage = isUsage,
+    };
+
+    private sealed class FakeBreakdownRepository(IReadOnlyList<DailySpendBreakdownRecord> rows) : IDailySpendBreakdownRepository
+    {
+        public Task<IReadOnlyList<DailySpendBreakdownRecord>> GetAsync(
+            string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<DailySpendBreakdownRecord>>(rows
+                .Where(r => r.TenantId == tenantId && r.VendorId == vendorId && r.Date >= range.Start && r.Date <= range.End)
+                .ToList());
+
+        public Task<BreakdownReplaceResult> ReplaceAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> coveredDays,
+            IEnumerable<DailySpendBreakdownRecord> records, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<BreakdownReplaceResult> PlanReplaceAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> coveredDays,
+            IEnumerable<DailySpendBreakdownRecord> records, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
     private static List<DailySpendRecord> DaysOf(string tenantId, Guid vendorId, DateOnly start, int count) =>
         Enumerable.Range(0, count)
             .Select(i => new DailySpendRecord { TenantId = tenantId, VendorId = vendorId, Date = start.AddDays(i) })

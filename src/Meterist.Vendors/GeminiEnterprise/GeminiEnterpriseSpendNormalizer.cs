@@ -7,13 +7,13 @@ namespace Meterist.Vendors.GeminiEnterprise;
 /// <summary>
 /// Turns Gemini Enterprise's day-grouped BigQuery rows into one
 /// DailySpendRecord per date, splitting each day's cost into the
-/// subscription seat fee vs. everything else (overage, Agent Gateway,
-/// Memory Bank — see docs/vendor-integration-reference.md).
+/// seat fee (the rows whose category is Seat) vs. everything else (overage, Agent
+/// Gateway, Memory Bank — see docs/vendor-integration-reference.md). Rows marked as
+/// non-usage (tax, support, rounding) are skipped: they are kept in the per-kind
+/// breakdown, not in any total.
 /// </summary>
 public sealed class GeminiEnterpriseSpendNormalizer : IVendorSpendNormalizer
 {
-    private const string SubscriptionMarker = "Subscription";
-
     private readonly ILogger<GeminiEnterpriseSpendNormalizer> _logger;
 
     public GeminiEnterpriseSpendNormalizer(ILogger<GeminiEnterpriseSpendNormalizer> logger)
@@ -44,11 +44,19 @@ public sealed class GeminiEnterpriseSpendNormalizer : IVendorSpendNormalizer
 
             foreach (var row in rows)
             {
-                var skuDescription = (string?)row[GeminiBillingRowFields.SkuDescription] ?? string.Empty;
+                // Tax, support fees and rounding are real charges on the account but not usage:
+                // recorded in the breakdown, never in a total (docs/architecture.md section 5.2).
+                if (!GeminiCostBreakdown.IsUsage(row))
+                {
+                    continue;
+                }
+
                 var cost = ToDecimal(row[GeminiBillingRowFields.Cost]);
                 var creditsAmount = ToDecimal(row[GeminiBillingRowFields.CreditsAmount]);
 
-                if (skuDescription.Contains(SubscriptionMarker, StringComparison.OrdinalIgnoreCase))
+                // The seat fee is the rows categorised as Seat (by the matching rule, or, for a rule with no
+                // category and for rows stored before categories existed, by a Subscription SKU).
+                if (string.Equals(GeminiCostBreakdown.CategoryOf(row), SpendCategories.Seat, StringComparison.Ordinal))
                 {
                     seatFee += cost;
                 }

@@ -15,12 +15,55 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261120160643_AddUserDailyUsageRecords";
+    public override string LastMigrationId => "20261120183237_AddDailySpendBreakdownRecords";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
 #pragma warning disable 612, 618
         modelBuilder.HasAnnotation("ProductVersion", "11.0.0");
+
+        modelBuilder.Entity("Meterist.Core.Models.DailySpendBreakdownRecord", b =>
+            {
+                b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("INTEGER");
+
+                b.Property<decimal>("Amount")
+                    .HasPrecision(18, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Category")
+                    .IsRequired()
+                    .HasMaxLength(64)
+                    .HasColumnType("TEXT");
+
+                b.Property<DateOnly>("Date")
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Detail")
+                    .IsRequired()
+                    .ValueGeneratedOnAdd()
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT")
+                    .HasDefaultValue("");
+
+                b.Property<bool>("IsUsage")
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("TenantId")
+                    .IsRequired()
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid>("VendorId")
+                    .HasColumnType("TEXT");
+
+                b.HasKey("Id");
+
+                b.HasIndex("TenantId", "VendorId", "Date", "Category", "Detail")
+                    .IsUnique();
+
+                b.ToTable("DailySpendBreakdownRecords");
+            });
 
         modelBuilder.Entity("Meterist.Core.Models.DailySpendRecord", b =>
             {

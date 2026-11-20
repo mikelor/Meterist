@@ -4,9 +4,9 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, three migrations:
-`20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource` and
-`20261120160643_AddUserDailyUsageRecords`.
+`src/Meterist.Data/Migrations/` — as of this writing, four migrations:
+`20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
+`20261120160643_AddUserDailyUsageRecords` and `20261120183237_AddDailySpendBreakdownRecords`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -100,6 +100,38 @@ out of anything committed to the repository; populated reports stay under
 repository's error messages name only the date, so an accidental log line does
 not print a person.
 
+### `DailySpendBreakdownRecords`
+
+The per-kind split behind a day's spend (`Meterist.Core.Models.DailySpendBreakdownRecord`): one
+row per tenant, vendor, day, kind of charge and line. Added by `AddDailySpendBreakdownRecords`;
+**Gemini Enterprise populates it** (issue #53) on every extraction, from the configured billing rules,
+or with `backfill spend-breakdown` from raw records already stored. Rows exist only where a charge
+exists, so a new kind of charge a vendor introduces is a new row, not a migration.
+
+| Column | Type (SQLite) | Nullable | Notes |
+|---|---|---|---|
+| `Id` | `INTEGER` | No | Surrogate PK, `AUTOINCREMENT`. Shadow property, same rationale as above. |
+| `TenantId` | `TEXT` | No | |
+| `VendorId` | `TEXT` | No | |
+| `Date` | `TEXT` | No | ISO `yyyy-MM-dd`. |
+| `Category` | `TEXT` | No | The kind of charge, as configured. Max 64. A free-form label rather than an enum, so configuration can add one. For Gemini: `Seat`, `EnterpriseOverage`, `AgentPlatform`, `ModelUsage`, `PayAsYouGo`, `Other` (usage) and `Tax`, `Support`, `Rounding` (not usage). `Seat` is the part of a day's spend that is the daily record's `SeatFee`. |
+| `Detail` | `TEXT` | No | The line within the category, usually the vendor's SKU text, so a specific model or plan stays visible. Max 256. Empty string (never `NULL`, so the key is enforceable) when a category has no finer line. |
+| `Amount` | `TEXT` | No | `decimal(18,4)`, USD, **before credits** (as `GrossSpend` is). Never zero: zero-cost lines are not stored. |
+| `IsUsage` | `INTEGER` | No | `1` when the amount is counted in the daily record's spend; `0` for tax, support and rounding, which are kept to explain the gap to a vendor's invoice and are **never part of any total**. |
+
+**Primary key:** `Id` (surrogate).
+**Natural key / unique index:** `IX_DailySpendBreakdownRecords_TenantId_VendorId_Date_Category_Detail`
+on `(TenantId, VendorId, Date, Category, Detail)`, **unique**.
+
+**Invariant:** for a day, the rows with `IsUsage = 1` add up to that day's `DailySpendRecords.GrossSpend`.
+The Gemini normalizers guarantee it by reading the same raw rows; `audit gemini-breakdown` checks it.
+
+**Written by replacing, not upserting.** An extraction states which days its pull covered and the stored rows
+for exactly those days become the batch: new keys inserted, changed amounts updated, and rows on a covered day
+that are absent from the batch **removed** (Google can revise or drop a line). Days the batch does not cover
+are never touched, and a batch that is malformed (two rows for one key, a row for another tenant or vendor or
+an uncovered day, a blank category) is rejected before anything is staged.
+
 ### `RawDailyExtractionRecords`
 
 Raw, unnormalized vendor API responses, kept alongside the normalized
@@ -176,9 +208,10 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
 live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied). The
-`UserDailyUsageRecords` table and its index at the end were added afterwards, taken
-from a freshly migrated empty database, not the live file; regenerate the whole dump
-from the live database once `AddUserDailyUsageRecords` has been applied there:
+`UserDailyUsageRecords` and `DailySpendBreakdownRecords` tables and their indexes at the end
+were added afterwards, taken from a freshly migrated empty database, not the live file;
+regenerate the whole dump from the live database once `AddDailySpendBreakdownRecords` has
+been applied there:
 
 > **Why `DailySpendRecords` ends with `, "Source" TEXT NULL);` on its own
 > line.** That is not a typo and not hand-edited: it is exactly how SQLite
@@ -247,4 +280,15 @@ CREATE TABLE IF NOT EXISTS "UserDailyUsageRecords" (
     "Attribution" TEXT NOT NULL
 );
 CREATE UNIQUE INDEX "IX_UserDailyUsageRecords_TenantId_VendorId_Date_UserId" ON "UserDailyUsageRecords" ("TenantId", "VendorId", "Date", "UserId");
+CREATE TABLE IF NOT EXISTS "DailySpendBreakdownRecords" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_DailySpendBreakdownRecords" PRIMARY KEY AUTOINCREMENT,
+    "TenantId" TEXT NOT NULL,
+    "VendorId" TEXT NOT NULL,
+    "Date" TEXT NOT NULL,
+    "Category" TEXT NOT NULL,
+    "Detail" TEXT NOT NULL DEFAULT '',
+    "Amount" TEXT NOT NULL,
+    "IsUsage" INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX "IX_DailySpendBreakdownRecords_TenantId_VendorId_Date_Category_Detail" ON "DailySpendBreakdownRecords" ("TenantId", "VendorId", "Date", "Category", "Detail");
 ```

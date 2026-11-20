@@ -462,6 +462,123 @@ public class SpendExtractionServiceTests
         Assert.DoesNotContain("per-user", result.Detail);
     }
 
+    [Fact]
+    public async Task ExtractAsync_VendorWithABreakdownNormalizer_ReplacesTheBreakdownForEveryDayThePullCovered()
+    {
+        var vendorId = Guid.NewGuid();
+        var breakdownRepo = new FakeBreakdownRepository();
+        var row = new DailySpendBreakdownRecord
+        {
+            TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, Category = "Seat", Amount = 5m,
+        };
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            breakdownNormalizers: [new FakeBreakdownNormalizer(vendorId, [row])], breakdownRepository: breakdownRepo);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        // Every day of the period is declared covered, not only the days that have a row: a day the vendor
+        // now reports nothing for must have its old rows cleared.
+        Assert.Equal(Period.EnumerateDays().ToList(), breakdownRepo.CoveredDays);
+        Assert.Equal([row], breakdownRepo.Written);
+        Assert.Equal(0, breakdownRepo.Planned);
+        Assert.Equal(new BreakdownReplaceResult(1, 0, 0, 0), result.Breakdown);
+        Assert.Contains("breakdown rows: 1 inserted", result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DryRun_PlansTheBreakdownAndWritesNone()
+    {
+        var vendorId = Guid.NewGuid();
+        var breakdownRepo = new FakeBreakdownRepository();
+        var row = new DailySpendBreakdownRecord
+        {
+            TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, Category = "Tax", Amount = 1m, IsUsage = false,
+        };
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            breakdownNormalizers: [new FakeBreakdownNormalizer(vendorId, [row])], breakdownRepository: breakdownRepo);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken, dryRun: true));
+
+        Assert.Empty(breakdownRepo.Written);
+        Assert.Equal(1, breakdownRepo.Planned);
+        Assert.Contains("dry run:", result.Detail);
+        Assert.Contains("breakdown rows: 1 inserted", result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_VendorWithNoBreakdownNormalizer_LeavesTheBreakdownUntouched()
+    {
+        var vendorId = Guid.NewGuid();
+        var breakdownRepo = new FakeBreakdownRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            breakdownNormalizers: [new FakeBreakdownNormalizer(Guid.NewGuid(), [])], breakdownRepository: breakdownRepo);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Empty(breakdownRepo.Written);
+        Assert.Equal(0, breakdownRepo.Planned);
+        Assert.Null(result.Breakdown);
+        Assert.DoesNotContain("breakdown", result.Detail);
+    }
+
+    private sealed class FakeBreakdownNormalizer(Guid vendorId, IReadOnlyList<DailySpendBreakdownRecord> rows) : IVendorSpendBreakdownNormalizer
+    {
+        public Guid VendorId => vendorId;
+
+        public IReadOnlyList<DailySpendBreakdownRecord> Normalize(RawVendorSpendData rawData) => rows;
+    }
+
+    private sealed class FakeBreakdownRepository : IDailySpendBreakdownRepository
+    {
+        public List<DailySpendBreakdownRecord> Written { get; } = [];
+
+        public List<DateOnly> CoveredDays { get; private set; } = [];
+
+        public int Planned { get; private set; }
+
+        public Task<BreakdownReplaceResult> ReplaceAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> coveredDays,
+            IEnumerable<DailySpendBreakdownRecord> records, CancellationToken cancellationToken = default)
+        {
+            var list = records.ToList();
+            Written.AddRange(list);
+            CoveredDays = coveredDays.ToList();
+            return Task.FromResult(new BreakdownReplaceResult(list.Count, 0, 0, 0));
+        }
+
+        public Task<BreakdownReplaceResult> PlanReplaceAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> coveredDays,
+            IEnumerable<DailySpendBreakdownRecord> records, CancellationToken cancellationToken = default)
+        {
+            var count = records.Count();
+            Planned += count;
+            CoveredDays = coveredDays.ToList();
+            return Task.FromResult(new BreakdownReplaceResult(count, 0, 0, 0));
+        }
+
+        public Task<IReadOnlyList<DailySpendBreakdownRecord>> GetAsync(
+            string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<DailySpendBreakdownRecord>>([]);
+    }
+
     private sealed class FakeUserNormalizer(Guid vendorId, IReadOnlyList<UserDailyUsageRecord> rows) : IVendorUserUsageNormalizer
     {
         public Guid VendorId => vendorId;

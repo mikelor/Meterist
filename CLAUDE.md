@@ -349,5 +349,5 @@ expected behavior, not a data gap to investigate.
     work with the existing key plus a mandatory beta header, so migrating the
     Claude Enterprise adapter (#24) is a go. Open in Sprint 2: #18 (Claude
     per-user storage), #19 (per-user CLI query), #35 (tax and support charges)
-    and #53 (Gemini spend by kind of charge). The user reviews every pull request
+    and #53 (Gemini spend by kind of charge; built, and also records tax and support as non-usage breakdown rows, in PR review). The user reviews every pull request
     and says when to merge.

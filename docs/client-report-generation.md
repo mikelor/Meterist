@@ -86,6 +86,12 @@ bundled into one page:
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the
    planned `meterist audit` command (insight #9).
+9a. **Spend by kind of charge** — for a vendor with anything beyond a seat fee, or any not-counted charge
+   (tax, support), a table of the stored per-kind breakdown: the usage kinds the figures count, and the not-counted
+   kinds that are on the vendor's invoice but in no figure or projection. Omitted for a tenant where nothing
+   is notable. A kind under half a cent (invoice rounding) is not listed, though it stays in the
+   subtotals, and does not by itself make the section appear. Informational: the weekly figures and
+   projections do not use it.
 10. **Footnote** — methodology and caveats: what "Gross Spend" means, that tax
    and support fees are not included (so a figure can differ from an invoice;
    see `docs/architecture.md` §5.2), why
