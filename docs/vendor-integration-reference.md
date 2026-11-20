@@ -574,9 +574,14 @@ not adopted.
   also contains `Invoice | Tax` for both tenants and `Support | ...` fees for
   one, which Meterist leaves out by design, so Meterist totals will not match
   the Google invoice until that is decided (issue #35). Above-quota and
-  Claude-model SKUs have never been observed, so the filter should be guarded
-  so a new Enterprise-related SKU is noticed rather than silently dropped
-  (issue #34).
+  Claude-model SKUs have never been observed. **Implemented (issue #34):** the
+  included service/SKU rules are now configuration (Meterist:Gemini:BillingFilter),
+  and every extraction warns about non-zero Gemini-looking lines the rules leave
+  out. Decision: Agent Platform compute and memory are pay-as-you-go consumption,
+  not part of the seat product, so they are **not** counted by default (they are
+  watched, and can be counted by adding an Include rule). A live run found only
+  those Agent Platform lines plus a day of raw Gemini model token usage (also
+  ignored by default) outside the filter. See the user guide.
 - **Newer per-user and licence paths (documented 2026-07 to 2026-11, not
   used yet):**
   - A Cloud Logging **log sink** to BigQuery (Google blog, 2026-07-15) lands

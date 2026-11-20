@@ -14,6 +14,7 @@ using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
 using Meterist.Vendors.GeminiEnterprise;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
@@ -33,6 +34,13 @@ builder.AddServiceDefaults();
 builder.Services.AddMeteristData();
 builder.Services.AddMeteristSecretStore();
 
+// Which billing lines count as Gemini Enterprise spend is configuration (appsettings), with the
+// verified defaults used when the section is absent.
+var geminiBillingSection = builder.Configuration.GetSection(GeminiBillingFilter.ConfigurationSection);
+builder.Services.AddSingleton(
+    geminiBillingSection.Exists()
+        ? geminiBillingSection.Get<GeminiBillingFilter>() ?? GeminiBillingFilter.Default
+        : GeminiBillingFilter.Default);
 builder.Services.AddSingleton<IGeminiBillingQueryRepository, BigQueryGeminiBillingRepository>();
 builder.Services.AddSingleton<IVendorSpendNormalizer, GeminiEnterpriseSpendNormalizer>();
 

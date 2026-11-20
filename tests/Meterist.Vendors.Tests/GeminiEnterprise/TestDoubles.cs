@@ -27,6 +27,10 @@ internal sealed class FakeGeminiBillingQueryRepository(IReadOnlyList<IReadOnlyDi
     {
     }
 
+    public IReadOnlyList<ExcludedBillingLine> ExcludedToReturn { get; init; } = [];
+
+    public Exception? ExcludedCheckThrows { get; init; }
+
     public GeminiCredential? ReceivedCredential { get; private set; }
 
     public DateRange? ReceivedPeriod { get; private set; }
@@ -38,4 +42,8 @@ internal sealed class FakeGeminiBillingQueryRepository(IReadOnlyList<IReadOnlyDi
         ReceivedPeriod = period;
         return Task.FromResult(rowsToReturn);
     }
+
+    public Task<IReadOnlyList<ExcludedBillingLine>> FindExcludedChargesAsync(
+        GeminiCredential credential, DateRange period, CancellationToken cancellationToken = default) =>
+        ExcludedCheckThrows is not null ? throw ExcludedCheckThrows : Task.FromResult(ExcludedToReturn);
 }

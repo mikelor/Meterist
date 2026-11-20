@@ -18,4 +18,14 @@ public interface IGeminiBillingQueryRepository
         GeminiCredential credential,
         DateRange period,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Billing lines in the period with non-zero cost that the Gemini Enterprise filter leaves
+    /// out but that look Gemini-related (see <see cref="GeminiBillingFilter.WatchTerms"/>). A
+    /// new SKU the filter does not yet count would otherwise be dropped without a trace.
+    /// </summary>
+    Task<IReadOnlyList<ExcludedBillingLine>> FindExcludedChargesAsync(
+        GeminiCredential credential,
+        DateRange period,
+        CancellationToken cancellationToken = default);
 }

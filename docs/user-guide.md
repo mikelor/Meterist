@@ -102,6 +102,60 @@ $credential | ConvertTo-Json | Set-Content -Path "C:\path\to\gemini-credential.j
 dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-id> --vendor gemini-enterprise --from-file "C:\path\to\gemini-credential.json"
 ```
 
+#### Which billing lines count, and the "not counted" warning
+
+Meterist counts a billing-export line as Gemini Enterprise spend only if it
+matches an **Include** rule: a service name plus a SKU pattern. The default is
+the one verified against real exports, service `Vertex AI Search` with a SKU
+containing `Enterprise` (the seat subscription and its per-request overage).
+
+Google keeps changing how this product bills, so each extraction also looks for
+charges the rules leave out. If a line with non-zero cost mentions Gemini,
+Agent Platform, Discovery Engine or Vertex AI Search and is not on the ignore
+list, the extraction logs a warning naming the service, SKU, cost and dates:
+
+```text
+Tenant 'acme' has 2 Gemini-related billing line(s) with non-zero cost that the
+Gemini Enterprise filter does not count: Vertex AI | Agent Platform Compute: 1.25
+(2026-03-02 to 2026-03-20); ...
+```
+
+The warning never fails the extraction and never changes the figures; it is a
+prompt to decide. Either the line belongs in Gemini Enterprise spend, so add an
+Include rule, or it does not, so add an Ignore rule. By default Agent Platform
+compute and memory are **not** counted: they are pay-as-you-go consumption, not
+a seat product, and the amounts seen so far are negligible. Raw Gemini model
+token usage (`... Predictions` SKUs) and `Data Index` lines are ignored by
+default.
+
+To change the rules, add a section to
+[`appsettings.json`](../src/Meterist.Cli/appsettings.json) (or set the matching
+environment variables). **If the section is present it replaces the defaults
+entirely**, so list every rule you want:
+
+```json
+{
+  "Meterist": {
+    "Gemini": {
+      "BillingFilter": {
+        "Include": [
+          { "Service": "Vertex AI Search", "SkuLike": "%Enterprise%" },
+          { "Service": "Vertex AI", "SkuLike": "%Agent Platform%" }
+        ],
+        "Ignore": [
+          { "Service": "Vertex AI Search", "SkuLike": "%Data Index%" },
+          { "Service": "Vertex AI", "SkuLike": "%Predictions%" }
+        ],
+        "WatchTerms": [ "Gemini", "Agent Platform", "Discovery Engine", "Vertex AI Search" ]
+      }
+    }
+  }
+}
+```
+
+`SkuLike` is a SQL `LIKE` pattern. The rules are global, not per tenant, and
+apply to future extractions: re-run `extract` for earlier days after changing
+them. An empty `Include` list is rejected when extraction starts.
 ### ChatGPT Enterprise
 
 **One-time Admin key setup:**
