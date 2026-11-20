@@ -1,3 +1,5 @@
+using Meterist.Core.Vendors;
+
 namespace Meterist.Core.Persistence;
 
 /// <summary>
@@ -20,5 +22,16 @@ public interface IRawExtractionRepository
         Guid vendorId,
         IReadOnlyDictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>> recordsByDate,
         DateTime extractedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The latest stored raw rows for each day in the period, as the JSON that was saved (an array
+    /// of row objects). Days with no stored pull are absent. For reporting that needs detail the
+    /// normalized records do not keep, such as the per-SKU split of a Gemini day.
+    /// </summary>
+    Task<IReadOnlyDictionary<DateOnly, string>> GetRecordsJsonAsync(
+        string tenantId,
+        Guid vendorId,
+        DateRange period,
         CancellationToken cancellationToken = default);
 }

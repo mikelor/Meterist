@@ -223,6 +223,24 @@ To count a new SKU Google introduces, add an Include rule for its service and a
 pattern that matches its SKU name; the warning shows you the exact service and
 SKU text to copy.
 
+##### Seeing the split by kind of charge
+
+The stored daily record only separates the seat fee from everything else, so
+Agent Platform, model usage and pay-as-you-go all sit inside the usage figure.
+To see them separately, run:
+
+```powershell
+dotnet run --project src/Meterist.Cli -- audit gemini-breakdown --tenant <your-tenant-id> --from 2026-07-01 --to 2026-11-19
+```
+
+It is read-only. It groups the stored raw billing rows into Seat, Enterprise
+overage, Agent Platform, Model usage, Pay-as-you-go and Other (a SKU that matched
+an Include rule but none of those; look at its name), with the cost, the number
+of days that had a charge, and the SKU names behind each. It also compares its
+total with the stored gross spend and says so if they differ, which means the raw
+rows and the stored records come from different extractions or rules: re-run
+`extract` for that period. The split is derived from SKU text, and a stored column
+for it is planned.
 **Environment variables.** Arrays are numbered from zero and each field is its
 own variable, with `__` as the separator. For example, the first Include rule is:
 

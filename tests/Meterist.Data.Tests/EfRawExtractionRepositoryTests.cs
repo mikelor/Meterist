@@ -49,6 +49,27 @@ public class EfRawExtractionRepositoryTests : IDisposable
         Assert.Contains("20", record.RecordsJson);
     }
 
+    [Fact]
+    public async Task GetRecordsJsonAsync_ReturnsOnlyTheTenantVendorAndPeriodRequested()
+    {
+        var vendorId = VendorCatalog.GeminiEnterprise.Id;
+        var inside = new DateOnly(2026, 7, 20);
+        var outside = new DateOnly(2026, 8, 20);
+        var ct = TestContext.Current.CancellationToken;
+
+        await _repository.UpsertAsync("ecosync", vendorId, RowsFor(inside, 10m), DateTime.UtcNow, ct);
+        await _repository.UpsertAsync("ecosync", vendorId, RowsFor(outside, 11m), DateTime.UtcNow, ct);
+        await _repository.UpsertAsync("zelleri", vendorId, RowsFor(inside, 12m), DateTime.UtcNow, ct);
+        await _repository.UpsertAsync("ecosync", VendorCatalog.ChatGptEnterprise.Id, RowsFor(inside, 13m), DateTime.UtcNow, ct);
+
+        var result = await _repository.GetRecordsJsonAsync(
+            "ecosync", vendorId, new DateRange(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)), ct);
+
+        var only = Assert.Single(result);
+        Assert.Equal(inside, only.Key);
+        Assert.Contains("10", only.Value);
+    }
+
     private static IReadOnlyDictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>> RowsFor(
         DateOnly date, decimal cost) => new Dictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>>
     {
