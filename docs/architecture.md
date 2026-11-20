@@ -199,7 +199,8 @@ separate feature (unbounded growth, different retention story) and is
 deliberately not built.
 
 **Per-user usage — table and repository built (2026-11-20, issue #16);
-ChatGPT Enterprise populates it (issue #17), the other vendors do not yet:**
+ChatGPT Enterprise (issue #17) and Claude Enterprise (issue #18) populate it, the
+other vendors do not yet:**
 
 ```
 UserDailyUsageRecord              (Meterist.Core.Models; table UserDailyUsageRecords)
@@ -224,7 +225,9 @@ A vendor opts in by registering an `IVendorUserUsageNormalizer`
 (`Meterist.Core.Vendors`), which turns its raw rows into `UserDailyUsageRecord`s.
 `SpendExtractionService` runs it after the daily totals are written (or, for a
 dry run, plans it) and adds the counts to the result detail; a vendor with none
-registered is simply skipped.
+registered is simply skipped. `UserUsageBackfill` runs the same normalizer over the
+raw records already stored (`backfill user-usage`), so history can be populated
+without calling the vendor again.
 
 `IUserDailyUsageRepository` (`Meterist.Core.Persistence`) offers `UpsertAsync`,
 `PlanUpsertAsync` (a dry run that writes nothing) and `GetAsync(tenant, vendor,
