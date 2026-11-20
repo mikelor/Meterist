@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Net.Http;
+using Meterist.Core.Auditing;
 using Meterist.Core.Extraction;
 using Meterist.Core.Models;
 using Meterist.Core.Persistence;
@@ -69,6 +70,7 @@ builder.Services.AddSingleton<IVendorSpendExtractor, GeminiEnterpriseSpendExtrac
 
 builder.Services.AddScoped<SpendExtractionService>();
 builder.Services.AddScoped<ReportDataAggregator>();
+builder.Services.AddScoped<CoverageChecker>();
 
 using var host = builder.Build();
 
@@ -82,6 +84,7 @@ rootCommand.Subcommands.Add(BuildCredentialsCommand(host));
 rootCommand.Subcommands.Add(BuildRatesCommand(host));
 rootCommand.Subcommands.Add(BuildExtractCommand(host));
 rootCommand.Subcommands.Add(BuildReportCommand(host));
+rootCommand.Subcommands.Add(BuildAuditCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -521,6 +524,146 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
     {
         AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
     }
+}
+
+static Command BuildAuditCommand(IHost host)
+{
+    var tenantOption = new Option<string[]>("--tenant")
+    {
+        Description = "Tenant identifier to check (repeat for multiple tenants)",
+        Required = true,
+    };
+    var fromOption = new Option<DateTime>("--from") { Description = "First day to check", Required = true };
+    var toOption = new Option<DateTime>("--to")
+    {
+        Description = "Last day to check (inclusive). Leave a day or two behind today: vendors publish with "
+            + "a delay, and a day they haven't published yet would read as a gap.",
+        Required = true,
+    };
+    var vendorOption = new Option<string?>("--vendor")
+    {
+        Description = "Check only one vendor short name (default: all vendors)",
+    };
+
+    var coverageCommand = new Command(
+        "coverage",
+        "Report days with no stored spend record, per tenant and vendor. Exits with a non-zero code when a "
+        + "seat-priced vendor has gaps, so a scheduled run can alert.");
+    coverageCommand.Options.Add(tenantOption);
+    coverageCommand.Options.Add(fromOption);
+    coverageCommand.Options.Add(toOption);
+    coverageCommand.Options.Add(vendorOption);
+
+    coverageCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantIds = parseResult.GetValue(tenantOption)!;
+        var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
+        var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
+        var vendorShortName = parseResult.GetValue(vendorOption);
+
+        if (from > to)
+        {
+            AnsiConsole.MarkupLine("[red]--from must not be after --to.[/]");
+            return 1;
+        }
+
+        Guid? vendorFilter = null;
+        if (vendorShortName is not null)
+        {
+            var vendor = VendorCatalog.FindByShortName(vendorShortName);
+            if (vendor is null)
+            {
+                AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(vendorShortName)}'.[/] Known vendors: "
+                    + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+                return 1;
+            }
+
+            vendorFilter = vendor.Id;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var checker = scope.ServiceProvider.GetRequiredService<CoverageChecker>();
+        var report = await checker.CheckAsync(tenantIds, new DateRange(from, to), vendorFilter, cancellationToken);
+
+        WriteCoverageReport(report);
+
+        // Non-zero means "look at this": a gap in a vendor that should have every day. Quiet days
+        // of a usage-priced vendor, unbackfilled history and unused vendors never set it.
+        return report.HasProblems ? 1 : 0;
+    });
+
+    var auditCommand = new Command("audit", "Data-quality checks on the stored spend data");
+    auditCommand.Subcommands.Add(coverageCommand);
+    return auditCommand;
+}
+
+static void WriteCoverageReport(CoverageReport report)
+{
+    AnsiConsole.MarkupLine(
+        $"[bold]Meterist[/] — coverage check, {report.Period.Start:yyyy-MM-dd} to {report.Period.End:yyyy-MM-dd}");
+
+    static string Describe(DateRange range)
+    {
+        var days = range.End.DayNumber - range.Start.DayNumber + 1;
+        var label = days == 1 ? "1 day" : $"{days} days";
+        return range.Start == range.End
+            ? $"{range.Start:yyyy-MM-dd} ({label})"
+            : $"{range.Start:yyyy-MM-dd} – {range.End:yyyy-MM-dd} ({label})";
+    }
+
+    foreach (var tenant in report.Tenants)
+    {
+        var table = new Table()
+            .Title($"{Markup.Escape(tenant.TenantId)}")
+            .AddColumn("Vendor")
+            .AddColumn(new TableColumn("Days stored").RightAligned())
+            .AddColumn("Status")
+            .AddColumn("Detail");
+
+        foreach (var v in tenant.Vendors)
+        {
+            var stored = $"{v.DaysStored} / {v.DaysInPeriod}";
+            var notes = new List<string>();
+
+            string status;
+            if (!v.HasAnyRecord)
+            {
+                status = "[grey]no data[/]";
+                notes.Add("[grey]no records at all for this tenant: unused, or never extracted[/]");
+            }
+            else if (v.HasProblem)
+            {
+                status = "[red]GAPS[/]";
+                notes.AddRange(v.Gaps.Select(g => $"[red]missing {Describe(g)}[/]"));
+            }
+            else if (!v.Vendor.ExpectsRecordEveryDay)
+            {
+                status = "[green]OK[/]";
+                if (v.GapDays > 0)
+                {
+                    notes.Add($"[grey]{v.GapDays} day(s) without a record: normal for a usage-priced vendor[/]");
+                }
+            }
+            else
+            {
+                status = "[green]OK[/]";
+            }
+
+            if (v.NotYetBackfilled is { } leading)
+            {
+                notes.Add($"[yellow]not yet backfilled: {Describe(leading)}[/]");
+            }
+
+            table.AddRow(
+                Markup.Escape(v.Vendor.DisplayName), stored, status, string.Join("\n", notes));
+        }
+
+        AnsiConsole.Write(table);
+    }
+
+    AnsiConsole.MarkupLine(report.HasProblems
+        ? "[red]Coverage problems found: a vendor that should have a record every day is missing some.[/]"
+        : "[green]No coverage problems.[/]");
 }
 
 static Command BuildReportCommand(IHost host)

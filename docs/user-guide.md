@@ -376,6 +376,37 @@ day records which one supplied it in `DailySpendRecords.Source`
 with a single source leave it empty. See
 [`database-schema.md`](database-schema.md).
 
+### Checking for missing days
+
+```powershell
+dotnet run --project src/Meterist.Cli -- audit coverage --tenant <your-tenant-id> --from 2026-07-01 --to 2026-11-18
+```
+
+`--tenant` can be repeated, and `--vendor <short-name>` narrows the check to
+one vendor. Use a `--to` a day or two behind today, since the most recent day
+may not be extractable yet.
+
+A stretch of days that were never extracted looks exactly like a quiet
+stretch: nothing errors, the totals are simply low, and some vendors (ChatGPT
+Enterprise's cost export keeps about 29 days) can't recover the days later.
+This command lists, per tenant and vendor, the days with no stored record:
+
+- **Seat-priced vendors** (Claude Enterprise, ChatGPT Enterprise, Gemini
+  Enterprise) accrue a fee every day, so every day should have a record. Any
+  missing day after the vendor's first stored record is a **gap** and fails
+  the check.
+- **Usage-priced vendors** (Claude API Platform) have no record on a day with
+  no usage, so missing days are normal and never fail the check.
+- Days before a vendor's first stored record are reported as **not yet
+  backfilled**: history never extracted, which is normal for a newly onboarded
+  tenant, so it doesn't fail the check either.
+- A vendor with no records at all for the tenant shows as **no data** and
+  doesn't fail the check.
+
+The exit code is `0` when no seat-priced vendor has a gap, and non-zero when
+one does (or when the command couldn't run, for example an unknown vendor or
+`--from` after `--to`), so a scheduled run can alert on it.
+
 ## Troubleshooting
 
 - **Debug logging is on by default** ([`appsettings.json`](../src/Meterist.Cli/appsettings.json)
