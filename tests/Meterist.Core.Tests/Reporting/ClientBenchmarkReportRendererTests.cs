@@ -153,6 +153,75 @@ public class ClientBenchmarkReportRendererTests
 
     // ---- fixtures -------------------------------------------------------------------------
 
+    [Fact]
+    public void SpendByKind_ShowsUsageKindsAndTheNotCountedOnes_WithSubtotals()
+    {
+        var gemini = Vendor(VendorCatalog.GeminiEnterprise, FullWeeks(100, 100, 100), NoSources, breakdown:
+        [
+            new BreakdownCategoryTotal("Seat", true, 1000m, 140, ["Plus: Subscription"]),
+            new BreakdownCategoryTotal("AgentPlatform", true, 0.05m, 6, ["Compute", "Memory"]),
+            new BreakdownCategoryTotal("Support", false, 300m, 140, ["GCP Support"]),
+            new BreakdownCategoryTotal("Tax", false, 90m, 5, ["Tax"]),
+        ]);
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(TenantWith("tenant-a", gemini)));
+
+        Assert.Contains("<h2>Spend by kind of charge</h2>", html);
+        Assert.Contains("AgentPlatform", html);
+        Assert.Contains("Support <span class=\"muted-dash\">(not counted)</span>", html);
+        Assert.Contains("Tax <span class=\"muted-dash\">(not counted)</span>", html);
+        Assert.Contains("Counted in the figures", html);
+        Assert.Contains("$1,000.05", html);   // seat + agent platform
+        Assert.Contains("Not counted", html);
+        Assert.Contains("$390.00", html);     // support + tax
+    }
+
+    [Fact]
+    public void SpendByKind_IsLeftOut_WhenEveryVendorIsOnlyASeatFee()
+    {
+        var gemini = Vendor(VendorCatalog.GeminiEnterprise, FullWeeks(100, 100, 100), NoSources, breakdown:
+        [
+            new BreakdownCategoryTotal("Seat", true, 1000m, 140, ["Plus: Subscription"]),
+        ]);
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(TenantWith("tenant-a", gemini)));
+
+        Assert.DoesNotContain("<h2>Spend by kind of charge</h2>", html);
+    }
+
+    [Fact]
+    public void SpendByKind_IsLeftOut_WhenNoBreakdownIsStored()
+    {
+        var html = ClientBenchmarkReportRenderer.Render(Report(
+            Tenant("tenant-a", ChatGpt(FullWeeks(100, 100, 100), NoSources))));
+
+        Assert.DoesNotContain("<h2>Spend by kind of charge</h2>", html);
+    }
+
+    [Fact]
+    public void SpendByKind_ShowsASeatOnlyVendorsTable_OnlyWhenAnotherVendorHasSomethingToShow()
+    {
+        // The section is per tenant: a tenant with nothing notable gets no heading of its own.
+        var notable = Vendor(VendorCatalog.GeminiEnterprise, FullWeeks(100), NoSources, breakdown:
+            [new BreakdownCategoryTotal("Tax", false, 5m, 1, ["Tax"])]);
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(
+            TenantWith("tenant-a", notable),
+            Tenant("tenant-b", ChatGpt(FullWeeks(100), NoSources))));
+
+        var section = html[html.IndexOf("<h2>Spend by kind of charge</h2>", StringComparison.Ordinal)..];
+        Assert.Contains("tenant-a", section[..section.IndexOf("</section>", StringComparison.Ordinal)]);
+        Assert.DoesNotContain("tenant-b", section[..section.IndexOf("</section>", StringComparison.Ordinal)]);
+    }
+
+    private static TenantReportData TenantWith(string tenantId, VendorReportData gemini) => new()
+    {
+        TenantId = tenantId,
+        Vendors = VendorCatalog.All
+            .Select(v => v.Id == VendorCatalog.GeminiEnterprise.Id ? gemini : Vendor(v, [], NoSources))
+            .ToList(),
+    };
+
     private static ReportData Report(params TenantReportData[] tenants) => Report(Period, tenants);
 
     private static ReportData Report(DateRange period, params TenantReportData[] tenants) => new()
@@ -177,12 +246,14 @@ public class ClientBenchmarkReportRendererTests
         Vendor(VendorCatalog.ChatGptEnterprise, weeks, sources);
 
     private static VendorReportData Vendor(
-        VendorIdentity vendor, IReadOnlyList<WeeklyTotal> weeks, IReadOnlyDictionary<string, int> sources) => new()
+        VendorIdentity vendor, IReadOnlyList<WeeklyTotal> weeks, IReadOnlyDictionary<string, int> sources,
+        IReadOnlyList<BreakdownCategoryTotal>? breakdown = null) => new()
     {
         Vendor = vendor,
         Weeks = weeks,
         CurrentRates = [],
         SourceDayCounts = sources,
+        Breakdown = breakdown ?? [],
     };
 
     private static IReadOnlyList<WeeklyTotal> FullWeeks(params decimal[] gross) =>

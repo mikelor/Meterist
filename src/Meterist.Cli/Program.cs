@@ -44,6 +44,7 @@ builder.Services.AddSingleton(
         : GeminiBillingFilter.Default);
 builder.Services.AddSingleton<IGeminiBillingQueryRepository, BigQueryGeminiBillingRepository>();
 builder.Services.AddSingleton<IVendorSpendNormalizer, GeminiEnterpriseSpendNormalizer>();
+builder.Services.AddSingleton<IVendorSpendBreakdownNormalizer, GeminiEnterpriseBreakdownNormalizer>();
 
 // AllowAutoRedirect must stay false: the download endpoint's 307 points to a
 // pre-signed URL that must never receive our Authorization header — see
@@ -97,6 +98,7 @@ builder.Services.AddScoped<ConfiguredVendorExtraction>();
 builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
 builder.Services.AddScoped<UserUsageBackfill>();
+builder.Services.AddScoped<SpendBreakdownBackfill>();
 builder.Services.AddScoped<UserUsageReporter>();
 
 using var host = builder.Build();
@@ -839,8 +841,70 @@ static Command BuildBackfillCommand(IHost host)
         }
     });
 
+    var breakdownBackfillCommand = new Command(
+        "spend-breakdown",
+        "Rebuild the per-kind spend breakdown from raw extraction records already in the database, without calling "
+        + "the vendor's API. Safe to repeat. Charges added to a vendor's query later (Gemini tax and support) are "
+        + "only in days pulled since; re-run extract for older days.");
+    breakdownBackfillCommand.Options.Add(tenantOption);
+    breakdownBackfillCommand.Options.Add(vendorOption);
+    breakdownBackfillCommand.Options.Add(fromOption);
+    breakdownBackfillCommand.Options.Add(toOption);
+    breakdownBackfillCommand.Options.Add(dryRunOption);
+
+    breakdownBackfillCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var vendorShortName = parseResult.GetValue(vendorOption)!;
+        var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
+        var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
+        var dryRun = parseResult.GetValue(dryRunOption);
+
+        var vendor = VendorCatalog.FindByShortName(vendorShortName);
+        if (vendor is null)
+        {
+            AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(vendorShortName)}'.[/] Known vendors: "
+                + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+            return 1;
+        }
+
+        if (from > to)
+        {
+            AnsiConsole.MarkupLine("[red]--from must not be after --to.[/]");
+            return 1;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var backfill = scope.ServiceProvider.GetRequiredService<SpendBreakdownBackfill>();
+
+        try
+        {
+            var result = await backfill.RunAsync(tenantId, vendor.Id, new DateRange(from, to), dryRun, cancellationToken);
+
+            AnsiConsole.MarkupLine(
+                $"[bold]Meterist[/] — spend breakdown backfill for [yellow]{Markup.Escape(tenantId)}[/] / "
+                + $"{Markup.Escape(vendor.DisplayName)}, {from:yyyy-MM-dd} to {to:yyyy-MM-dd}"
+                + (dryRun ? " [grey](dry run: nothing written)[/]" : string.Empty));
+            AnsiConsole.MarkupLine(
+                $"  Read {result.DaysRead} stored day(s), found {result.RowsNormalized} breakdown row(s): "
+                + $"{result.Replace.Summarize()}.");
+            if (result.DaysRead == 0)
+            {
+                AnsiConsole.MarkupLine("  [yellow]No raw records are stored for this tenant, vendor and period.[/]");
+            }
+
+            return 0;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+    });
+
     var backfillCommand = new Command("backfill", "Rebuild derived data from what is already stored");
     backfillCommand.Subcommands.Add(userUsageCommand);
+    backfillCommand.Subcommands.Add(breakdownBackfillCommand);
     return backfillCommand;
 }
 
@@ -912,8 +976,9 @@ static Command BuildAuditCommand(IHost host)
 
     var breakdownCommand = new Command(
         "gemini-breakdown",
-        "Split stored Gemini Enterprise spend by kind of charge (seat, overage, Agent Platform, model usage, "
-        + "pay-as-you-go), from the stored raw billing rows. Read-only.");
+        "Show stored Gemini Enterprise spend by kind of charge (seat, overage, Agent Platform, model usage, "
+        + "pay-as-you-go) and the non-usage charges kept out of the totals (tax, support), from the stored "
+        + "breakdown. Read-only.");
     breakdownCommand.Options.Add(tenantOption);
     breakdownCommand.Options.Add(fromOption);
     breakdownCommand.Options.Add(toOption);
@@ -932,48 +997,73 @@ static Command BuildAuditCommand(IHost host)
         }
 
         using var scope = host.Services.CreateScope();
-        var rawRepository = scope.ServiceProvider.GetRequiredService<IRawExtractionRepository>();
+        var breakdownRepository = scope.ServiceProvider.GetRequiredService<IDailySpendBreakdownRepository>();
         var dailyRepository = scope.ServiceProvider.GetRequiredService<IDailySpendRepository>();
+        var us = CultureInfo.GetCultureInfo("en-US");
 
         foreach (var tenantId in tenantIds)
         {
-            var rawByDay = await rawRepository.GetRecordsJsonAsync(
+            var rows = await breakdownRepository.GetAsync(
                 tenantId, VendorCatalog.GeminiEnterprise.Id, period, cancellationToken);
             var stored = await dailyRepository.GetAsync(
                 tenantId, VendorCatalog.GeminiEnterprise.Id, period, cancellationToken);
-            var storedGross = stored.Sum(r => r.GrossSpend);
 
             AnsiConsole.MarkupLine(
                 $"[bold]Meterist[/] — Gemini Enterprise spend by kind, [yellow]{Markup.Escape(tenantId)}[/], "
                 + $"{period.Start:yyyy-MM-dd} to {period.End:yyyy-MM-dd}");
 
-            var totals = GeminiCostBreakdown.Summarize(rawByDay.Values);
+            var totals = SpendBreakdownSummary.Summarize(rows);
             if (totals.Count == 0)
             {
-                AnsiConsole.MarkupLine("  [grey]No stored Gemini billing rows in this period.[/]");
+                AnsiConsole.MarkupLine(
+                    "  [grey]No stored breakdown rows in this period. Run extract, or backfill spend-breakdown "
+                    + "from raw records already stored.[/]");
                 continue;
             }
 
-            var table = new Table().AddColumns("Kind", "Days with charge", "Cost", "SKUs");
+            var table = new Table().AddColumns("Kind", "In totals?", "Days with charge", "Amount", "SKUs");
             foreach (var total in totals)
             {
                 table.AddRow(
-                    total.Category.ToString(),
+                    Markup.Escape(total.Category),
+                    total.IsUsage ? "yes" : "[grey]no (not usage)[/]",
                     total.Days.ToString(CultureInfo.InvariantCulture),
-                    total.Cost.ToString("C2", CultureInfo.GetCultureInfo("en-US")),
-                    Markup.Escape(string.Join("; ", total.Skus)));
+                    total.Amount.ToString("C2", us),
+                    Markup.Escape(string.Join("; ", total.Details)));
             }
 
             AnsiConsole.Write(table);
 
-            var breakdownTotal = totals.Sum(t => t.Cost);
+            var usageTotal = totals.Where(t => t.IsUsage).Sum(t => t.Amount);
+            var nonUsageTotal = totals.Where(t => !t.IsUsage).Sum(t => t.Amount);
+            var storedGross = stored.Sum(r => r.GrossSpend);
+            var daysWithBreakdown = rows.Select(r => r.Date).Distinct().ToHashSet();
+            var storedGrossOnThoseDays = stored.Where(r => daysWithBreakdown.Contains(r.Date)).Sum(r => r.GrossSpend);
+
             AnsiConsole.MarkupLine(
-                $"  Breakdown total {breakdownTotal.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}; "
-                + $"stored gross spend {storedGross.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}."
-                + (Math.Abs(breakdownTotal - storedGross) > 0.005m
-                    ? " [yellow]They differ: the raw rows and the stored records were written by different "
-                      + "extractions or rules; re-run extract for this period.[/]"
+                $"  Usage categories total {usageTotal.ToString("C2", us)}; stored gross spend on the same days "
+                + $"{storedGrossOnThoseDays.ToString("C2", us)}"
+                + (storedGross == storedGrossOnThoseDays ? string.Empty : $" ({storedGross.ToString("C2", us)} over the whole period)")
+                + "."
+                + (Math.Abs(usageTotal - storedGrossOnThoseDays) > 0.005m
+                    ? " [yellow]They differ: the breakdown and the daily records came from different extractions "
+                      + "or rules; re-run extract for this period.[/]"
                     : string.Empty));
+
+            if (nonUsageTotal != 0m)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [grey]Not usage, not in any total: {nonUsageTotal.ToString("C2", us)} (tax, support and similar). "
+                    + "A Google invoice for this period would be about this much higher.[/]");
+            }
+
+            var daysWithoutBreakdown = stored.Count(r => r.GrossSpend != 0m && !daysWithBreakdown.Contains(r.Date));
+            if (daysWithoutBreakdown > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]{daysWithoutBreakdown} day(s) have spend but no breakdown rows[/] "
+                    + "(backfill spend-breakdown, or re-run extract).");
+            }
         }
 
         return 0;

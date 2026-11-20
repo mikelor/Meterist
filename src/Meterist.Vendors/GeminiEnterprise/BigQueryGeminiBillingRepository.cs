@@ -15,23 +15,25 @@ namespace Meterist.Vendors.GeminiEnterprise;
 /// named "Gemini Enterprise" (that string only appears in the SKU
 /// description, e.g. "Gemini Enterprise Plus: Subscription - one month
 /// term"). Plain "Vertex AI" (no "Search") carries raw Gemini model token
-/// usage instead — a different, pay-as-you-go product/billing surface, out
-/// of scope for this adapter. Within "Vertex AI Search," the SKU filter
-/// (LIKE '%Enterprise%') deliberately excludes sibling SKUs like "Vertex AI
-/// Search and Conversation: Data Index," which isn't specific to the
-/// Enterprise plan.
+/// usage instead.
 ///
 /// Which service/SKU pairs count is a <see cref="GeminiBillingFilter"/> (configuration,
 /// not code), and <see cref="FindExcludedChargesAsync"/> reports Gemini-looking lines the
-/// filter leaves out, so a new SKU is noticed instead of silently dropped.
+/// filter leaves out, so a new SKU is noticed instead of silently dropped. Each returned
+/// row also carries the kind of charge the matching rule names (its category) and whether it
+/// is usage or a non-usage charge such as tax or support, decided in SQL by the same first-match
+/// rule order that decides inclusion, so the two cannot disagree.
 ///
-/// Aggregates to (day, SKU) grain at the SQL level (GROUP BY DATE(...), sku)
+/// Aggregates to (day, service, SKU) grain at the SQL level (GROUP BY DATE(...)...)
 /// rather than returning raw hourly rows for the extractor to bucket later —
 /// this is what makes "daily is the raw grain" a guarantee of the query
 /// itself, not a convention, and it moves less data over the wire.
 /// </summary>
 public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryRepository
 {
+    private const string ServiceColumn = "service.description";
+    private const string SkuColumn = "sku.description";
+
     private readonly GeminiBillingFilter _filter;
     private readonly ILogger<BigQueryGeminiBillingRepository> _logger;
 
@@ -52,15 +54,15 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
         var client = await CreateClientAsync(credential).ConfigureAwait(false);
 
         var sql = BuildSql(tableRef, _filter);
-        var parameters = BuildParameters(_filter, period, includeExclusionParameters: false);
+        var parameters = BuildParameters(_filter, period, forExcludedQuery: false);
 
         // Deliberately not logging credential.ServiceAccountJson — everything else
         // here is safe to log and is exactly what you'd want when a query comes
         // back empty and you need to know precisely what was asked for.
         _logger.LogDebug(
             "Querying Gemini Enterprise billing export {Table} for {PeriodStart} to {PeriodEnd} "
-            + "with {RuleCount} include rule(s). SQL: {Sql}",
-            tableRef, period.Start, period.End, _filter.Include.Count, sql);
+            + "with {RuleCount} include and {NonUsageCount} non-usage rule(s). SQL: {Sql}",
+            tableRef, period.Start, period.End, _filter.Include.Count, _filter.NonUsage.Count, sql);
 
         var results = await client.ExecuteQueryAsync(sql, parameters, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -71,7 +73,10 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
             rows.Add(new Dictionary<string, object?>
             {
                 [GeminiBillingRowFields.RecordDate] = ToDateOnly(row["record_date"]),
+                [GeminiBillingRowFields.ServiceDescription] = row["service_description"]?.ToString(),
                 [GeminiBillingRowFields.SkuDescription] = row["sku_description"]?.ToString(),
+                [GeminiBillingRowFields.Category] = row["meterist_category"]?.ToString(),
+                [GeminiBillingRowFields.IsUsage] = row["meterist_is_usage"] is bool isUsage && isUsage,
                 [GeminiBillingRowFields.Cost] = ToDecimal(row["cost"]),
                 [GeminiBillingRowFields.CreditsAmount] = ToDecimal(row["credits_amount"]),
             });
@@ -98,7 +103,7 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
         var client = await CreateClientAsync(credential).ConfigureAwait(false);
 
         var sql = BuildExcludedSql(tableRef, _filter);
-        var parameters = BuildParameters(_filter, period, includeExclusionParameters: true);
+        var parameters = BuildParameters(_filter, period, forExcludedQuery: true);
 
         _logger.LogDebug("Looking for excluded Gemini-looking charges in {Table}. SQL: {Sql}", tableRef, sql);
 
@@ -122,21 +127,36 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
     // Extracted purely so the WHERE-clause shape is unit-testable without a live
     // BigQuery connection — see BigQueryGeminiBillingRepositoryTests, added
     // specifically to guard against silently reverting the 2026-07-22 fix above.
-    public static string BuildSql(string tableRef, GeminiBillingFilter filter) => $"""
-        SELECT
-          DATE(usage_start_time) AS record_date,
-          sku.description AS sku_description,
-          SUM(cost) AS cost,
-          IFNULL(SUM((SELECT SUM(c.amount) FROM UNNEST(credits) AS c)), 0) AS credits_amount
-        FROM {tableRef}
-        WHERE ({IncludeClause(filter.Include, "inc", "service.description", "sku.description")})
-          AND DATE(usage_start_time) BETWEEN @periodStart AND @periodEnd
-        GROUP BY record_date, sku_description
-        ORDER BY record_date
-        """;
+    //
+    // Aliases are prefixed meterist_ and the cost sum is aliased as cost only because nothing here
+    // aggregates it again; the excluded query below must not (BigQuery rejects an aggregate of an
+    // aggregate when an alias shadows the column).
+    public static string BuildSql(string tableRef, GeminiBillingFilter filter)
+    {
+        var usage = IncludeClause(filter.Include, "inc", ServiceColumn, SkuColumn);
+        var counted = filter.NonUsage.Count == 0
+            ? $"({usage})"
+            : $"(({usage}) OR ({IncludeClause(filter.NonUsage, "non", ServiceColumn, SkuColumn)}))";
+
+        return $"""
+            SELECT
+              DATE(usage_start_time) AS record_date,
+              {ServiceColumn} AS service_description,
+              {SkuColumn} AS sku_description,
+              {CategoryCase(filter)} AS meterist_category,
+              CASE WHEN ({usage}) THEN TRUE ELSE FALSE END AS meterist_is_usage,
+              SUM(cost) AS cost,
+              IFNULL(SUM((SELECT SUM(c.amount) FROM UNNEST(credits) AS c)), 0) AS credits_amount
+            FROM {tableRef}
+            WHERE {counted}
+              AND DATE(usage_start_time) BETWEEN @periodStart AND @periodEnd
+            GROUP BY record_date, service_description, sku_description, meterist_category, meterist_is_usage
+            ORDER BY record_date
+            """;
+    }
 
     /// <summary>
-    /// Lines the include rules leave out, that are not on the ignore list, and that match a
+    /// Lines the include and non-usage rules leave out, that are not on the ignore list, and that match a
     /// watch term in their service or SKU, with a non-zero total cost. NULL descriptions are
     /// coalesced so a line with a missing SKU is still seen rather than lost to SQL's NULL logic.
     /// </summary>
@@ -148,6 +168,13 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
         var watch = string.Join(
             " OR ",
             filter.WatchTerms.Select((_, i) => $"LOWER({Service}) LIKE @watch{i} OR LOWER({Sku}) LIKE @watch{i}"));
+
+        // A line that is counted or recorded as non-usage has been dealt with, so it is not "excluded".
+        var counted = IncludeClause(filter.Include, "inc", Service, Sku);
+        if (filter.NonUsage.Count > 0)
+        {
+            counted += " OR " + IncludeClause(filter.NonUsage, "non", Service, Sku);
+        }
 
         var ignore = filter.Ignore.Count == 0
             ? string.Empty
@@ -162,7 +189,7 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
               MAX(DATE(usage_start_time)) AS last_date
             FROM {tableRef}
             WHERE DATE(usage_start_time) BETWEEN @periodStart AND @periodEnd
-              AND NOT ({IncludeClause(filter.Include, "inc", Service, Sku)}){ignore}
+              AND NOT ({counted}){ignore}
               AND ({watch})
             GROUP BY service_description, sku_description
             HAVING SUM(cost) != 0
@@ -170,8 +197,13 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
             """;
     }
 
+    /// <summary>
+    /// Query parameters. The main query takes the include and non-usage rules with their categories; the
+    /// excluded-charges query takes the same rules without categories (it never reads them) plus the ignore
+    /// rules and watch terms. Every parameter given is referenced by its query.
+    /// </summary>
     public static BigQueryParameter[] BuildParameters(
-        GeminiBillingFilter filter, DateRange period, bool includeExclusionParameters)
+        GeminiBillingFilter filter, DateRange period, bool forExcludedQuery)
     {
         var parameters = new List<BigQueryParameter>
         {
@@ -179,11 +211,12 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
             new("periodEnd", BigQueryDbType.Date, period.End.ToDateTime(TimeOnly.MinValue)),
         };
 
-        AddRuleParameters(parameters, filter.Include, "inc");
+        AddRuleParameters(parameters, filter.Include, "inc", withCategory: !forExcludedQuery);
+        AddRuleParameters(parameters, filter.NonUsage, "non", withCategory: !forExcludedQuery);
 
-        if (includeExclusionParameters)
+        if (forExcludedQuery)
         {
-            AddRuleParameters(parameters, filter.Ignore, "ign");
+            AddRuleParameters(parameters, filter.Ignore, "ign", withCategory: false);
             for (var i = 0; i < filter.WatchTerms.Count; i++)
             {
                 parameters.Add(new BigQueryParameter(
@@ -194,6 +227,19 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
         return [.. parameters];
     }
 
+    // First matching rule wins, include rules before non-usage ones. A rule with no category yields NULL,
+    // which the normalizer replaces by classifying the SKU text, so a configuration written before categories
+    // existed keeps behaving as it did.
+    private static string CategoryCase(GeminiBillingFilter filter)
+    {
+        var whens = filter.Include
+            .Select((_, i) => $"WHEN ({ServiceColumn} = @incService{i} AND {SkuColumn} LIKE @incSku{i}) THEN @incCategory{i}")
+            .Concat(filter.NonUsage.Select((_, i) =>
+                $"WHEN ({ServiceColumn} = @nonService{i} AND {SkuColumn} LIKE @nonSku{i}) THEN @nonCategory{i}"));
+
+        return "CASE " + string.Join(" ", whens) + " END";
+    }
+
     private static string IncludeClause(
         IReadOnlyList<GeminiBillingRule> rules, string prefix, string serviceColumn, string skuColumn) =>
         string.Join(
@@ -201,12 +247,16 @@ public sealed class BigQueryGeminiBillingRepository : IGeminiBillingQueryReposit
             rules.Select((_, i) => $"({serviceColumn} = @{prefix}Service{i} AND {skuColumn} LIKE @{prefix}Sku{i})"));
 
     private static void AddRuleParameters(
-        List<BigQueryParameter> parameters, IReadOnlyList<GeminiBillingRule> rules, string prefix)
+        List<BigQueryParameter> parameters, IReadOnlyList<GeminiBillingRule> rules, string prefix, bool withCategory)
     {
         for (var i = 0; i < rules.Count; i++)
         {
             parameters.Add(new BigQueryParameter($"{prefix}Service{i}", BigQueryDbType.String, rules[i].Service));
             parameters.Add(new BigQueryParameter($"{prefix}Sku{i}", BigQueryDbType.String, rules[i].SkuLike));
+            if (withCategory)
+            {
+                parameters.Add(new BigQueryParameter($"{prefix}Category{i}", BigQueryDbType.String, rules[i].Category));
+            }
         }
     }
 

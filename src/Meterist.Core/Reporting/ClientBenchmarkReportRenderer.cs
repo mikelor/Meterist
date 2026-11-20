@@ -39,6 +39,7 @@ public static class ClientBenchmarkReportRenderer
         RenderConcentrationRisk(html, data);
         RenderRateCard(html, data);
         RenderWeeklySpend(html, data, totalWeekCount);
+        RenderSpendByKind(html, data);
         RenderProjections(html, data, totalWeekCount);
         RenderPendingSections(html);
         RenderFootnote(html, data);
@@ -401,13 +402,64 @@ public static class ClientBenchmarkReportRenderer
             """);
     }
 
+    // What the weekly figures are made of, and what they leave out. Shown only where it adds something:
+    // a vendor that is nothing but a seat fee has no breakdown worth a table. The usage kinds are what the
+    // figures above count; the non-usage ones (tax, support) are on the vendor's invoice but in no figure here,
+    // so this is where a reader can see why a total sits below an invoice. The projections do not use any of it.
+    private static void RenderSpendByKind(StringBuilder html, ReportData data)
+    {
+        var tenants = data.Tenants
+            .Select(t => (t.TenantId, Vendors: t.Vendors.Where(v => v.HasNotableBreakdown).ToList()))
+            .Where(t => t.Vendors.Count > 0)
+            .ToList();
+
+        if (tenants.Count == 0)
+        {
+            return;
+        }
+
+        html.Append("""
+              <section>
+                <div class="eyebrow">What the figures contain</div>
+                <h2>Spend by kind of charge</h2>
+                <p class="audit-intro">The figures above count the <b>usage and seat</b> kinds. <b>Not counted</b> kinds, such as tax and support fees, are real charges on the vendor's invoice but are in no figure or projection in this report, so a vendor's invoice can total more than its figure above.</p>
+
+            """);
+
+        foreach (var (tenantId, vendors) in tenants)
+        {
+            html.Append($"    <h3 class=\"subsection-tenant\">{Encode(tenantId)}</h3>\n    <div class=\"table-scroll\">\n      <table>\n        <thead>\n          <tr>\n            <th>Vendor</th>\n            <th>Kind</th>\n            <th class=\"figure\">Days with a charge</th>\n            <th class=\"figure\">Amount</th>\n          </tr>\n        </thead>\n        <tbody>\n");
+
+            foreach (var vendor in vendors)
+            {
+                foreach (var kind in vendor.Breakdown)
+                {
+                    var label = kind.IsUsage ? Encode(kind.Category) : $"{Encode(kind.Category)} <span class=\"muted-dash\">(not counted)</span>";
+                    html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.Vendor.DisplayName)}</th>\n            <td>{label}</td>\n            <td class=\"figure tabular\">{kind.Days}</td>\n            <td class=\"figure tabular\">{Money(kind.Amount)}</td>\n          </tr>\n");
+                }
+
+                var counted = vendor.Breakdown.Where(b => b.IsUsage).Sum(b => b.Amount);
+                var notCounted = vendor.Breakdown.Where(b => !b.IsUsage).Sum(b => b.Amount);
+                html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.Vendor.DisplayName)}</th>\n            <td><b>Counted in the figures</b></td>\n            <td class=\"figure tabular\"></td>\n            <td class=\"figure tabular\"><b>{Money(counted)}</b></td>\n          </tr>\n");
+                if (notCounted != 0m)
+                {
+                    html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.Vendor.DisplayName)}</th>\n            <td><b>Not counted</b></td>\n            <td class=\"figure tabular\"></td>\n            <td class=\"figure tabular\"><b>{Money(notCounted)}</b></td>\n          </tr>\n");
+                }
+            }
+
+            html.Append("        </tbody>\n      </table>\n    </div>\n");
+        }
+
+        html.Append("  </section>\n\n");
+    }
+
     private static void RenderFootnote(StringBuilder html, ReportData data)
     {
         html.Append("""
               <footer class="footnote">
                 <ul>
                   <li><b>Figures are Gross Spend</b> (seat fee + usage/overage), pulled live from each vendor's API through Meterist — not estimated or modeled.</li>
-                  <li><b>Tax and support fees are not included.</b> Figures are the usage and seat charges each vendor reports, so a figure can differ from the amount on that vendor's invoice. In particular, tax and cloud support fees (which Google bills on the same account as Gemini Enterprise) are left out on purpose.</li>
+                  <li><b>Tax and support fees are not included.</b> Figures are the usage and seat charges each vendor reports, so a figure can differ from the amount on that vendor's invoice. In particular, tax and cloud support fees (which Google bills on the same account as Gemini Enterprise) are left out of the figures on purpose; where they were recorded, the Spend by kind of charge section lists them.</li>
                   <li><b>Date ranges differ by vendor within a tenant</b> — this reflects each vendor's actual available extraction window at pull time, not a data gap.</li>
 
             """);

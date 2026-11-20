@@ -22,6 +22,8 @@ public sealed class SpendExtractionService
     private readonly ILogger<SpendExtractionService> _logger;
     private readonly IEnumerable<IVendorUserUsageNormalizer> _userUsageNormalizers;
     private readonly IUserDailyUsageRepository? _userDailyUsageRepository;
+    private readonly IEnumerable<IVendorSpendBreakdownNormalizer> _breakdownNormalizers;
+    private readonly IDailySpendBreakdownRepository? _breakdownRepository;
 
     public SpendExtractionService(
         IEnumerable<IVendorSpendExtractor> extractors,
@@ -31,7 +33,9 @@ public sealed class SpendExtractionService
         IVendorRateConfigRepository vendorRateConfigRepository,
         ILogger<SpendExtractionService> logger,
         IEnumerable<IVendorUserUsageNormalizer>? userUsageNormalizers = null,
-        IUserDailyUsageRepository? userDailyUsageRepository = null)
+        IUserDailyUsageRepository? userDailyUsageRepository = null,
+        IEnumerable<IVendorSpendBreakdownNormalizer>? breakdownNormalizers = null,
+        IDailySpendBreakdownRepository? breakdownRepository = null)
     {
         _extractors = extractors;
         _normalizers = normalizers;
@@ -41,6 +45,8 @@ public sealed class SpendExtractionService
         _logger = logger;
         _userUsageNormalizers = userUsageNormalizers ?? [];
         _userDailyUsageRepository = userDailyUsageRepository;
+        _breakdownNormalizers = breakdownNormalizers ?? [];
+        _breakdownRepository = breakdownRepository;
     }
 
     /// <param name="dryRun">
@@ -137,15 +143,25 @@ public sealed class SpendExtractionService
                 "[{Vendor}] Succeeded: {Verb} {RecordCount} DailySpendRecord(s) for tenant '{TenantId}' ({Summary}).",
                 displayName, dryRun ? "would write" : "wrote", records.Count, tenantId, changes.Summarize());
 
+            // The per-kind breakdown, replaced for every day the pull covered. Like the per-user rows it
+            // follows the daily totals, which are the source of record and are already written.
+            var breakdown = await StoreBreakdownAsync(extractor.VendorId, rawData, dryRun, cancellationToken)
+                .ConfigureAwait(false);
+
             var detail = (dryRun ? "dry run: " : string.Empty) + changes.Summarize();
             if (userUsage is not null)
             {
                 detail += $"; per-user rows: {userUsage.Summarize()}";
             }
 
+            if (breakdown is not null)
+            {
+                detail += $"; breakdown rows: {breakdown.Summarize()}";
+            }
+
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count,
-                detail, changes, userUsage);
+                detail, changes, userUsage, breakdown);
         }
         catch (NotImplementedException ex)
         {
@@ -180,6 +196,26 @@ public sealed class SpendExtractionService
         return dryRun
             ? await _userDailyUsageRepository.PlanUpsertAsync(rows, cancellationToken).ConfigureAwait(false)
             : await _userDailyUsageRepository.UpsertAsync(rows, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Null when the vendor has no breakdown normalizer (or no repository is wired), which is normal.
+    private async Task<BreakdownReplaceResult?> StoreBreakdownAsync(
+        Guid vendorId, RawVendorSpendData rawData, bool dryRun, CancellationToken cancellationToken)
+    {
+        var normalizer = _breakdownNormalizers.FirstOrDefault(n => n.VendorId == vendorId);
+        if (normalizer is null || _breakdownRepository is null)
+        {
+            return null;
+        }
+
+        var rows = normalizer.Normalize(rawData);
+        var days = rawData.Period.EnumerateDays().ToList();
+
+        return dryRun
+            ? await _breakdownRepository
+                .PlanReplaceAsync(rawData.TenantId, vendorId, days, rows, cancellationToken).ConfigureAwait(false)
+            : await _breakdownRepository
+                .ReplaceAsync(rawData.TenantId, vendorId, days, rows, cancellationToken).ConfigureAwait(false);
     }
 
     // The never-lower rule used to operate silently. A day it overrides is a

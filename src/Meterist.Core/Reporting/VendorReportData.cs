@@ -21,6 +21,20 @@ public sealed class VendorReportData
     /// </summary>
     public IReadOnlyDictionary<string, int> SourceDayCounts { get; init; } = new Dictionary<string, int>();
 
+    /// <summary>
+    /// The per-kind split of this vendor's spend over the period (seat, overage, model usage...) and any
+    /// non-usage charges kept out of the totals (tax, support). Empty for a vendor with no breakdown stored.
+    /// Informational: the weekly totals and projections run on the daily records, not on this.
+    /// </summary>
+    public IReadOnlyList<BreakdownCategoryTotal> Breakdown { get; init; } = [];
+
+    /// <summary>
+    /// True when the breakdown says something the weekly figures do not: a usage kind other than the seat fee,
+    /// or any non-usage charge. A vendor that is only a seat fee has nothing to add.
+    /// </summary>
+    public bool HasNotableBreakdown =>
+        Breakdown.Any(b => !b.IsUsage || b.Category != Models.SpendCategories.Seat);
+
     public decimal TotalSeatFee => Weeks.Sum(w => w.SeatFee);
 
     public decimal TotalUsageOrOverage => Weeks.Sum(w => w.UsageOrOverage);
