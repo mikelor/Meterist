@@ -407,6 +407,45 @@ The exit code is `0` when no seat-priced vendor has a gap, and non-zero when
 one does (or when the command couldn't run, for example an unknown vendor or
 `--from` after `--to`), so a scheduled run can alert on it.
 
+### Running extraction on a schedule
+
+Run extraction daily. ChatGPT Enterprise's cost export keeps only about 29
+days, so a stretch of missed runs can lose data that can't be recovered later.
+
+```powershell
+./scripts/Register-DailyExtractionTask.ps1 -Time 06:00
+```
+
+This registers a Windows Task Scheduler job ("Meterist daily extraction") that
+runs [`scripts/RunScheduledExtraction.ps1`](../scripts/RunScheduledExtraction.ps1)
+each day. That script extracts every tenant from `2026-07-01` through
+yesterday, runs the [coverage check](#checking-for-missing-days) over the same
+window, and writes everything to `%LOCALAPPDATA%\Meterist\logs\extract-yyyy-MM-dd.log`
+(a second run the same day appends). Its exit code, shown as the task's
+"Last Run Result", is `0` when everything is clean, `1` for an extraction
+failure, `2` for a coverage gap, and `3` for both.
+
+- The task runs as you, and only while you're logged on: credentials are
+  encrypted per Windows user, so it has to be the account that stored them.
+  If the machine was off at the scheduled time, it runs at the next
+  opportunity.
+- It runs through *yesterday*, because today's data isn't complete yet.
+- Tenants default to `zelleri` and `ecosync`. Pass `-Tenants` to
+  `RunScheduledExtraction.ps1` (or edit the default) to add a new one once its
+  credentials are stored.
+- Try it now with `Start-ScheduledTask -TaskName 'Meterist daily extraction'`;
+  remove it with `./scripts/Register-DailyExtractionTask.ps1 -Remove`.
+
+**Tenants that use only some vendors.** `extract --configured-only` runs only
+the vendors the tenant has a stored credential for and shows the rest as
+`Skipped`, instead of reporting them as `Failed`. The scripts above use it, so
+a tenant such as one with only Claude API Platform needs no special handling.
+Without the flag, a vendor with no credential is a failure.
+
+**Exit code of `extract`.** `extract` now exits `1` when any vendor extraction
+failed (it used to exit `0` regardless), so scripts and schedulers can detect
+failures. Skipped and not-implemented vendors don't count as failures.
+
 ## Troubleshooting
 
 - **Debug logging is on by default** ([`appsettings.json`](../src/Meterist.Cli/appsettings.json)

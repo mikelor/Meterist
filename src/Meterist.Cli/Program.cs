@@ -69,6 +69,7 @@ builder.Services.AddSingleton<IVendorSpendExtractor, ChatGptEnterpriseSpendExtra
 builder.Services.AddSingleton<IVendorSpendExtractor, GeminiEnterpriseSpendExtractor>();
 
 builder.Services.AddScoped<SpendExtractionService>();
+builder.Services.AddScoped<ConfiguredVendorExtraction>();
 builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
 
@@ -375,6 +376,11 @@ static Command BuildExtractCommand(IHost host)
         Description = "Query the vendors and show what would change, without writing anything "
             + "(no raw data and no daily records are stored)",
     };
+    var configuredOnlyOption = new Option<bool>("--configured-only")
+    {
+        Description = "Skip vendors the tenant has no stored credential for, instead of reporting them "
+            + "as failed (for tenants that use only some of the vendors)",
+    };
 
     var extractCommand = new Command("extract", "Extract spend for a tenant across a date range");
     extractCommand.Options.Add(tenantOption);
@@ -382,6 +388,7 @@ static Command BuildExtractCommand(IHost host)
     extractCommand.Options.Add(toOption);
     extractCommand.Options.Add(vendorOption);
     extractCommand.Options.Add(dryRunOption);
+    extractCommand.Options.Add(configuredOnlyOption);
 
     extractCommand.SetAction(async (parseResult, cancellationToken) =>
     {
@@ -390,6 +397,7 @@ static Command BuildExtractCommand(IHost host)
         var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
         var vendorShortName = parseResult.GetValue(vendorOption);
         var dryRun = parseResult.GetValue(dryRunOption);
+        var configuredOnly = parseResult.GetValue(configuredOnlyOption);
 
         Guid? vendorFilter = null;
         if (vendorShortName is not null)
@@ -414,10 +422,12 @@ static Command BuildExtractCommand(IHost host)
         }
 
         using var scope = host.Services.CreateScope();
-        var extractionService = scope.ServiceProvider.GetRequiredService<SpendExtractionService>();
-        var results = await extractionService.ExtractAsync(
-            tenantId, new DateRange(from, to), vendorFilter, cancellationToken, dryRun);
-
+        var period = new DateRange(from, to);
+        var results = configuredOnly
+            ? await scope.ServiceProvider.GetRequiredService<ConfiguredVendorExtraction>()
+                .ExtractAsync(tenantId, period, vendorFilter, cancellationToken, dryRun)
+            : await scope.ServiceProvider.GetRequiredService<SpendExtractionService>()
+                .ExtractAsync(tenantId, period, vendorFilter, cancellationToken, dryRun);
         var table = new Table()
             .AddColumn("Vendor")
             .AddColumn("Status")
@@ -430,6 +440,7 @@ static Command BuildExtractCommand(IHost host)
             {
                 VendorExtractionStatus.Succeeded => "[green]Succeeded[/]",
                 VendorExtractionStatus.NotImplemented => "[grey]Not implemented[/]",
+                VendorExtractionStatus.Skipped => "[grey]Skipped[/]",
                 _ => "[red]Failed[/]",
             };
 
@@ -444,7 +455,15 @@ static Command BuildExtractCommand(IHost host)
             WriteDryRunChanges(results);
         }
 
-        return 0;
+        // A scheduled run has to be able to tell that something broke, so a failed vendor
+        // makes the whole command fail. Skipped and not-implemented vendors are not failures.
+        var exitCode = ExtractionExitCode.For(results);
+        if (exitCode != 0)
+        {
+            AnsiConsole.MarkupLine($"[red]{results.Count(r => r.Status == VendorExtractionStatus.Failed)} vendor extraction(s) failed.[/]");
+        }
+
+        return exitCode;
     });
 
     return extractCommand;
