@@ -210,8 +210,9 @@ UserSpendRecord
 └── IsEstimated (bool)    — true for Gemini Enterprise (no vendor-reported
                              per-user $, would be a derived allocation);
                              false for Claude Enterprise / ChatGPT Enterprise
-                             (vendor-reported natively); N/A for Claude API
-                             Platform (no per-human-user concept there)
+                             (vendor-reported natively); available for Claude API
+                             Platform only where personal or service-account
+                             keys are used (otherwise per key)
 ```
 
 Flagging `IsEstimated` at the schema level (rather than a documentation

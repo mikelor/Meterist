@@ -84,14 +84,20 @@ overage/per-user feasibility matrix) now lives in
   path. Three of the four APIs are beta/recently-shipped (May–Jun 2026);
   re-check the reference doc periodically for schema drift.
 - **Claude Enterprise** (Analytics API) returns native per-user dollar cost.
-  **ChatGPT Enterprise** (`COSTS` compliance log export) returns native
-  per-user *credit* usage, but a reliable per-row dollar figure is **not**
-  consistently present — confirmed 2026-07-22 against real data (see
-  `docs/vendor-integration-reference.md`); converting to dollars needs a
-  configured credit-to-USD rate in the general case. **Gemini Enterprise**
-  gives per-user activity but not per-user dollars (would be a derived
-  estimate). **Claude API Platform** has no per-human-user concept at all
-  (workspace/API-key scoped only).
+  **ChatGPT Enterprise**: the **Daily Usage API** (per user, per day, credits)
+  is the source of record since 2026-11; the `COSTS` compliance-log export
+  (29-day retention) is a best-effort cross-check. In July `estimated_cost_usd`
+  was not reliably present; as of 2026-11-19 it is populated on every credit
+  line and matched the configured credit-to-USD rates exactly, so the
+  configured rate is now only a fallback. **Gemini Enterprise** gives
+  per-user activity (via a log sink, not yet set up) but not per-user dollars
+  (would be a derived estimate). **Claude API Platform** attributes usage
+  per person only where personal or service-account keys are used (since
+  2026-08-27); legacy workspace keys attribute only to the key. **Both Claude
+  endpoints Meterist uses were reclassified "legacy but still supported" on
+  2026-10-29** (no sunset date); a newer analytics API with per-user requests
+  and cost exists. See the November 2026 update at the top of the vendor
+  reference.
 - **Overage is not uniformly available**: Claude Enterprise only has an
   overage concept if the tenant has "usage credits" enabled; ChatGPT
   Enterprise's credit-pool size/overage rate remain console/contract-only
@@ -133,16 +139,15 @@ expected behavior, not a data gap to investigate.
    intentionally left open, not pre-committed to Azure Key Vault — see
    `docs/architecture.md` §6. No longer blocking implementation.
 3. **ChatGPT Enterprise Cost API schema spiked 2026-07-22 against the real
-   OpenAI Programmatic Admin Platform reference** (authenticated-only doc,
-   gated behind an active admin session — not publicly fetchable). Full
+   OpenAI Programmatic Admin Platform reference** (login-gated then; a public
+   OpenAPI spec has existed since at least 2026-11-18). Full
    shape now in `docs/vendor-integration-reference.md`: it's a `COSTS` event
    type inside the Compliance Logs Platform (JSONL file export via
    org-scoped `/compliance/organizations/{organization_id}/logs`), hourly +
    per-user grain, with a vendor-computed `estimated_cost_usd` per SKU line
    that may substantially close the overage-dollar gap (though it's an
-   estimate at current rates, not an authoritative invoice figure). **Not
-   yet verified against a real response** — still need a live Admin key pull
-   before finalizing the extractor/mapping code. Credit pool size / true
+   estimate at current rates, not an authoritative invoice figure). **Verified against live
+   pulls** for two tenants since then. Credit pool size / true
    contracted overage rate remain contract/console-only regardless.
 4. **Pricing data changes over time and per tenant.** Any hardcoded rate table
    will go stale and won't generalize across clients. Design for updatability
@@ -298,7 +303,12 @@ expected behavior, not a data gap to investigate.
     combinations. This specific failure did not recur, but one clean run
     doesn't close it: still unresolved, still worth a dedicated debugging
     session before trusting `extract`'s success message unconditionally.
-13. **🟡 Open, unresolved (found 2026-08-29):** while re-verifying item 11's
+    **Update 2026-11:** later runs, including the November catch-up of both
+    tenants across all vendors, persisted new days correctly, and `audit
+    coverage` now flags any seat-priced day that is missing. Still not
+    root-caused, so the advice stands: do not treat the success message as
+    proof on its own; run the coverage check.
+13. **✅ Resolved 2026-11 (found 2026-08-29):** while re-verifying item 11's
     fix stayed solid, found a subtler, related problem it doesn't cover.
     A ChatGPT week still nominally *inside* the 29-day retention window
     (not yet clamped away entirely) can lose usage across successive
@@ -316,3 +326,21 @@ expected behavior, not a data gap to investigate.
     captured figure per ChatGPT week, since these figures only ever shrink
     pull-over-pull. Possible real fix: never let a re-pull replace an
     existing day's `UsageOrOverage` with a lower value.
+    **Resolution (2026-11):** the never-lower rule was implemented (with a
+    0.005 noise tolerance, so sub-cent float noise isn't reported), and the
+    ChatGPT Daily Usage API replaced `COSTS` as the source of record, so
+    erosion of in-window days no longer reaches the stored figures. See
+    `docs/vendor-integration-reference.md`.
+14. **Sprint 1 status (2026-11-20).** Work is tracked in GitHub issues #5–#39
+    (milestones Sprint 1–4); the plan and rationale are in the research
+    report kept locally under `reports/` (untracked, contains client data,
+    never commit it). Done: .NET 11 and central package management; ChatGPT
+    Daily Usage client and adapter with a `Source` column, change-reporting
+    upserts and `extract --dry-run`; the report's ChatGPT first-week fix and
+    source footnote; `audit coverage`; `extract --configured-only`, a
+    non-zero exit code when a vendor fails, and the scheduled daily run
+    (`scripts/RunScheduledExtraction.ps1`,
+    `scripts/Register-DailyExtractionTask.ps1`). Still to do in Sprint 1:
+    the Gemini SKU-filter guard (#34) and the Daily Usage history-depth and
+    Monday-discrepancy spike (#10). The user reviews every pull request and
+    says when to merge.
