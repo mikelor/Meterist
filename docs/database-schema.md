@@ -61,8 +61,9 @@ needed.
 
 One user's usage for one day on one vendor, the per-user companion of
 `DailySpendRecords` (`Meterist.Core.Models.UserDailyUsageRecord`). Added by
-`AddUserDailyUsageRecords`; **nothing writes to it yet**. The ChatGPT and Claude
-Enterprise adapters will populate it in later sprint issues.
+`AddUserDailyUsageRecords`. **ChatGPT Enterprise populates it** (issue #17), from
+the Daily Usage API when the tenant's credential has a `WorkspaceId`; Claude
+Enterprise will follow in a later sprint issue.
 
 A row exists only for a user-day with usage, because the vendors return
 nothing for idle users. So no row means no usage, and the number of active

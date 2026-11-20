@@ -25,10 +25,21 @@ public sealed record VendorExtractionResult(
     VendorExtractionStatus Status,
     int RecordCount,
     string? Detail,
-    IReadOnlyList<DailySpendChange>? Changes = null);
+    IReadOnlyList<DailySpendChange>? Changes = null,
+    UserUsageUpsertResult? UserUsage = null);
 
 public static class DailySpendChangeExtensions
 {
+    /// <summary>One-line account of a per-user upsert, e.g. "2 inserted, 40 unchanged". Zero counts are left out.</summary>
+    public static string Summarize(this UserUsageUpsertResult result)
+    {
+        var parts = new List<string>();
+        if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");
+        if (result.Updated > 0) parts.Add($"{result.Updated} updated");
+        if (result.Unchanged > 0) parts.Add($"{result.Unchanged} unchanged");
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
+    }
+
     /// <summary>
     /// One-line account of a set of changes, e.g. "3 inserted, 118 unchanged,
     /// 1 kept higher usage". Zero counts are left out. It exists so that a

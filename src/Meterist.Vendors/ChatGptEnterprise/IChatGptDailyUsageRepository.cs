@@ -18,6 +18,9 @@ public enum ChatGptUsageGrouping
 /// <see cref="Credits"/> is null on a USD-only day, <see cref="CostUsd"/> is
 /// null on a credit-only day, and the token fields are omitted when no
 /// eligible token usage exists. A reported zero stays zero.
+/// <see cref="Clients"/> and <see cref="Models"/> are the API's per-client and per-model
+/// breakdowns exactly as sent, and <see cref="ActorType"/> its actor type (for example
+/// ACCOUNT_USER); all three are null when the API omitted them.
 /// <see cref="EstimatedCostUsd"/> estimates only the credit-priced portion.
 /// </summary>
 public sealed record ChatGptDailyUsageRow(
@@ -32,7 +35,10 @@ public sealed record ChatGptDailyUsageRow(
     long? UncachedTextInputTokens,
     long? CachedTextInputTokens,
     long? TextOutputTokens,
-    long? TextTotalTokens);
+    long? TextTotalTokens,
+    string? ActorType = null,
+    System.Text.Json.JsonElement? Clients = null,
+    System.Text.Json.JsonElement? Models = null);
 
 /// <summary>
 /// Seam between the ChatGPT adapter and the Daily Usage API, mirroring

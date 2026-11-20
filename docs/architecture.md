@@ -198,8 +198,8 @@ every historical extraction attempt. A true append-only history is a larger,
 separate feature (unbounded growth, different retention story) and is
 deliberately not built.
 
-**Per-user usage — table and repository built (2026-11-20, issue #16); the
-adapters do not populate it yet:**
+**Per-user usage — table and repository built (2026-11-20, issue #16);
+ChatGPT Enterprise populates it (issue #17), the other vendors do not yet:**
 
 ```
 UserDailyUsageRecord              (Meterist.Core.Models; table UserDailyUsageRecords)
@@ -216,6 +216,12 @@ UserDailyUsageRecord              (Meterist.Core.Models; table UserDailyUsageRec
                                     is Person only for personal or service-account
                                     keys, ApiKey for legacy workspace keys
 ```
+
+A vendor opts in by registering an `IVendorUserUsageNormalizer`
+(`Meterist.Core.Vendors`), which turns its raw rows into `UserDailyUsageRecord`s.
+`SpendExtractionService` runs it after the daily totals are written (or, for a
+dry run, plans it) and adds the counts to the result detail; a vendor with none
+registered is simply skipped.
 
 `IUserDailyUsageRepository` (`Meterist.Core.Persistence`) offers `UpsertAsync`,
 `PlanUpsertAsync` (a dry run that writes nothing) and `GetAsync(tenant, vendor,

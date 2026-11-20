@@ -34,6 +34,27 @@ public class ChatGptEnterpriseDailyUsageNormalizerTests
     }
 
     [Fact]
+    public void Normalize_PerUserRawRowsAreDetailBehindTheWorkspaceRow_NotCostsLinesAndNotDoubleCounted()
+    {
+        var logger = new CapturingLogger<ChatGptEnterpriseSpendNormalizer>();
+        var perUser = new Dictionary<string, object?>(UsageRow(credits: 600m, costUsd: null, estimated: 24m))
+        {
+            [ChatGptDailyUsageRowFields.Source] = ChatGptRowSources.DailyUsageUser,
+            [ChatGptDailyUsageRowFields.UserId] = "user-1",
+        };
+
+        var record = Single(Normalize(
+            RawData(Day, [UsageRow(credits: 1000m, costUsd: null, estimated: 40m), perUser, perUser]),
+            [SeatRate(), CreditRate(0.04m)], logger));
+
+        Assert.Equal(1000m * 0.04m, record.UsageOrOverage);
+        Assert.Equal(DailySpendSources.DailyUsageApi, record.Source);
+        // Were the per-user rows mistaken for COSTS lines, their credits would be compared with the
+        // workspace's and reported as a disagreement.
+        Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
     public void Normalize_NativeUsdUsage_IsDollarsAndIsNeverRunThroughTheCreditRate()
     {
         // A USD-only day: credits null. 12.50 must stay 12.50, not become 12.50 * 0.07.

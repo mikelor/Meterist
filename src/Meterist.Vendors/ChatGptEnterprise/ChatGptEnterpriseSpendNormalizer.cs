@@ -92,7 +92,7 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
             var creditRate = applicableRates.FindRateForDay(ChatGptRateKeys.CreditUsdModelOrSku, date);
 
             var usageRow = rows.FirstOrDefault(IsDailyUsageRow);
-            var costRows = rows.Where(r => !IsDailyUsageRow(r)).ToList();
+            var costRows = rows.Where(r => !IsDailyUsageRow(r) && !IsDailyUsageUserRow(r)).ToList();
 
             decimal usageOrOverage;
             string? source;
@@ -318,6 +318,11 @@ public sealed class ChatGptEnterpriseSpendNormalizer : IVendorSpendNormalizer
     private static bool IsDailyUsageRow(IReadOnlyDictionary<string, object?> row) =>
         row.TryGetValue(ChatGptDailyUsageRowFields.Source, out var source)
         && string.Equals(source as string, ChatGptRowSources.DailyUsage, StringComparison.Ordinal);
+
+    // A per-user Daily Usage row is detail behind the workspace row, never a COSTS billing line.
+    private static bool IsDailyUsageUserRow(IReadOnlyDictionary<string, object?> row) =>
+        row.TryGetValue(ChatGptDailyUsageRowFields.Source, out var source)
+        && string.Equals(source as string, ChatGptRowSources.DailyUsageUser, StringComparison.Ordinal);
 
     private static decimal SumCostsCredits(IReadOnlyList<IReadOnlyDictionary<string, object?>> costRows) =>
         costRows

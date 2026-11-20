@@ -200,6 +200,76 @@ public class ChatGptEnterpriseSpendExtractorTests
 
     private const string WorkspaceId = "11111111-2222-3333-4444-555555555555";
 
+    [Fact]
+    public async Task ExtractAsync_WithWorkspaceId_KeepsPerUserRowsInRawStorage_TaggedAndWithBreakdowns()
+    {
+        var day = new DateOnly(2026, 7, 20);
+        using var clients = JsonDocument.Parse("""[{"client_id":"CHAT_WEB","credits":10}]""");
+        using var models = JsonDocument.Parse("""[{"model":"gpt-x","credits":10}]""");
+        var perUser = new ChatGptDailyUsageRow(
+            day, "user-1", "a@example.test", 3, 4, 10m, null, 0.4m, null, null, null, null,
+            "ACCOUNT_USER", clients.RootElement.Clone(), models.RootElement.Clone());
+        var dailyUsage = new FakeChatGptDailyUsageRepository([UsageRow(day, 10m)], perUserRowsToReturn: [perUser]);
+
+        var extractor = new ChatGptEnterpriseSpendExtractor(
+            await StoreCredentialAsync(WorkspaceId), new FakeChatGptCostLogRepository([]), dailyUsage,
+            NullLogger<ChatGptEnterpriseSpendExtractor>.Instance);
+
+        var result = await extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken);
+
+        Assert.Equal([ChatGptUsageGrouping.Workspace, ChatGptUsageGrouping.PerUser], dailyUsage.Groupings);
+
+        var rows = result.RecordsByDate[day];
+        Assert.Equal(2, rows.Count);
+
+        var workspace = Assert.Single(rows, r => (string?)r[ChatGptDailyUsageRowFields.Source] == ChatGptRowSources.DailyUsage);
+        Assert.Equal(10m, workspace[ChatGptDailyUsageRowFields.Credits]);
+
+        var user = Assert.Single(rows, r => (string?)r[ChatGptDailyUsageRowFields.Source] == ChatGptRowSources.DailyUsageUser);
+        Assert.Equal("user-1", user[ChatGptDailyUsageRowFields.UserId]);
+        Assert.Equal("a@example.test", user[ChatGptDailyUsageRowFields.UserEmail]);
+        Assert.Equal("ACCOUNT_USER", user[ChatGptDailyUsageRowFields.ActorType]);
+        Assert.Equal(10m, user[ChatGptDailyUsageRowFields.Credits]);
+
+        // Breakdowns survive as the vendor sent them, and serialize into raw storage as real JSON.
+        var json = JsonSerializer.Serialize(user);
+        Assert.Contains("\"CHAT_WEB\"", json);
+        Assert.Contains("\"gpt-x\"", json);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WhenThePerUserQueryFails_StillSucceedsOnTheWorkspaceTotalsAndSaysSo()
+    {
+        var day = new DateOnly(2026, 7, 20);
+        var dailyUsage = new FakeChatGptDailyUsageRepository(
+            [UsageRow(day, 10m)], perUserExceptionToThrow: new HttpRequestException("boom"));
+        var logger = new CapturingLogger<ChatGptEnterpriseSpendExtractor>();
+
+        var extractor = new ChatGptEnterpriseSpendExtractor(
+            await StoreCredentialAsync(WorkspaceId), new FakeChatGptCostLogRepository([]), dailyUsage, logger);
+
+        var result = await extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(result.RecordsByDate[day]);
+        Assert.Equal(ChatGptRowSources.DailyUsage, row[ChatGptDailyUsageRowFields.Source]);
+        Assert.Contains(logger.Warnings, w => w.Contains("per-user") && w.Contains("workspace totals alone"));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WhenTheWorkspaceQueryFails_FailsLoudlyEvenIfPerUserWouldHaveWorked()
+    {
+        var dailyUsage = new FakeChatGptDailyUsageRepository(
+            exceptionToThrow: new InvalidOperationException("workspace down"),
+            perUserRowsToReturn: [new ChatGptDailyUsageRow(new DateOnly(2026, 7, 20), "u", null, 1, 1, 1m, null, null, null, null, null, null)]);
+
+        var extractor = new ChatGptEnterpriseSpendExtractor(
+            await StoreCredentialAsync(WorkspaceId), new FakeChatGptCostLogRepository([]), dailyUsage,
+            NullLogger<ChatGptEnterpriseSpendExtractor>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => extractor.ExtractAsync("ecosync", Period, TestContext.Current.CancellationToken));
+    }
+
     private static ChatGptDailyUsageRow UsageRow(DateOnly day, decimal credits, decimal? estimated = null) =>
         new(day, null, null, 1, 2, credits, null, estimated ?? credits * 0.04m, 100, 200, 300, 600);
 
@@ -242,7 +312,7 @@ public class ChatGptEnterpriseSpendExtractorTests
         Assert.Equal(DailySpendSources.DailyUsageApi, result.PrimarySource);
 
         // Workspace-wide totals, for the whole requested period.
-        Assert.Equal(ChatGptUsageGrouping.Workspace, dailyUsage.ReceivedGrouping);
+        Assert.Contains(ChatGptUsageGrouping.Workspace, dailyUsage.Groupings);
         Assert.Equal(Period, dailyUsage.ReceivedPeriod);
         Assert.Equal(WorkspaceId, dailyUsage.ReceivedCredential!.WorkspaceId);
 

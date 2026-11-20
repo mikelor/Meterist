@@ -341,6 +341,19 @@ total usage over four months, with `COSTS` slightly higher on some days (about
 $0.03 a day, and more on Mondays), so a handful of days keep their `COSTS`
 figure; that is expected, not an error. The extra `COSTS` amount is usage with no user attached and non-token lines such as site hosting, which the Daily Usage API does not return (see the vendor reference).
 
+**Per-user usage.** With a `WorkspaceId`, `extract` also stores one row per
+user per day (who used how many credits and what that cost) in the local
+database, next to the daily totals. The result line gains a count, for example
+`per-user rows: 12 inserted, 340 unchanged`, and `extract --dry-run` shows what
+it would add without writing anything. These rows hold email addresses, so they
+stay in the database and in reports under `artifacts/`; Meterist does not log
+them. Dollars use your configured credit rate, like the daily total, and a row is
+marked as estimated only when no rate is configured. If the per-user query fails
+the extraction still succeeds on the daily totals and logs a warning; run it again
+to fill the rows in. A warning that per-user rows "do not add up" to the workspace
+total names the date and the credits, and usually means a user has since been
+deleted.
+
 **If the Daily Usage call fails** (the admin key lacks "Enterprise analytics
 API: Read", the `WorkspaceId` belongs to a different workspace, an outage),
 the ChatGPT extraction **fails with a message saying so**; it does not quietly

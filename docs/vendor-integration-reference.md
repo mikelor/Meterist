@@ -324,8 +324,31 @@ not adopted.
       and non-token SKUs) as a separate reconciling amount, not to switch source.
     - Reproduce with `scripts/QueryChatGptSourceComparison.sql` (per-day
       totals) and `scripts/QueryChatGptMondayDetail.sql` (per user and SKU).
-  - **Not yet stored:** the per-user rows are not persisted yet; the adapter
-    keeps the daily total. Per-user storage is Sprint 2.
+  - **Per-user rows are stored (issue #17).** With a `WorkspaceId`, each
+    extraction also queries the API with the default (per-user) grouping and
+    keeps those rows in raw storage tagged `DailyUsageUser`, with the vendor's
+    client and model breakdowns as sent. They are normalized into
+    `UserDailyUsageRecords` by `ChatGptEnterpriseUserUsageNormalizer`:
+    - **Identity:** `UserId` is the vendor's user id and `UserEmail` the actor's
+      email. The actor has **no display name**, so `UserName` is empty.
+    - **Amount:** priced exactly like the daily total (native USD as it is, plus
+      credits times the configured credit-to-USD rate), so per-user dollars add
+      up to the day's `UsageOrOverage`. Only when no rate is configured does a
+      row use the vendor's own estimate, and then it is marked `IsEstimated`.
+    - **Requests** is the API's message count; **Credits** is stored as sent.
+    - **Reconciliation:** each completed day's per-user credits are compared with
+      its workspace row (tolerance 5 credits or 2%). A mismatch logs a warning
+      naming the date and the two figures, never a person. The per-user
+      grouping omits users who have since been deleted, so a shortfall is
+      expected now and then; users summing to more than the workspace is not.
+    - **Best effort:** if the per-user query fails, the extraction still succeeds
+      on the workspace totals (the source of record), logs a warning, and stores
+      no per-user rows for that run; the next run that covers the period fills
+      them in.
+    - Rows with no user id are skipped and counted in a warning.
+    - Not yet done: `actor.type` is stored in raw but every row is treated as a
+      person (only `ACCOUNT_USER` has been seen), and the COSTS-only fallback
+      (no `WorkspaceId`) stores no per-user rows.
 - **Other documented surfaces (2026-11-19 research, not used yet):** the
   **Spend Controls** API under `/v1/manage/workspaces/{workspace_id}/usage_limits/`
   (scope `chatgpt.enterprise.usage_limit.read`) lists every user with
