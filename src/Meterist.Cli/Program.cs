@@ -59,6 +59,7 @@ builder.Services.AddHttpClient<IChatGptDailyUsageRepository, HttpChatGptDailyUsa
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IVendorSpendNormalizer, ChatGptEnterpriseSpendNormalizer>();
+builder.Services.AddSingleton<IVendorUserUsageNormalizer, ChatGptEnterpriseUserUsageNormalizer>();
 
 builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReportRepository>(client =>
 {

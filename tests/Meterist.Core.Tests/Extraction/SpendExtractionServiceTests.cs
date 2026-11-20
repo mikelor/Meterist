@@ -389,6 +389,113 @@ public class SpendExtractionServiceTests
             Entries.Add((logLevel, formatter(state, exception)));
     }
 
+    [Fact]
+    public async Task ExtractAsync_VendorWithAUserNormalizer_StoresPerUserRowsAfterTheDailyTotals_AndSaysSoInTheDetail()
+    {
+        var vendorId = Guid.NewGuid();
+        var userRepo = new FakeUserRepository();
+        var userRows = new List<UserDailyUsageRecord>
+        {
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, UserId = "u1" },
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, UserId = "u2" },
+        };
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            [new FakeUserNormalizer(vendorId, userRows)], userRepo);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.Equal(2, userRepo.Upserted.Count);
+        Assert.Equal(0, userRepo.Planned);
+        Assert.Equal(new UserUsageUpsertResult(2, 0, 0), result.UserUsage);
+        Assert.Contains("per-user rows: 2 inserted", result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DryRun_PlansPerUserRowsAndWritesNone()
+    {
+        var vendorId = Guid.NewGuid();
+        var userRepo = new FakeUserRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            [new FakeUserNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, UserId = "u1" }])],
+            userRepo);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken, dryRun: true));
+
+        Assert.Empty(userRepo.Upserted);
+        Assert.Equal(1, userRepo.Planned);
+        Assert.Contains("dry run:", result.Detail);
+        Assert.Contains("per-user rows: 1 inserted", result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_VendorWithNoUserNormalizer_LeavesPerUserStorageUntouched()
+    {
+        var vendorId = Guid.NewGuid();
+        var userRepo = new FakeUserRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            [new FakeUserNormalizer(Guid.NewGuid(), [])], userRepo);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, userRepo.Planned);
+        Assert.Empty(userRepo.Upserted);
+        Assert.Null(result.UserUsage);
+        Assert.DoesNotContain("per-user", result.Detail);
+    }
+
+    private sealed class FakeUserNormalizer(Guid vendorId, IReadOnlyList<UserDailyUsageRecord> rows) : IVendorUserUsageNormalizer
+    {
+        public Guid VendorId => vendorId;
+
+        public IReadOnlyList<UserDailyUsageRecord> Normalize(
+            RawVendorSpendData rawData, IReadOnlyList<VendorRateConfig> applicableRates) => rows;
+    }
+
+    private sealed class FakeUserRepository : IUserDailyUsageRepository
+    {
+        public List<UserDailyUsageRecord> Upserted { get; } = [];
+
+        public int Planned { get; private set; }
+
+        public Task<UserUsageUpsertResult> UpsertAsync(
+            IEnumerable<UserDailyUsageRecord> records, CancellationToken cancellationToken = default)
+        {
+            var list = records.ToList();
+            Upserted.AddRange(list);
+            return Task.FromResult(new UserUsageUpsertResult(list.Count, 0, 0));
+        }
+
+        public Task<UserUsageUpsertResult> PlanUpsertAsync(
+            IEnumerable<UserDailyUsageRecord> records, CancellationToken cancellationToken = default)
+        {
+            Planned += records.Count();
+            return Task.FromResult(new UserUsageUpsertResult(records.Count(), 0, 0));
+        }
+
+        public Task<IReadOnlyList<UserDailyUsageRecord>> GetAsync(
+            string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<UserDailyUsageRecord>>([]);
+    }
+
     private sealed class FakeRawExtractionRepository : IRawExtractionRepository
     {
         public bool WasCalled { get; private set; }

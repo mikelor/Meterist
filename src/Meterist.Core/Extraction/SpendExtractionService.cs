@@ -20,6 +20,8 @@ public sealed class SpendExtractionService
     private readonly IDailySpendRepository _dailySpendRepository;
     private readonly IVendorRateConfigRepository _vendorRateConfigRepository;
     private readonly ILogger<SpendExtractionService> _logger;
+    private readonly IEnumerable<IVendorUserUsageNormalizer> _userUsageNormalizers;
+    private readonly IUserDailyUsageRepository? _userDailyUsageRepository;
 
     public SpendExtractionService(
         IEnumerable<IVendorSpendExtractor> extractors,
@@ -27,7 +29,9 @@ public sealed class SpendExtractionService
         IRawExtractionRepository rawExtractionRepository,
         IDailySpendRepository dailySpendRepository,
         IVendorRateConfigRepository vendorRateConfigRepository,
-        ILogger<SpendExtractionService> logger)
+        ILogger<SpendExtractionService> logger,
+        IEnumerable<IVendorUserUsageNormalizer>? userUsageNormalizers = null,
+        IUserDailyUsageRepository? userDailyUsageRepository = null)
     {
         _extractors = extractors;
         _normalizers = normalizers;
@@ -35,6 +39,8 @@ public sealed class SpendExtractionService
         _dailySpendRepository = dailySpendRepository;
         _vendorRateConfigRepository = vendorRateConfigRepository;
         _logger = logger;
+        _userUsageNormalizers = userUsageNormalizers ?? [];
+        _userDailyUsageRepository = userDailyUsageRepository;
     }
 
     /// <param name="dryRun">
@@ -122,13 +128,24 @@ public sealed class SpendExtractionService
 
             LogKeptHigherUsage(displayName, tenantId, changes, dryRun);
 
+            // Per-user rows go in after the daily totals, which are the source of record and are
+            // already written. Counts only: the rows are personal data and are not logged.
+            var userUsage = await StoreUserUsageAsync(
+                extractor.VendorId, rawData, applicableRates, dryRun, cancellationToken).ConfigureAwait(false);
+
             _logger.LogDebug(
                 "[{Vendor}] Succeeded: {Verb} {RecordCount} DailySpendRecord(s) for tenant '{TenantId}' ({Summary}).",
                 displayName, dryRun ? "would write" : "wrote", records.Count, tenantId, changes.Summarize());
 
+            var detail = (dryRun ? "dry run: " : string.Empty) + changes.Summarize();
+            if (userUsage is not null)
+            {
+                detail += $"; per-user rows: {userUsage.Summarize()}";
+            }
+
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count,
-                (dryRun ? "dry run: " : string.Empty) + changes.Summarize(), changes);
+                detail, changes, userUsage);
         }
         catch (NotImplementedException ex)
         {
@@ -142,6 +159,27 @@ public sealed class SpendExtractionService
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Failed, 0, ex.Message);
         }
+    }
+
+    // Null when the vendor has no per-user normalizer (or no repository is wired), which is normal.
+    private async Task<UserUsageUpsertResult?> StoreUserUsageAsync(
+        Guid vendorId,
+        RawVendorSpendData rawData,
+        IReadOnlyList<VendorRateConfig> applicableRates,
+        bool dryRun,
+        CancellationToken cancellationToken)
+    {
+        var normalizer = _userUsageNormalizers.FirstOrDefault(n => n.VendorId == vendorId);
+        if (normalizer is null || _userDailyUsageRepository is null)
+        {
+            return null;
+        }
+
+        var rows = normalizer.Normalize(rawData, applicableRates);
+
+        return dryRun
+            ? await _userDailyUsageRepository.PlanUpsertAsync(rows, cancellationToken).ConfigureAwait(false)
+            : await _userDailyUsageRepository.UpsertAsync(rows, cancellationToken).ConfigureAwait(false);
     }
 
     // The never-lower rule used to operate silently. A day it overrides is a

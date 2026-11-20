@@ -110,6 +110,14 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             }
         }
 
+        // Per-user rows for the same period, kept in raw storage beside the workspace row.
+        // Best effort, like the COSTS cross-check: the workspace totals above are the source of
+        // record, so a failure here must not fail an extraction they already answered.
+        var userRowsByDay = (await TryQueryPerUserAsync(tenantId, credential, period, cancellationToken)
+                .ConfigureAwait(false))
+            .GroupBy(row => row.Day)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         var costsResult = await TryQueryCostsAsync(tenantId, credential, period, cancellationToken)
             .ConfigureAwait(false);
 
@@ -140,6 +148,14 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             if (usageByDay.TryGetValue(date, out var usage))
             {
                 rows.Add(ToRawRow(usage));
+            }
+
+            if (userRowsByDay.TryGetValue(date, out var userRows))
+            {
+                foreach (var userRow in userRows)
+                {
+                    rows.Add(ToUserRawRow(userRow));
+                }
             }
 
             if (costRowsByDay.TryGetValue(date, out var costRows))
@@ -200,6 +216,44 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         }
     }
 
+    // Best effort by design; see the call site. A failure leaves the day without per-user rows,
+    // and the next extraction that covers it fills them in.
+    private async Task<IReadOnlyList<ChatGptDailyUsageRow>> TryQueryPerUserAsync(
+        string tenantId, ChatGptCredential credential, DateRange period, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _dailyUsageRepository
+                .QueryDailyUsageAsync(credential, period, ChatGptUsageGrouping.PerUser, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "The ChatGPT Enterprise per-user Daily Usage query for tenant '{TenantId}' failed ({Message}); "
+                + "continuing with the workspace totals alone. No per-user rows are stored for this period this run.",
+                tenantId, ex.Message);
+            return [];
+        }
+    }
+
+    private static IReadOnlyDictionary<string, object?> ToUserRawRow(ChatGptDailyUsageRow row)
+    {
+        var raw = new Dictionary<string, object?>(ToRawRow(row))
+        {
+            [ChatGptDailyUsageRowFields.Source] = ChatGptRowSources.DailyUsageUser,
+            [ChatGptDailyUsageRowFields.UserId] = row.UserId,
+            [ChatGptDailyUsageRowFields.UserEmail] = row.Email,
+            [ChatGptDailyUsageRowFields.ActorType] = row.ActorType,
+        };
+        return raw;
+    }
+
     private static IReadOnlyDictionary<string, object?> ToRawRow(ChatGptDailyUsageRow row) =>
         new Dictionary<string, object?>
         {
@@ -213,6 +267,8 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             [ChatGptDailyUsageRowFields.CachedTextInputTokens] = row.CachedTextInputTokens,
             [ChatGptDailyUsageRowFields.TextOutputTokens] = row.TextOutputTokens,
             [ChatGptDailyUsageRowFields.TextTotalTokens] = row.TextTotalTokens,
+            [ChatGptDailyUsageRowFields.Clients] = row.Clients,
+            [ChatGptDailyUsageRowFields.Models] = row.Models,
         };
 
     // The original extraction, unchanged in behavior: used when there is no

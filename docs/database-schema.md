@@ -61,8 +61,9 @@ needed.
 
 One user's usage for one day on one vendor, the per-user companion of
 `DailySpendRecords` (`Meterist.Core.Models.UserDailyUsageRecord`). Added by
-`AddUserDailyUsageRecords`; **nothing writes to it yet**. The ChatGPT and Claude
-Enterprise adapters will populate it in later sprint issues.
+`AddUserDailyUsageRecords`. **ChatGPT Enterprise populates it** (issue #17), from
+the Daily Usage API when the tenant's credential has a `WorkspaceId`; Claude
+Enterprise will follow in a later sprint issue.
 
 A row exists only for a user-day with usage, because the vendors return
 nothing for idle users. So no row means no usage, and the number of active
@@ -80,8 +81,8 @@ users on a day is the number of distinct `UserId`s.
 | `Amount` | `TEXT` | No | `decimal(18,4)`, USD. Vendor-reported where the vendor gives a dollar figure, otherwise derived (then `IsEstimated` is `1`). |
 | `Credits` | `TEXT` | Yes | `decimal(18,4)`. Credits consumed, for vendors that bill in credits. `NULL` where the vendor has no such concept. |
 | `Requests` | `INTEGER` | Yes | Requests or messages, whichever the vendor reports. `NULL` where no count is reported. |
-| `IsEstimated` | `INTEGER` | No | `1` when `Amount` is an estimate rather than a billed figure; reports must label it. |
-| `Attribution` | `TEXT` | No | `Person`, `ApiKey` or `Allocated` (`UsageAttribution`), stored as text so it is readable in SQL and reordering the enum cannot relabel history. `ApiKey`: the vendor reported the usage against a key, not a person. `Allocated`: Meterist divided an aggregate across users. |
+| `IsEstimated` | `INTEGER` | No | `1` when `Amount` is derived rather than vendor-reported (for example credits converted at a rate, even a contracted one); reports must label it. |
+| `Attribution` | `TEXT` | No | `Person`, `ApiKey`, `Allocated` or `Unrecognized` (`UsageAttribution`), stored as text so it is readable in SQL and reordering the enum cannot relabel history. `ApiKey`: the vendor reported the usage against a key, not a person. `Allocated`: Meterist divided an aggregate across users. `Unrecognized`: an actor type Meterist does not know; stored so totals reconcile, not counted as a person. |
 
 **Primary key:** `Id` (surrogate).
 **Natural key / unique index:** `IX_UserDailyUsageRecords_TenantId_VendorId_Date_UserId`

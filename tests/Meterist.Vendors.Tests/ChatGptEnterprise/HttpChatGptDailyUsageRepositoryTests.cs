@@ -117,6 +117,46 @@ public class HttpChatGptDailyUsageRepositoryTests
     }
 
     [Fact]
+    public async Task QueryDailyUsageAsync_PerUser_KeepsActorTypeAndTheClientAndModelBreakdowns()
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, $$"""
+            {
+              "object": "page",
+              "data": [
+                {
+                  "start_time": {{Oct1}}, "end_time": {{Oct2}},
+                  "user_id": "user-aaa",
+                  "actor": { "type": "ACCOUNT_USER", "user_id": "user-aaa", "email": "person@example.com" },
+                  "totals": { "chats": 1, "messages": 2, "credits": 10 },
+                  "clients": [ { "client_id": "CHAT_WEB", "credits": 6 }, { "client_id": "CODEX_CLI", "credits": 4 } ],
+                  "models": [ { "model": "gpt-x", "speed": "default", "credits": 10 } ]
+                },
+                {
+                  "start_time": {{Oct1}}, "end_time": {{Oct2}}, "user_id": "user-bbb",
+                  "actor": { "type": "ACCOUNT_USER", "email": "b@example.com" },
+                  "totals": { "chats": 1, "messages": 1, "credits": 1 }
+                }
+              ],
+              "has_more": false, "next_page": null
+            }
+            """);
+
+        var rows = await CreateRepository(server)
+            .QueryDailyUsageAsync(Credential(), TwoDays, ChatGptUsageGrouping.PerUser, TestContext.Current.CancellationToken);
+
+        var first = rows[0];
+        Assert.Equal("ACCOUNT_USER", first.ActorType);
+        Assert.Equal(2, first.Clients!.Value.GetArrayLength());
+        Assert.Equal("CODEX_CLI", first.Clients.Value[1].GetProperty("client_id").GetString());
+        Assert.Equal("gpt-x", first.Models!.Value[0].GetProperty("model").GetString());
+
+        // A row that omits the breakdowns gets null, not an exception or an empty placeholder.
+        Assert.Null(rows[1].Clients);
+        Assert.Null(rows[1].Models);
+    }
+
+    [Fact]
     public async Task QueryDailyUsageAsync_FollowsNextPageCursorAndPreservesOtherParameters()
     {
         using var server = WireMockServer.Start();

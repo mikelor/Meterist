@@ -11,6 +11,13 @@ public static class ChatGptRowSources
     public const string DailyUsage = "DailyUsage";
 
     public const string CostsExport = "CostsExport";
+
+    /// <summary>
+    /// One user's Daily Usage API row for one day (default grouping). Stored beside the
+    /// workspace-wide <see cref="DailyUsage"/> row so per-user usage can be normalized later
+    /// without another API call, and so a day can be reconciled against its workspace total.
+    /// </summary>
+    public const string DailyUsageUser = "DailyUsageUser";
 }
 
 /// <summary>
@@ -30,4 +37,14 @@ public static class ChatGptDailyUsageRowFields
     public const string CachedTextInputTokens = "CachedTextInputTokens";
     public const string TextOutputTokens = "TextOutputTokens";
     public const string TextTotalTokens = "TextTotalTokens";
+
+    // Present on DailyUsageUser rows only. UserEmail is personal data.
+    public const string UserId = "UserId";
+    public const string UserEmail = "UserEmail";
+    public const string ActorType = "ActorType";
+
+    // The per-client and per-model breakdowns the API returns, kept as the vendor sent them
+    // (a JSON array) for later use. Present on both DailyUsage and DailyUsageUser rows.
+    public const string Clients = "Clients";
+    public const string Models = "Models";
 }

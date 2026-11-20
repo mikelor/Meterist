@@ -159,8 +159,15 @@ public sealed class HttpChatGptDailyUsageRepository : IChatGptDailyUsageReposito
             totals.UncachedTextInputTokens,
             totals.CachedTextInputTokens,
             totals.TextOutputTokens,
-            totals.TextTotalTokens);
+            totals.TextTotalTokens,
+            dto.Actor?.Type,
+            Cloned(dto.Clients),
+            Cloned(dto.Models));
     }
+
+    // The element belongs to a JsonDocument that is disposed with the response, so keep a copy.
+    private static JsonElement? Cloned(JsonElement? element) =>
+        element is { ValueKind: JsonValueKind.Array } e ? e.Clone() : null;
 
     private sealed class UsagePageDto
     {
@@ -187,12 +194,21 @@ public sealed class HttpChatGptDailyUsageRepository : IChatGptDailyUsageReposito
 
         [JsonPropertyName("totals")]
         public UsageTotalsDto? Totals { get; set; }
+
+        [JsonPropertyName("clients")]
+        public JsonElement? Clients { get; set; }
+
+        [JsonPropertyName("models")]
+        public JsonElement? Models { get; set; }
     }
 
     private sealed class ActorDto
     {
         [JsonPropertyName("email")]
         public string? Email { get; set; }
+
+        [JsonPropertyName("type")]
+        public string? Type { get; set; }
     }
 
     private sealed class UsageTotalsDto
