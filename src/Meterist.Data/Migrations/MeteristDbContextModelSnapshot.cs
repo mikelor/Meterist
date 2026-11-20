@@ -15,7 +15,7 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261120183237_AddDailySpendBreakdownRecords";
+    public override string LastMigrationId => "20261120193404_AddMemberRosterRecords";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -111,6 +111,54 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
                     .IsUnique();
 
                 b.ToTable("DailySpendRecords");
+            });
+
+        modelBuilder.Entity("Meterist.Core.Models.MemberRosterRecord", b =>
+            {
+                b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("INTEGER");
+
+                b.Property<DateTimeOffset?>("AddedAt")
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Email")
+                    .HasMaxLength(320)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("MemberId")
+                    .IsRequired()
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Name")
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Role")
+                    .HasMaxLength(64)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("SeatType")
+                    .HasMaxLength(64)
+                    .HasColumnType("TEXT");
+
+                b.Property<DateOnly>("SnapshotDate")
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("TenantId")
+                    .IsRequired()
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid>("VendorId")
+                    .HasColumnType("TEXT");
+
+                b.HasKey("Id");
+
+                b.HasIndex("TenantId", "VendorId", "SnapshotDate", "MemberId")
+                    .IsUnique();
+
+                b.ToTable("MemberRosterRecords");
             });
 
         modelBuilder.Entity("Meterist.Core.Models.UserDailyUsageRecord", b =>

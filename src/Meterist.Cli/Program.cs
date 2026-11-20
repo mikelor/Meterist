@@ -87,6 +87,11 @@ builder.Services.AddTransient<IClaudeAnalyticsCostReportRepository>(sp =>
         : sp.GetRequiredService<HttpClaudeAnalyticsCostRepository>());
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeEnterpriseUserUsageNormalizer>();
+builder.Services.AddHttpClient<IClaudeMemberRosterRepository, HttpClaudeMemberRosterRepository>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com/");
+});
+builder.Services.AddSingleton<IVendorRosterSource, ClaudeEnterpriseRosterSource>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeApiPlatformSpendExtractor>();
@@ -99,6 +104,7 @@ builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
 builder.Services.AddScoped<UserUsageBackfill>();
 builder.Services.AddScoped<SpendBreakdownBackfill>();
+builder.Services.AddScoped<RosterSnapshotService>();
 builder.Services.AddScoped<UserUsageReporter>();
 
 using var host = builder.Build();
@@ -116,6 +122,7 @@ rootCommand.Subcommands.Add(BuildReportCommand(host));
 rootCommand.Subcommands.Add(BuildAuditCommand(host));
 rootCommand.Subcommands.Add(BuildBackfillCommand(host));
 rootCommand.Subcommands.Add(BuildUsersCommand(host));
+rootCommand.Subcommands.Add(BuildRosterCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -573,6 +580,158 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
     {
         AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
     }
+}
+
+static Command BuildRosterCommand(IHost host)
+{
+    var tenantOption = new Option<string>("--tenant") { Description = "Tenant identifier", Required = true };
+    var vendorOption = new Option<string>("--vendor")
+    {
+        Description = "Vendor short name (a vendor with a member list, such as claude-enterprise)",
+        Required = true,
+    };
+
+    static (VendorIdentity? Vendor, int ExitCode) ResolveVendor(string shortName)
+    {
+        var vendor = VendorCatalog.FindByShortName(shortName);
+        if (vendor is null)
+        {
+            AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(shortName)}'.[/] Known vendors: "
+                + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+            return (null, 1);
+        }
+
+        return (vendor, 0);
+    }
+
+    // ---- roster snapshot
+    var dryRunOption = new Option<bool>("--dry-run")
+    {
+        Description = "Fetch the member list and show what would be stored, without writing anything",
+    };
+
+    var snapshotCommand = new Command(
+        "snapshot",
+        "Take a dated snapshot of a vendor's member list (who holds a seat today) and store it. Run it regularly: "
+        + "vendors expose no membership history, so each snapshot is the only record of who was on the list that day. "
+        + "Taking another on the same day replaces that day's snapshot.");
+    snapshotCommand.Options.Add(tenantOption);
+    snapshotCommand.Options.Add(vendorOption);
+    snapshotCommand.Options.Add(dryRunOption);
+
+    snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var dryRun = parseResult.GetValue(dryRunOption);
+        var (vendor, exit) = ResolveVendor(parseResult.GetValue(vendorOption)!);
+        if (vendor is null)
+        {
+            return exit;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<RosterSnapshotService>();
+
+        try
+        {
+            var outcome = await service.TakeAsync(tenantId, vendor.Id, dryRun, cancellationToken);
+
+            AnsiConsole.MarkupLine(
+                $"[bold]Meterist[/] — roster snapshot for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
+                + $"{outcome.SnapshotDate:yyyy-MM-dd}" + (dryRun ? " [grey](dry run: nothing written)[/]" : string.Empty));
+            AnsiConsole.MarkupLine(
+                $"  {outcome.MemberCount} member(s): {string.Join(", ", outcome.RoleCounts.Select(kv => $"{Markup.Escape(kv.Key)} {kv.Value}"))}.");
+
+            var stored = outcome.Stored;
+            var parts = new List<string>();
+            if (stored.Inserted > 0) parts.Add($"{stored.Inserted} added");
+            if (stored.Updated > 0) parts.Add($"{stored.Updated} changed");
+            if (stored.Removed > 0) parts.Add($"{stored.Removed} removed");
+            if (stored.Unchanged > 0) parts.Add($"{stored.Unchanged} unchanged");
+            AnsiConsole.MarkupLine(
+                $"  {(dryRun ? "Would store" : "Stored")} the snapshot: {(parts.Count == 0 ? "nothing" : string.Join(", ", parts))}"
+                + (outcome.Stored.Inserted + outcome.Stored.Updated + outcome.Stored.Removed == 0 && stored.Unchanged > 0
+                    ? " (identical to the snapshot already stored for today)"
+                    : string.Empty)
+                + ".");
+            return 0;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+    });
+
+    // ---- roster show
+    var dateOption = new Option<DateTime?>("--on-or-before")
+    {
+        Description = "Show the latest snapshot taken on or before this date (default: the latest of all)",
+    };
+
+    var showCommand = new Command(
+        "show",
+        "Show a stored roster snapshot: the members, their roles and when they were added. Read-only.");
+    showCommand.Options.Add(tenantOption);
+    showCommand.Options.Add(vendorOption);
+    showCommand.Options.Add(dateOption);
+
+    showCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var (vendor, exit) = ResolveVendor(parseResult.GetValue(vendorOption)!);
+        if (vendor is null)
+        {
+            return exit;
+        }
+
+        var onOrBefore = parseResult.GetValue(dateOption) is { } d ? DateOnly.FromDateTime(d) : (DateOnly?)null;
+
+        using var scope = host.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IMemberRosterRepository>();
+        var snapshot = await repository.GetLatestSnapshotAsync(tenantId, vendor.Id, onOrBefore, cancellationToken);
+        var dates = await repository.GetSnapshotDatesAsync(tenantId, vendor.Id, cancellationToken);
+
+        if (snapshot is null)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No roster snapshot is stored for {Markup.Escape(tenantId)} / {Markup.Escape(vendor.DisplayName)}"
+                + (onOrBefore is { } b ? $" on or before {b:yyyy-MM-dd}" : string.Empty)
+                + ".[/] Run roster snapshot first.");
+            return 0;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[bold]Meterist[/] — roster for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
+            + $"snapshot of {snapshot.Date:yyyy-MM-dd} ({dates.Count} snapshot(s) stored)");
+
+        var table = new Table().AddColumns("Member", "Role", "Seat type", "Added");
+        foreach (var member in snapshot.Members)
+        {
+            var who = !string.IsNullOrWhiteSpace(member.Name) && !string.IsNullOrWhiteSpace(member.Email)
+                ? $"{member.Name} <{member.Email}>"
+                : member.Name ?? member.Email ?? member.MemberId;
+            table.AddRow(
+                Markup.Escape(who),
+                Markup.Escape(member.Role ?? "-"),
+                Markup.Escape(member.SeatType ?? "-"),
+                member.AddedAt is { } added ? added.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "-");
+        }
+
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine(
+            $"  {snapshot.Members.Count} member(s): "
+            + string.Join(", ", snapshot.Members
+                .GroupBy(m => string.IsNullOrWhiteSpace(m.Role) ? "(none)" : m.Role!, StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => $"{Markup.Escape(g.Key)} {g.Count()}")) + ".");
+        return 0;
+    });
+
+    var rosterCommand = new Command("roster", "Vendor member lists: who holds a seat");
+    rosterCommand.Subcommands.Add(snapshotCommand);
+    rosterCommand.Subcommands.Add(showCommand);
+    return rosterCommand;
 }
 
 static Command BuildUsersCommand(IHost host)

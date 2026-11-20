@@ -317,6 +317,25 @@ section and in `audit gemini-breakdown`, and still enter **no total or projectio
 decision to exclude them from the figures stands, only the invisibility is gone. They are
 never inside `UsageOrOverage`.
 
+### 5.3 Rosters: who holds a seat — BUILT for Claude Enterprise (2026-11-20, issue #30)
+
+Spend and usage say what people did; seat counts, idle seats and "who is near their cap" also need to know who
+*has* a seat. A **roster** is a vendor's member list, stored as dated snapshots in `MemberRosterRecords` (tenant,
+vendor, snapshot date, member id, email, name, role, seat type, added date).
+
+- **Snapshots, because the vendors keep no history.** Each run records who was on the list that day; retaking one
+  the same day replaces it, and other days are never touched. Whatever cadence the operator runs
+  `meterist roster snapshot` at is the resolution of the history.
+- **Opt-in per vendor** through `IVendorRosterSource` (`Meterist.Core.Vendors`), the same seam style as the per-user
+  and breakdown normalizers. `RosterSnapshotService` fetches, builds the dated records and stores them, with a dry
+  run. Claude Enterprise registers one (the member list works with the key already stored for spend); the ChatGPT
+  roster (#28) plugs into the same seam, which is why the table has a nullable `SeatType`.
+- **Complete or nothing.** A source must return the whole list or throw, and an empty list is refused: a partial or
+  empty snapshot would read as people having left, which would then wrongly mark seats as freed.
+- **Personal data.** Names and emails are stored and shown (operator decision) but never logged.
+- **Not yet joined to anything.** Seat counts, idle seats and spend-cap views (issues #22, #26, #29) are the
+  consumers; this issue only captures the list.
+
 ## 6. Credentials — DECIDED (2026-07-21)
 
 **Decision: DPAPI-encrypted local files for v1, behind an `ISecretStore`

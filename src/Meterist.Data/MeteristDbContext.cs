@@ -16,6 +16,8 @@ public sealed class MeteristDbContext : DbContext
 
     public DbSet<DailySpendBreakdownRecord> DailySpendBreakdownRecords => Set<DailySpendBreakdownRecord>();
 
+    public DbSet<MemberRosterRecord> MemberRosterRecords => Set<MemberRosterRecord>();
+
     public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
     public DbSet<VendorRateConfig> VendorRateConfigs => Set<VendorRateConfig>();
@@ -46,6 +48,22 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.NetSpend).HasPrecision(18, 4);
 
             entity.Property(r => r.Source).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<MemberRosterRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            // Natural key: one row per member per snapshot day per vendor per tenant. Retaking a snapshot the
+            // same day replaces it. Queries for a tenant's latest snapshot use the leading columns.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.SnapshotDate, r.MemberId }).IsUnique();
+
+            entity.Property(r => r.MemberId).HasMaxLength(256);
+            entity.Property(r => r.Email).HasMaxLength(320);
+            entity.Property(r => r.Name).HasMaxLength(256);
+            entity.Property(r => r.Role).HasMaxLength(64);
+            entity.Property(r => r.SeatType).HasMaxLength(64);
         });
 
         modelBuilder.Entity<DailySpendBreakdownRecord>(entity =>

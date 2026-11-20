@@ -340,14 +340,11 @@ expected behavior, not a data gap to investigate.
     source footnote; `audit coverage`; `extract --configured-only`, a
     non-zero exit code when a vendor fails, and the scheduled daily run
     (`scripts/RunScheduledExtraction.ps1`,
-    `scripts/Register-DailyExtractionTask.ps1`). **Sprint 1 is complete** (the
-    Gemini SKU-filter guard #34 and the Daily Usage spike #10 are merged;
-    findings are in `docs/vendor-integration-reference.md`). **Sprint 2 so far:**
-    the per-user table and repository (#16) and ChatGPT per-user storage (#17)
-    are merged, and the Claude analytics spike (#21) found the new
-    `/analytics/cost` and `/usage` endpoints match the legacy report exactly and
-    work with the existing key plus a mandatory beta header, so migrating the
-    Claude Enterprise adapter (#24) is a go. Open in Sprint 2: #18 (Claude
-    per-user storage), #19 (per-user CLI query), #35 (tax and support charges)
-    and #53 (Gemini spend by kind of charge; built, and also records tax and support as non-usage breakdown rows, in PR review). The user reviews every pull request
-    and says when to merge.
+    `scripts/Register-DailyExtractionTask.ps1`). **Sprints 1 and 2 are
+    complete and every issue in them is closed**: the ChatGPT Daily Usage API as source of record, the coverage
+    check and scheduled extraction, per-user usage storage and query for ChatGPT and Claude Enterprise, the Claude
+    migration to `/analytics/cost` (with a legacy fallback setting), the decision that tax and support are never
+    counted, and the per-kind Gemini breakdown that also records them as non-usage rows. Findings are in
+    `docs/vendor-integration-reference.md`. **Sprint 3 has begun:** the Claude Enterprise roster snapshot (#30) is
+    in review; next are the ChatGPT roster (#28), seat counts and active users (#22), and the spend-limit views
+    (#26, #29). The user reviews every pull request and says when to merge.
