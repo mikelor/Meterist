@@ -55,11 +55,12 @@ public sealed class UserUsageReporter
             {
                 // Identity and attribution come from the most recent row, so a renamed mailbox or a
                 // reclassified actor shows its current state.
-                var latest = g.OrderByDescending(r => r.Date).First();
+                var newestFirst = g.OrderByDescending(r => r.Date).ToList();
+                var latest = newestFirst[0];
                 return new UserUsageSummary(
                     g.Key,
-                    g.Select(r => r.UserEmail).FirstOrDefault(e => !string.IsNullOrWhiteSpace(e)) ?? latest.UserEmail,
-                    g.OrderByDescending(r => r.Date).Select(r => r.UserName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)),
+                    newestFirst.Select(r => r.UserEmail).FirstOrDefault(e => !string.IsNullOrWhiteSpace(e)),
+                    newestFirst.Select(r => r.UserName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)),
                     latest.Attribution,
                     g.Sum(r => r.Amount),
                     g.Any(r => r.Credits is not null) ? g.Sum(r => r.Credits ?? 0m) : null,

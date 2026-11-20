@@ -71,6 +71,39 @@ public class UserUsageReporterTests
         Assert.False(vendor.Users.Single(u => u.UserId == "k1").IsEstimated);
     }
 
+    [Fact]
+    public async Task Build_ARenamedMailbox_ShowsTheNewestEmail_NotTheOldest()
+    {
+        // Oldest first, as the repository returns them: the old address is the first one seen. The
+        // newest day has no email at all, so the answer is the newest address that exists.
+        var reporter = Reporter(
+            [
+                User("u1", D1, 1m, email: "old@example.test"),
+                User("u1", D2, 1m, email: "new@example.test"),
+                User("u1", new DateOnly(2026, 11, 4), 1m, email: null),
+            ],
+            [Day(D1, usage: 1m), Day(D2, usage: 1m), Day(new DateOnly(2026, 11, 4), usage: 1m)]);
+
+        var user = Assert.Single(
+            Assert.Single((await reporter.BuildAsync("t1", Period, null, TestContext.Current.CancellationToken)).Vendors).Users);
+
+        Assert.Equal("new@example.test", user.Email);
+        Assert.Equal("new@example.test", user.DisplayName);
+    }
+
+    [Fact]
+    public async Task Build_ANameBlankedOnTheNewestDay_FallsBackToTheNewestNameThatExists()
+    {
+        var reporter = Reporter(
+            [User("u1", D1, 1m, name: "Older Name"), User("u1", D2, 1m, name: null)],
+            [Day(D1, usage: 1m), Day(D2, usage: 1m)]);
+
+        var user = Assert.Single(
+            Assert.Single((await reporter.BuildAsync("t1", Period, null, TestContext.Current.CancellationToken)).Vendors).Users);
+
+        Assert.Equal("Older Name", user.Name);
+    }
+
     [Theory]
     [InlineData("Alex Example", "a@example.test", "Alex Example")]
     [InlineData(null, "a@example.test", "a@example.test")]
