@@ -147,11 +147,56 @@ not adopted.
     `period_to_date_spend`. Anthropic calls that figure informational (it can
     read `"0"` when unavailable), so treat it as a headroom signal, not a
     ledger.
-  - **Unverified:** whether `/analytics/usage` on a seat-based plan includes
-    seat-covered usage or only usage-credit usage (Anthropic says cost and
-    usage endpoints on seat-based plans "reflect usage credits only"), and
-    whether one key can carry `read:analytics`, `read:members` and
-    `read:spend_limits` together.
+  - **Live test of `/analytics/usage` and `/analytics/cost` (spike #21, 2026-11-20,
+    read-only, both tenants, one Analytics key each). Verdict: GO for migrating
+    the Claude Enterprise adapter (#24).**
+    - **Beta header and key:** the existing Analytics key (`read:analytics`) works
+      with `anthropic-beta: analytics-usage-cost-2026-08-24`. Without the header
+      the same URL returns **404 not_found_error**, so the header is mandatory,
+      not an opt-in nicety. `anthropic-version: 2023-06-01` is still sent.
+    - **Totals match the legacy `user_cost_report` exactly.** For a full closed
+      month (October) on both tenants, the new `/cost` per day equalled the
+      legacy report per day with a maximum difference of 0, both for the whole org
+      and grouped by `actor` (same row counts, same distinct users). Neither tenant
+      has enough users per bucket to hit the legacy top-100 truncation, so that
+      documented difference was not exercised.
+    - **Seat-based plan: usage counts seat-covered activity, cost does not.** One
+      tenant is seat-based: in October its cost was zero on 30 of 31 days, yet
+      `requests` was in the hundreds to thousands every day. So `/usage`
+      `requests` (and `cost.requests`, which equals it) measure activity
+      including seat-included use, while `amount` reflects usage credits only,
+      exactly as Anthropic's docs say for cost. The other tenant (usage credits)
+      had non-zero cost every day. Consequence: per-user **cost** on a seat plan is
+      near zero by design and is not a measure of use; per-user **requests** are the
+      activity signal. Reports must not read "$0" as "inactive".
+    - **`ending_at` is required with `time_bucket_width`:** confirmed, HTTP 400
+      ("`ending_at` is required when `time_bucket_width` is set so pagination stays
+      consistent across pages").
+    - **Empty buckets return no row:** confirmed. A future week returned status
+      200 with zero rows, and a 12-day window reaching into tomorrow returned 11
+      rows. The client must zero-fill (the existing daily path already does).
+    - **Earliest date:** a window starting before 2026-01-01 is a 400 naming
+      2026-01-01T00:00:00Z as the earliest.
+    - **Freshness:** the response `data_refreshed_at` was about 35 minutes old at
+      the time of the call and the current (partial) day already had rows. Anthropic
+      documents 4 to 24 hours; that was not observed in this one sample, so keep
+      treating the latest day as incomplete. A month's figures can still be revised
+      until about 7 days after it ends.
+    - **Row shape (confirmed):** `starting_at`, `ending_at`, `group`, and `cost`
+      (`currency`, `amount`, `list_amount`, `requests`) or `usage` (`uncached_input_tokens`,
+      `cache_creation`, `cache_read_input_tokens`, `output_tokens`, `total_tokens`,
+      `server_tool_use`, `requests`). With `group_by[]=actor` the actor carries
+      `type`, `user_id`, `email_address`, `name` and `deleted`, so the new endpoint
+      has the identity (name and email) that per-user reports need. Amounts are
+      cents as six-decimal strings, as before.
+    - **Differences the migration must handle:** parameter `time_bucket_width` (not
+      `bucket_width`), no default bucket width, `group_by[]` and `actor_types[]` as
+      repeated bracketed parameters, the mandatory beta header, and the
+      `email_address` field name (the legacy report used `email`). The beta label
+      means the schema can still move, so keep the legacy endpoint as a fallback
+      and cross-check rather than removing it.
+    - **Still unverified:** whether one key can carry `read:analytics`,
+      `read:members` and `read:spend_limits` together (not tested here).
 
 ### Claude API Platform (developer API — billed separately from Claude Enterprise) — IMPLEMENTED (2026-07-22)
 

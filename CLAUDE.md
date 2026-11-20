@@ -340,9 +340,14 @@ expected behavior, not a data gap to investigate.
     source footnote; `audit coverage`; `extract --configured-only`, a
     non-zero exit code when a vendor fails, and the scheduled daily run
     (`scripts/RunScheduledExtraction.ps1`,
-    `scripts/Register-DailyExtractionTask.ps1`). The Gemini SKU-filter guard (#34) is done and merged: the filter is configurable,
-    counts Agent Platform, model usage and pay-as-you-go by default, and `audit gemini-breakdown`
-    shows the split (a stored column is #53). The Daily Usage history-depth and
-    Monday-discrepancy spike (#10) is the last Sprint 1 item; its findings are in
-    `docs/vendor-integration-reference.md`. The user reviews every pull request and
-    says when to merge.
+    `scripts/Register-DailyExtractionTask.ps1`). **Sprint 1 is complete** (the
+    Gemini SKU-filter guard #34 and the Daily Usage spike #10 are merged;
+    findings are in `docs/vendor-integration-reference.md`). **Sprint 2 so far:**
+    the per-user table and repository (#16) and ChatGPT per-user storage (#17)
+    are merged, and the Claude analytics spike (#21) found the new
+    `/analytics/cost` and `/usage` endpoints match the legacy report exactly and
+    work with the existing key plus a mandatory beta header, so migrating the
+    Claude Enterprise adapter (#24) is a go. Open in Sprint 2: #18 (Claude
+    per-user storage), #19 (per-user CLI query), #35 (tax and support charges)
+    and #53 (Gemini spend by kind of charge). The user reviews every pull request
+    and says when to merge.
