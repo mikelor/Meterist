@@ -747,8 +747,9 @@ dotnet run --project src/Meterist.Cli -- roster show --tenant <your-tenant-id> -
 - **Take snapshots regularly.** Vendors keep no membership history, so a snapshot is the only record of who was on
   the list that day. Nothing schedules it yet; running it daily alongside the extraction is the intent.
 - **It stops rather than store a wrong list.** If the member list cannot be read in full (a cursor problem, a member
-  with no id) or comes back empty, the command fails with a message and stores nothing, because a partial snapshot
-  would look like people leaving. A `401`/`403` means the stored key lacks the `read:members` (or `read:org_audit`)
+  with no id) or comes back empty, or the vendor is unavailable (a rate limit, a server error, a timeout, an
+  unreadable response), the command prints a message saying so, exits non-zero and stores nothing, because a partial
+  snapshot would look like people leaving. A `401`/`403` means the stored key lacks the `read:members` (or `read:org_audit`)
   scope.
 
 The output names people, so keep it out of anything you commit; it stays in the database and under `artifacts/`.

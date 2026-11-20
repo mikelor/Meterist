@@ -28,7 +28,9 @@ public sealed class RosterSnapshotService
     }
 
     /// <exception cref="InvalidOperationException">
-    /// The vendor has no roster source, the source returned no members, or it returned the same member twice.
+    /// The vendor has no roster source, the source could not read the member list (a rejected key, a rate limit or
+    /// server error, a timeout or open circuit, a response that is not valid JSON), or it returned no members. The
+    /// original exception is kept as the inner exception. Cancellation requested by the caller is not wrapped.
     /// </exception>
     public async Task<RosterSnapshotOutcome> TakeAsync(
         string tenantId, Guid vendorId, bool dryRun, CancellationToken cancellationToken = default)
@@ -38,7 +40,23 @@ public sealed class RosterSnapshotService
                 $"{VendorCatalog.FindById(vendorId)?.DisplayName ?? vendorId.ToString()} has no member roster source, "
                 + "so there is nothing to snapshot.");
 
-        var members = await source.FetchMembersAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<VendorMember> members;
+        try
+        {
+            members = await source.FetchMembersAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException
+            && !(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
+        {
+            // Everything that can go wrong talking to the vendor (HTTP 429 or 5xx, a timeout, an open circuit
+            // breaker, a response that does not parse) is an expected failure of this command, not a crash: it is
+            // reported as one, with a non-zero exit, and nothing is stored. The type name and message say what
+            // happened; neither carries a member (the sources never put one in an exception).
+            throw new InvalidOperationException(
+                $"Could not read the {VendorCatalog.FindById(vendorId)?.DisplayName ?? "vendor"} member list for tenant "
+                + $"'{tenantId}': {ex.GetType().Name}: {ex.Message.TrimEnd('.')}. Nothing was stored.",
+                ex);
+        }
 
         // An organisation always has at least an owner, so an empty list is a vendor or scope problem, not a
         // roster. Storing it would replace a good snapshot taken earlier the same day with nothing, and read

@@ -59,7 +59,8 @@ public sealed class HttpClaudeMemberRosterRepository : IClaudeMemberRosterReposi
             request.Headers.Add("anthropic-version", AnthropicVersion);
             request.Headers.Add("x-api-key", apiKey);
 
-            _logger.LogDebug("Listing Claude Enterprise members: {Url}", url);
+            // Deliberately not the URL: after the first page it carries a cursor, which is a member id.
+            _logger.LogDebug("Listing Claude Enterprise members, page {Page} (limit {Limit}).", pageIndex + 1, PageLimit);
 
             using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
             ThrowIfNotSuccess(response);

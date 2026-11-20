@@ -1,5 +1,6 @@
 using Meterist.Core.Vendors;
 using Meterist.Vendors.ClaudeEnterprise;
+using Meterist.Vendors.Tests.ChatGptEnterprise;
 using Meterist.Vendors.Tests.GeminiEnterprise;
 using Microsoft.Extensions.Logging.Abstractions;
 using WireMock.RequestBuilders;
@@ -68,6 +69,40 @@ public class HttpClaudeMemberRosterRepositoryTests
 
         Assert.Equal(["u1", "u2"], members.Select(m => m.Id));
         Assert.Contains("limit=1000", server.LogEntries.Last().RequestMessage!.Url!);   // every other parameter is repeated
+    }
+
+    [Fact]
+    public async Task ListMembers_NeverLogsACursorAMemberIdOrAnyMemberField()
+    {
+        // The cursor is a member id, so a logged URL after page one would put an identifier in the log.
+        using var server = WireMockServer.Start();
+        server
+            .Given(Request.Create().WithPath(UsersPath).UsingGet().WithParam("after_id", WireMock.Matchers.MatchBehaviour.RejectOnMatch))
+            .RespondWith(Json("""
+                { "data": [ { "id": "user_FIRST", "email": "first@example.test", "name": "First Person", "role": "user" } ],
+                  "has_more": true, "last_id": "cursor_LAST_ID_SECRET" }
+                """));
+        server
+            .Given(Request.Create().WithPath(UsersPath).UsingGet().WithParam("after_id", "cursor_LAST_ID_SECRET"))
+            .RespondWith(Json("""
+                { "data": [ { "id": "user_SECOND", "email": "second@example.test", "name": "Second Person", "role": "owner" } ],
+                  "has_more": false, "last_id": "user_SECOND" }
+                """));
+        var logger = new CapturingLogger<HttpClaudeMemberRosterRepository>();
+        var repository = new HttpClaudeMemberRosterRepository(
+            new HttpClient { BaseAddress = new Uri(server.Url + "/") }, logger);
+
+        await repository.ListMembersAsync(Key, TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(logger.Entries);   // it does log, so this is not vacuous
+        var everything = string.Join("\n", logger.Entries.Select(e => e.Message));
+        foreach (var secret in new[] { "cursor_LAST_ID_SECRET", "user_FIRST", "user_SECOND", "example.test", "First Person", "Second Person", Key, "after_id" })
+        {
+            Assert.DoesNotContain(secret, everything);
+        }
+
+        Assert.Contains("page 2", everything);   // what it does say: progress, not identity
+        Assert.Contains("2 member(s)", everything);
     }
 
     [Fact]

@@ -96,17 +96,66 @@ public class RosterSnapshotServiceTests
         Assert.Contains("nothing to snapshot", ex.Message);
     }
 
-    [Fact]
-    public async Task Take_ASourceThatThrows_StoresNothing()
+    public static TheoryData<Exception> ExpectedVendorFailures() => new()
+    {
+        new HttpRequestException("Response status code does not indicate success: 429 (Too Many Requests).", null, System.Net.HttpStatusCode.TooManyRequests),
+        new HttpRequestException("Response status code does not indicate success: 503 (Service Unavailable)."),
+        new System.Text.Json.JsonException("The JSON value could not be converted. Path: $.data | LineNumber: 0."),
+        new TimeoutException("The operation timed out."),
+        new TaskCanceledException("A task was canceled (an HTTP timeout, not the caller)."),
+        new CustomResilienceException("The circuit is open."),
+    };
+
+    [Theory]
+    [MemberData(nameof(ExpectedVendorFailures))]
+    public async Task Take_AFailureTalkingToTheVendor_IsAControlledFailure_NotACrash_AndStoresNothing(Exception failure)
     {
         var repo = new FakeRepository();
-        var service = new RosterSnapshotService([new ThrowingSource(Vendor)], repo, Now);
+        var service = new RosterSnapshotService([new ThrowingSource(Vendor, failure)], repo, Now);
 
-        await Assert.ThrowsAsync<HttpRequestException>(
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.TakeAsync("t1", Vendor, false, TestContext.Current.CancellationToken));
+
+        Assert.Same(failure, ex.InnerException);
+        Assert.Contains("Could not read the Claude Enterprise member list", ex.Message);
+        Assert.Contains("'t1'", ex.Message);
+        Assert.Contains(failure.GetType().Name, ex.Message);
+        Assert.Contains("Nothing was stored", ex.Message);
+        Assert.DoesNotContain("..", ex.Message);
+        Assert.Empty(repo.Stored);
+        Assert.Equal(0, repo.Planned);
+    }
+
+    [Fact]
+    public async Task Take_ACallersOwnCancellation_IsNotWrapped()
+    {
+        using var cts = new CancellationTokenSource();
+        var repo = new FakeRepository();
+        var service = new RosterSnapshotService([new ThrowingSource(Vendor, new OperationCanceledException(cts.Token))], repo, Now);
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.TakeAsync("t1", Vendor, false, cts.Token));
 
         Assert.Empty(repo.Stored);
     }
+
+    [Fact]
+    public async Task Take_AMessageTheSourceAlreadyWroteForAnOperator_PassesThroughUnchanged()
+    {
+        // "No credential configured", "key lacks the scope" and similar are already clear; wrapping them would bury them.
+        var service = new RosterSnapshotService(
+            [new ThrowingSource(Vendor, new InvalidOperationException("No Claude Enterprise credential configured for tenant 't1'."))],
+            new FakeRepository(), Now);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.TakeAsync("t1", Vendor, false, TestContext.Current.CancellationToken));
+
+        Assert.Equal("No Claude Enterprise credential configured for tenant 't1'.", ex.Message);
+        Assert.Null(ex.InnerException);
+    }
+
+    // Stands in for a resilience-library exception (a rejected execution, an open circuit): not an HTTP or timeout type.
+    private sealed class CustomResilienceException(string message) : Exception(message);
 
     private static RosterSnapshotService Service(FakeRepository repo, IReadOnlyList<VendorMember> members) =>
         new([new FakeSource(Vendor, members)], repo, Now);
@@ -121,12 +170,12 @@ public class RosterSnapshotServiceTests
             Task.FromResult(members);
     }
 
-    private sealed class ThrowingSource(Guid vendorId) : IVendorRosterSource
+    private sealed class ThrowingSource(Guid vendorId, Exception failure) : IVendorRosterSource
     {
         public Guid VendorId => vendorId;
 
         public Task<IReadOnlyList<VendorMember>> FetchMembersAsync(string tenantId, CancellationToken cancellationToken = default) =>
-            throw new HttpRequestException("boom");
+            throw failure;
     }
 
     private sealed class FakeRepository : IMemberRosterRepository
