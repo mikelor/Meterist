@@ -347,8 +347,10 @@ database, next to the daily totals. The result line gains a count, for example
 `per-user rows: 12 inserted, 340 unchanged`, and `extract --dry-run` shows what
 it would add without writing anything. These rows hold email addresses, so they
 stay in the database and in reports under `artifacts/`; Meterist does not log
-them. Dollars use your configured credit rate, like the daily total, and a row is
-marked as estimated only when no rate is configured. If the per-user query fails
+them. Dollars use your configured credit rate, like the daily total, but they are
+marked as estimated: a per-user dollar figure derived from credits is an allocation,
+not a billed amount. Only people (actor type `ACCOUNT_USER`) are counted as people;
+any other kind of actor is stored as "unrecognized" and named in a warning. If the per-user query fails
 the extraction still succeeds on the daily totals and logs a warning; run it again
 to fill the rows in. A warning that per-user rows "do not add up" to the workspace
 total names the date and the credits, and usually means a user has since been

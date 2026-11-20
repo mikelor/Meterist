@@ -16,6 +16,13 @@ public enum UsageAttribution
 
     /// <summary>Meterist divided an aggregate figure across users; the vendor reported no per-user value.</summary>
     Allocated,
+
+    /// <summary>
+    /// The vendor reported an actor type Meterist does not recognise (or none). The usage is stored
+    /// so totals still reconcile, but it is not assumed to be a person: person-level reporting
+    /// counts <see cref="Person"/> only, and extraction warns about the type so it can be classified.
+    /// </summary>
+    Unrecognized,
 }
 
 /// <summary>
@@ -53,7 +60,9 @@ public sealed class UserDailyUsageRecord
 
     /// <summary>
     /// USD cost of the day's usage. Vendor-reported where the vendor gives a dollar figure,
-    /// otherwise derived (then <see cref="IsEstimated"/> is true).
+    /// otherwise derived, for example credits converted at a configured rate (then
+    /// <see cref="IsEstimated"/> is true: a per-user dollar figure derived from credits is not a
+    /// billed amount, even when the rate is the contracted one).
     /// </summary>
     public decimal Amount { get; init; }
 

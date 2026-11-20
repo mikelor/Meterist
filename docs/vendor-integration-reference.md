@@ -334,7 +334,12 @@ not adopted.
     - **Amount:** priced exactly like the daily total (native USD as it is, plus
       credits times the configured credit-to-USD rate), so per-user dollars add
       up to the day's `UsageOrOverage`. Only when no rate is configured does a
-      row use the vendor's own estimate, and then it is marked `IsEstimated`.
+      row use the vendor's own estimate. **Any amount that includes converted
+      credits is marked `IsEstimated`**: a per-user dollar figure derived from
+      credits is not a billed amount, even at the contracted rate. Only native USD
+      (`cost_usd`, null on both tenants' credit-billed workspaces) is
+      vendor-reported, so in practice every ChatGPT per-user row is estimated and
+      reports must say so.
     - **Requests** is the API's message count; **Credits** is stored as sent.
     - **Reconciliation:** each completed day's per-user credits are compared with
       its workspace row (tolerance 5 credits or 2%). A mismatch logs a warning
@@ -346,9 +351,11 @@ not adopted.
       no per-user rows for that run; the next run that covers the period fills
       them in.
     - Rows with no user id are skipped and counted in a warning.
-    - Not yet done: `actor.type` is stored in raw but every row is treated as a
-      person (only `ACCOUNT_USER` has been seen), and the COSTS-only fallback
-      (no `WorkspaceId`) stores no per-user rows.
+    - **Actor type:** only `ACCOUNT_USER` (the one value seen live) is stored as
+      `Person`. Any other type, or none, is stored as `Unrecognized` so totals still
+      reconcile, left out of person-level reporting, and named in a warning (type
+      names and counts only), so it gets classified rather than assumed.
+    - Not yet done: the COSTS-only fallback (no `WorkspaceId`) stores no per-user rows.
 - **Other documented surfaces (2026-11-19 research, not used yet):** the
   **Spend Controls** API under `/v1/manage/workspaces/{workspace_id}/usage_limits/`
   (scope `chatgpt.enterprise.usage_limit.read`) lists every user with

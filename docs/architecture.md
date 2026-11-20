@@ -209,12 +209,15 @@ UserDailyUsageRecord              (Meterist.Core.Models; table UserDailyUsageRec
 ├── Amount (decimal, USD)
 ├── Credits (decimal?)            — null where the vendor has no credits
 ├── Requests (long?)              — requests or messages, whichever the vendor reports
-├── IsEstimated (bool)            — true when Amount is a derived or vendor-estimated
-│                                   figure (Gemini would be an allocation; ChatGPT's
-│                                   dollars are the vendor's estimate at current rates)
-└── Attribution                   — Person | ApiKey | Allocated. Claude API Platform
-                                    is Person only for personal or service-account
-                                    keys, ApiKey for legacy workspace keys
+├── IsEstimated (bool)            — true when Amount is derived rather than vendor-
+│                                   reported: Gemini would be an allocation, and
+│                                   ChatGPT's credit-billed dollars (credits x rate)
+│                                   are estimates even at the contracted rate
+└── Attribution                   — Person | ApiKey | Allocated | Unrecognized. Claude
+                                    API Platform is Person only for personal or
+                                    service-account keys, ApiKey for legacy workspace
+                                    keys; an actor type Meterist does not know is
+                                    Unrecognized and kept out of person-level views
 ```
 
 A vendor opts in by registering an `IVendorUserUsageNormalizer`

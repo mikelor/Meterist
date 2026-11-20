@@ -8,8 +8,16 @@ namespace Meterist.Vendors.ChatGptEnterprise;
 /// Turns the per-user Daily Usage rows (<see cref="ChatGptRowSources.DailyUsageUser"/>) in a day's raw
 /// data into <see cref="UserDailyUsageRecord"/>s, priced the same way the daily total is so the two
 /// reconcile: native USD as it is, plus credits times the configured credit-to-USD rate, falling
-/// back to the vendor's own estimate only when no rate is configured (and then the row is marked
-/// <see cref="UserDailyUsageRecord.IsEstimated"/>).
+/// back to the vendor's own estimate only when no rate is configured. Any amount that includes
+/// converted credits is marked <see cref="UserDailyUsageRecord.IsEstimated"/>: per-user dollars are
+/// derived from credits, not billed per user, whether the rate is configured or the vendor's.
+/// Only native USD (<c>cost_usd</c>) is vendor-reported, and a row with credits at zero is not estimated.
+/// <para>
+/// Attribution: only the actor type <c>ACCOUNT_USER</c> (the one the API has been seen to return) is a
+/// <see cref="UsageAttribution.Person"/>. Any other type, or none, is stored as
+/// <see cref="UsageAttribution.Unrecognized"/> and reported in a warning by type name, so it is not
+/// silently counted as a person.
+/// </para>
 /// <para>
 /// Reconciliation: the per-user rows of a day should add up to that day's workspace row. The API's
 /// per-user grouping omits deleted users, so a shortfall is possible and is not an error, but it is
@@ -23,6 +31,9 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
     private const decimal CreditsToleranceAbsolute = 5m;
     private const decimal ToleranceRelative = 0.02m;
     private const int ExamplesShown = 5;
+
+    // The only actor type the API has been seen to return for a person. Compared ignoring case.
+    private const string PersonActorType = "ACCOUNT_USER";
 
     private readonly ILogger<ChatGptEnterpriseUserUsageNormalizer> _logger;
     private readonly TimeProvider _timeProvider;
@@ -43,6 +54,7 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
         var disagreements = new List<string>();
         var skippedWithoutUserId = 0;
         var warnedMissingRate = false;
+        var unrecognizedActorTypes = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
         // A day still in progress is incomplete in both groupings and would look like a disagreement.
         var today = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
@@ -69,6 +81,17 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
 
                 var (amount, estimated) = PriceOf(row, creditRate, ref warnedMissingRate, rawData.TenantId, date);
 
+                var actorType = row.TryGetValue(ChatGptDailyUsageRowFields.ActorType, out var type) ? type as string : null;
+                var attribution = string.Equals(actorType, PersonActorType, StringComparison.OrdinalIgnoreCase)
+                    ? UsageAttribution.Person
+                    : UsageAttribution.Unrecognized;
+                if (attribution == UsageAttribution.Unrecognized)
+                {
+                    // The type name is a vendor label, not personal data, so it is safe to log.
+                    var label = string.IsNullOrWhiteSpace(actorType) ? "(none)" : actorType;
+                    unrecognizedActorTypes[label] = unrecognizedActorTypes.GetValueOrDefault(label) + 1;
+                }
+
                 dayRecords.Add(new UserDailyUsageRecord
                 {
                     TenantId = rawData.TenantId,
@@ -82,7 +105,7 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
                     Credits = row[ChatGptDailyUsageRowFields.Credits] as decimal?,
                     Requests = Convert.ToInt64(row[ChatGptDailyUsageRowFields.Messages] ?? 0),
                     IsEstimated = estimated,
-                    Attribution = UsageAttribution.Person,
+                    Attribution = attribution,
                 });
             }
 
@@ -108,6 +131,16 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
                 "ChatGPT Enterprise tenant '{TenantId}': {Count} per-user Daily Usage row(s) had no user id and were "
                 + "not stored.",
                 rawData.TenantId, skippedWithoutUserId);
+        }
+
+        if (unrecognizedActorTypes.Count > 0)
+        {
+            _logger.LogWarning(
+                "ChatGPT Enterprise tenant '{TenantId}': {Count} per-user Daily Usage row(s) have an actor type other "
+                + "than {PersonType} and were stored as unrecognized, not as people: {Types}. They are left out of "
+                + "person-level reporting until the type is classified.",
+                rawData.TenantId, unrecognizedActorTypes.Values.Sum(), PersonActorType,
+                string.Join(", ", unrecognizedActorTypes.Select(kv => $"{kv.Key} x{kv.Value}")));
         }
 
         if (disagreements.Count > 0)
@@ -144,6 +177,10 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
 
         if (credits > 0m)
         {
+            // Dollars derived from credits are never a billed per-user figure, so any credit-priced
+            // amount is an estimate, whether the rate is the configured one or the vendor's.
+            estimated = true;
+
             if (creditRate is not null)
             {
                 amount += credits * creditRate.Rate;
@@ -151,13 +188,12 @@ public sealed class ChatGptEnterpriseUserUsageNormalizer : IVendorUserUsageNorma
             else if (estimatedUsd is { } estimate)
             {
                 amount += estimate;
-                estimated = true;
 
                 if (!warnedMissingRate)
                 {
                     _logger.LogWarning(
                         "No '{ModelOrSku}' VendorRateConfig found for tenant '{TenantId}' covering {Date}; per-user "
-                        + "dollars use the vendor's own estimate and are marked as estimated. Configure one via "
+                        + "dollars use the vendor's own estimate. Configure one via "
                         + "'rates set --rate-type {RateType} --model-or-sku {ModelOrSku} ...'.",
                         ChatGptRateKeys.CreditUsdModelOrSku, tenantId, date,
                         ChatGptRateKeys.CreditToUsdRateType, ChatGptRateKeys.CreditUsdModelOrSku);
