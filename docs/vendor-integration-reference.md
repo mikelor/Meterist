@@ -4,7 +4,10 @@
 four v1 vendor APIs are beta or shipped within the last ~2 months as of this
 writing; treat schemas and endpoint details as subject to change, not final.
 
-**Last verified:** 2026-07-21
+**Last verified:** 2026-07-21 for the per-vendor sections below, except where a
+dated note says otherwise. The November 2026 update immediately below was
+researched and live-tested on 2026-11-19 and supersedes any older statement
+in this document that it contradicts.
 
 ## Purpose
 
@@ -12,6 +15,39 @@ This is the single source of truth for how Meterist talks to each vendor —
 endpoints, auth, granularity, and known gaps. [`README.md`](../README.md) and
 [`CLAUDE.md`](../CLAUDE.md) carry a summary; this document is where sprint
 tickets for a specific vendor adapter should point for implementation detail.
+
+---
+
+## November 2026 update (researched and live-tested 2026-11-19)
+
+All of this came from documentation plus read-only live calls against two real
+tenants. Anything marked **unverified** rests on documentation alone.
+
+**What changed, at a glance**
+
+| Item | Status | Date | Consequence for Meterist |
+|---|---|---|---|
+| Anthropic Usage and Cost Analytics API (`/v1/organizations/analytics/usage` and `/cost`) | New, beta (`anthropic-beta: analytics-usage-cost-2026-08-24`) | 2026-10-29 | Per-user requests, tokens and cost, for Enterprise and Console, grouped by up to five dimensions. Same Analytics key (Enterprise) / Admin key (Console) already stored |
+| Claude Enterprise `user_cost_report` and Claude API Platform `cost_report` | Reclassified "legacy but still supported", no sunset date announced | 2026-10-29 | No forced migration. New dimensions land only on the new endpoints; plan a migration (Sprint 3) |
+| "Claude API Platform has no per-human-user concept" | Out of date where personal or service-account keys are used | 2026-08-27 | Attribution is per person for those keys; workspace keys still attribute only to the key |
+| ChatGPT Unified Daily Usage API | GA | 2026-09-17 | Implemented as the ChatGPT source of record (see the ChatGPT section) |
+| ChatGPT admin API reference | Public OpenAPI spec (`chatgpt.com/public/admin/api-reference/openapi.json`, "OpenAI Programmatic Admin Platform"), versioned, roughly 40 revisions since July | by 2026-11-18 | The reference is no longer login-gated; the spec carries a changelog worth polling |
+| ChatGPT `COSTS` billing lines | `cost.unit` can be `CREDITS` or `USD`; never add the two | documented from 2026-07-16 | The normalizer already applies the credit rate only to `CREDITS` lines. Every stored line for both tenants is `CREDITS` |
+| ChatGPT Codex per-user daily usage endpoint | Deprecated, retires 2026-12-15 | 2026-12-15 | Meterist does not call it |
+| Gemini Enterprise quota and pay-as-you-go model | Per-feature daily quotas pooled per edition, overage pay-as-you-go; customers moved to new overage billing controls | from 2026-08-17 | See the SKU-filter finding in the Gemini section |
+| Gemini Code Assist bundled with Gemini Enterprise Standard | Ends for existing subscriptions | 2027-03-31 | Expect seat-value changes in affected tenants |
+
+**No vendor exposes contract-level balances.** Anthropic documents no
+organization credit balance, prepaid commitment or invoice endpoint; OpenAI's
+spec contains no credit pool size, grant, balance or expiration; Google
+exposes no per-user quota consumption or per-user overage dollars. Pool and
+grant tracking stays a manually entered configuration (see the backlog).
+
+**MCP adds no data.** Every MCP server inspected wraps an API Meterist already
+reaches, with tighter limits. **OpenTelemetry** is the only channel carrying
+data the admin APIs lack (per-request events, active time, tool decisions),
+but it is push-only, estimate-grade, and limited to agent and CLI surfaces;
+not adopted.
 
 ---
 
@@ -81,6 +117,41 @@ tickets for a specific vendor adapter should point for implementation detail.
   separate `read:spend_limits`/`write:spend_limits` scopes): reads/sets
   per-member spend caps — a secondary signal, not used by this adapter.
 - **Compliance API** exists (audit/governance events) — confirmed irrelevant to spend.
+- **Newer endpoints (2026-10-29 research, not yet used by the adapter):**
+  - **Legacy designation.** `user_cost_report` is now "legacy but still
+    supported" with no sunset date. Its replacement is `GET
+    /v1/organizations/analytics/cost` (and `/usage` for tokens plus a
+    `requests` count), which accepts up to five `group_by[]` dimensions
+    (`actor`, `product`, `model`, `service_tier`, `rbac_group_id`,
+    `session_id`, `workspace_id`, `api_key_id`, ...). Same 31-day span cap,
+    2026-01-01 floor, 365-day lookback and cents-denominated amounts, but
+    `time_bucket_width` has no default (`ending_at` becomes mandatory once it
+    is set) and **buckets with no usage produce no rows**, so a client must
+    zero-fill. The legacy reports silently drop groups past the top 100 per
+    bucket; the new API returns every group, so its totals can run higher.
+    Freshness is slower: typically within 4 hours, up to 24.
+  - **Engagement endpoints** (explicitly not legacy):
+    `/analytics/summaries` (daily/weekly/monthly active users,
+    `assigned_seat_count`, pending invites, adoption rates; up to 366 days)
+    and `/analytics/users` (per-user activity by product: message counts,
+    Claude Code sessions, commits, pull requests, Cowork and Office metrics,
+    `last_activity_date`). Next-day snapshot, around 13:00 UTC.
+    `assigned_seat_count` gives seat-count drift detection a vendor-reported
+    input.
+  - **Roster:** the Admin API user-management endpoints (out of beta
+    2026-08-19) return members, invites and RBAC groups. Joined to
+    `last_activity_date` they identify idle seats.
+  - **Spend Limits API** (needs usage credits enabled and a key with
+    `read:spend_limits`): `GET /v1/organizations/spend_limits/effective`
+    returns each member's effective monthly limit, where it comes from, and
+    `period_to_date_spend`. Anthropic calls that figure informational (it can
+    read `"0"` when unavailable), so treat it as a headroom signal, not a
+    ledger.
+  - **Unverified:** whether `/analytics/usage` on a seat-based plan includes
+    seat-covered usage or only usage-credit usage (Anthropic says cost and
+    usage endpoints on seat-based plans "reflect usage credits only"), and
+    whether one key can carry `read:analytics`, `read:members` and
+    `read:spend_limits` together.
 
 ### Claude API Platform (developer API — billed separately from Claude Enterprise) — IMPLEMENTED (2026-07-22)
 
@@ -135,10 +206,18 @@ tickets for a specific vendor adapter should point for implementation detail.
 - **Overage:** not applicable — this product is pure usage-based; the
   entire `cost_report` figure *is* the spend. `SeatFee` is always `0` for
   this vendor; the whole daily total lands in `UsageOrOverage`.
-- **Per-user:** not available natively — granularity is by `workspace_id`/
-  `api_key_id`, a developer-API construct, not a named human user. If
-  per-individual comparison is wanted for this vendor, it would require a
-  1:1 API-key-to-person convention, not a direct query.
+- **Per-user:** *corrected 2026-11-19.* The original finding here, that there
+  is no per-human concept at all, is out of date. Since 2026-08-27 personal
+  keys and service-account keys act as a user or service account, and the new
+  `/analytics/*` endpoints group Console usage by `actor`. Legacy workspace
+  keys still attribute only to the key (it appears as both `actor` and
+  `api_key_id`). So per-person attribution exists exactly where a tenant has
+  adopted personal keys or Console-authenticated Claude Code; otherwise it
+  would still need a 1:1 API-key-to-person convention. The adapter does not
+  read any of this yet (it uses `cost_report`, now designated legacy).
+- **Legacy designation:** `/v1/organizations/cost_report` was reclassified
+  "legacy but still supported" on 2026-10-29, no sunset date. It keeps roughly
+  5-minute freshness; the new `/analytics/cost` is the migration target.
 - **Current rate card** (verified live at
   `platform.claude.com/docs/en/about-claude/pricing`):
 
@@ -157,10 +236,60 @@ tickets for a specific vendor adapter should point for implementation detail.
 
 ### ChatGPT Enterprise
 
+- **Daily Usage API — the source of record, IMPLEMENTED (2026-11).** `GET
+  https://api.chatgpt.com/v1/analytics/workspaces/{workspace_id}/usage`,
+  the Unified Daily Usage API (GA 2026-09-17), queried with
+  `group=workspace`, `start_time`/`end_time` as Unix seconds, and
+  `limit=1000` (paginated by `next_page`). It needs the tenant's workspace
+  ID (stored as the optional `WorkspaceId` in the ChatGPT credential) and an
+  Admin key with **Enterprise analytics API: Read** (scope
+  `enterprise.analytics.usage.read`). A key used against another tenant's
+  workspace returns HTTP 403. Each row is one user on one day: `start_time`,
+  `end_time`, `user_id`, `actor`, `totals` (`chats`, `messages`, `credits`,
+  `cost_usd`, `estimated_cost_usd`, token counts), and `clients[]` /
+  `models[]` breakdowns. A row exists only for a user-day with usage, so
+  active users are derived by counting distinct users.
+  - **Why it is the source of record:** it is a query API, not an expiring
+    file export, so it sidesteps the 29-day `COSTS` retention that lost data
+    (see the retention notes below). In live tests its history reached back to
+    April and May 2026 for the two tenants, months beyond `COSTS`, which let
+    the days lost to the overwrite bug and to a missed-run gap be recovered.
+    Its exact history depth is still undocumented (issue #10).
+  - **Money semantics:** `credits` is credit-priced usage; `cost_usd` is
+    natively USD-priced usage (`null` on every row for credit-billed
+    workspaces, which both tenants are); `estimated_cost_usd` estimates the
+    credit-priced portion at the workspace's current overage rate. A
+    contracted rate still comes from Meterist's rate configuration.
+  - **How the adapter uses it:** with a `WorkspaceId`, `ChatGptEnterpriseSpendExtractor`
+    uses the Daily Usage API for the usage figures and the `COSTS` export as a
+    best-effort cross-check; a Daily Usage failure fails the extraction loudly
+    rather than falling back silently. Without a `WorkspaceId` it falls back to
+    `COSTS` alone. Each stored day records which source supplied it
+    (`DailySpendRecords.Source`).
+  - **Known differences to settle (issue #10):** `COSTS` counts slightly more
+    than Daily Usage on some days (under half a percent in total for one
+    tenant, mostly Mondays); and one tenant's May credits from the API
+    disagree substantially with the console CSV downloaded in July, so treat
+    anything before June as unconfirmed.
+  - **Not yet stored:** the per-user rows are not persisted yet; the adapter
+    keeps the daily total. Per-user storage is Sprint 2.
+- **Other documented surfaces (2026-11-19 research, not used yet):** the
+  **Spend Controls** API under `/v1/manage/workspaces/{workspace_id}/usage_limits/`
+  (scope `chatgpt.enterprise.usage_limit.read`) lists every user with
+  `current_month_usage`, `last_month_usage`, the effective monthly limit and
+  its source, and `seat_type`; it is month-to-date only and has no pool size or
+  balance. `GET /v1/manage/workspaces/{workspace_id}/users` (added 2026-08-21)
+  returns active members with `role` and `seat_type`, but **no last-active
+  field**, so idle seats are computed as roster minus users with Daily Usage
+  rows. Other Compliance Logs event types (`CODEX_TURN`, `CONVERSATION_MESSAGE`,
+  and others) exist; `CONVERSATION_MESSAGE` exposes message content and is not
+  needed for spend. Availability of each endpoint is per workspace and plan,
+  so confirm per tenant.
 - **⚠️ Schema spiked 2026-07-22 against the real, authenticated OpenAI
   Programmatic Admin Platform reference** (`chatgpt.com/admin/api-reference`,
-  v2.5.3 as of that date — this page 403s without an active admin session,
-  which is why it wasn't visible in the 2026-07-21 research pass). The
+  v2.5.3 as of that date — it was login-gated then, which is why it wasn't
+  visible in the 2026-07-21 research pass; **as of 2026-11-18 the same
+  reference is public as an OpenAPI spec**, see the November 2026 update). The
   marketing "unified Cost API" turns out to be a `COSTS` event type inside
   the **Compliance Logs Platform** (immutable JSONL file export), not a
   simple REST reporting endpoint — see below for the concrete shape. Not yet
@@ -246,6 +375,12 @@ tickets for a specific vendor adapter should point for implementation detail.
     replace an existing `DailySpendRecord` with a *lower* value — only ever
     increase it — as a second safeguard layered on top of the
     `EffectiveStart` gap-fill.
+    **Resolved 2026-11:** the never-lower rule was implemented (with a
+    0.005 noise tolerance), and the Daily Usage API replaced `COSTS` as the
+    source of record, so the erosion no longer reaches the stored figures.
+    A multi-week extraction gap longer than the window still loses `COSTS`
+    data, which is what `audit coverage` and the scheduled daily run exist to
+    prevent.
 - **Latency:** OpenAI states 3–5 hours for `COSTS` specifically (other log
   types target a p99 <30min SLA — costs are explicitly slower). Events use
   an "at least once" contract — **de-duplicate on `event_id`** before
@@ -263,9 +398,13 @@ tickets for a specific vendor adapter should point for implementation detail.
   `user_id`, `email`, `name`, `groups[]` (workspace group id/name), and
   optionally `agent` (Workspace Agent id/name) when the usage came from an
   agent rather than a direct chat.
-- **⚠️ Dollar cost — `estimated_cost_usd` does NOT reliably appear, corrected
-  2026-07-22 against a real zelleri pull:** a real row (org
-  `org-QfdtNaipyr41iIOkKRw3fa7y`, 2026-07-13) had four `billing[]` entries,
+- **⚠️ Dollar cost — `estimated_cost_usd` did NOT reliably appear in July,
+  corrected 2026-07-22 against a real pull. *Superseded 2026-11-19: the field
+  is now populated on every credit line since August, and its implied rate
+  exactly matched the configured credit-to-USD rate for both tenants, so the
+  configured rate is now only a fallback.* The normalizer still prefers the
+  vendor estimate when present and applies the configured rate only to
+  `CREDITS` lines. The July observation:** a real row (2026-07-13) had four `billing[]` entries,
   all `cost.unit = "CREDITS"` (values like `3.3408`, `6.09925`), and **none**
   carried `estimated_cost_usd` — despite the doc's claim that it's
   "populated only when the SKU has a cost in CREDITS" (i.e., exactly this
@@ -364,11 +503,13 @@ tickets for a specific vendor adapter should point for implementation detail.
   developer-platform Admin API — different product (api.openai.com token
   spend, project-scoped), confirmed to NOT cover ChatGPT/Codex workspace
   credits.
-- A separate **Spend Controls** surface (`https://api.chatgpt.com/v1/usage`,
-  scopes `chatgpt.enterprise.usage_limit.read`/`.write`) manages/reads
-  monthly hard-cap limits at workspace/group/user level — write access,
-  useful for a possible future "set spend alerts from Meterist" feature, but
-  out of scope for the read-only extraction this tool needs today.
+- A separate **Spend Controls** surface (scopes
+  `chatgpt.enterprise.usage_limit.read`/`.write`) manages and reads monthly
+  hard-cap limits at workspace/group/user level. The read side is described
+  under "Other documented surfaces" above (the path given in the July notes,
+  `/v1/usage`, was superseded by `/v1/manage/workspaces/{workspace_id}/usage_limits/`).
+  Write access would suit a possible future "set spend alerts from Meterist"
+  feature but is out of scope for the read-only extraction this tool needs.
 
 ### Gemini Enterprise
 
@@ -417,6 +558,45 @@ tickets for a specific vendor adapter should point for implementation detail.
 - **Seat/license counts:** Discovery Engine API confirmed — subscription-details
   GET plus `distributeLicenseConfig`/`retractLicenseConfig`, callable via
   service account. Response includes `licenseCount`.
+- **Billing model change (2026-08-17) and SKU-filter finding (live-tested
+  2026-11-19).** Gemini Enterprise now runs on per-feature daily quotas pooled
+  per edition (for example 160 Assistant queries per user per day on
+  Standard, 200 on Plus), with usage above the pool billed pay-as-you-go,
+  Claude models billed only pay-as-you-go, a no-license pay-as-you-go edition
+  (GA 2026-08-01), monthly spend limits, and prepaid credits for self-serve
+  accounts (GA 2026-11-05). A `SELECT DISTINCT service.description,
+  sku.description` over each tenant's export since 2026-07-01 found: the
+  **only Gemini Enterprise charge for either tenant is the subscription SKU**,
+  which the current filter captures, and no overage SKU has posted since
+  July. One tenant has `Vertex AI | Agent Platform Compute` and `Agent
+  Platform Memory` rows since 2026-09-11 (the Agent Gateway / Memory Bank
+  family) at a negligible total, which sit **outside** the filter. The export
+  also contains `Invoice | Tax` for both tenants and `Support | ...` fees for
+  one, which Meterist leaves out by design, so Meterist totals will not match
+  the Google invoice until that is decided (issue #35). Above-quota and
+  Claude-model SKUs have never been observed, so the filter should be guarded
+  so a new Enterprise-related SKU is noticed rather than silently dropped
+  (issue #34).
+- **Newer per-user and licence paths (documented 2026-07 to 2026-11, not
+  used yet):**
+  - A Cloud Logging **log sink** to BigQuery (Google blog, 2026-07-15) lands
+    the `discoveryengine.googleapis.com` user-activity log with the user
+    identity in `useriamprincipal`; it is the realistic source of per-user
+    request counts. Its column schema is **unverified**, and setting it up
+    creates a sink in the client's cloud project, which needs the client's
+    agreement (issue #36).
+  - `analytics:exportMetrics` (v1alpha) writes the last 30 days of aggregate
+    adoption and seat metrics to a BigQuery table; quota is 5 calls per day
+    per project and each export covers a rolling 30 days, so it must be called
+    daily and accumulated, the same hazard as `COSTS`.
+  - `userStores.userLicenses.list` (GA v1) enumerates per-user licence records
+    filterable by `licenseAssignmentState` (`ASSIGNED`, `NO_LICENSE`,
+    `NO_LICENSE_ATTEMPTED_LOGIN`); joined to the activity table it yields
+    licensed-but-inactive users and an unmet-demand signal. Whether the
+    object carries a last-login field is unverified.
+  - Per-user Gemini *dollars* remain unavailable from any documented source:
+    no billing export schema has a user column, and per-user quota counters
+    are internal.
 - **New SKU lines** confirmed on Google's own pricing page: **Agent
   Gateway** billing started **Jul 13, 2026** ($0.085/vCPU-hour, billed as
   Agent Compute); **Memory Bank/Sessions** billing starts **Sep 1, 2026**
@@ -429,23 +609,25 @@ tickets for a specific vendor adapter should point for implementation detail.
 | Vendor | Overage extractable? | Per-user usage? | Per-user $ cost? |
 |---|---|---|---|
 | Claude Enterprise (seat-based) | Yes, but only if tenant has "usage credits" enabled — otherwise no overage concept exists | Yes | Yes (native) |
-| Claude API Platform | N/A — no seat/overage concept, it's all usage-priced | No (workspace/API-key granularity only) | No |
-| ChatGPT Enterprise | Partial — raw credits via API now; pool size/overage rate still console/contract-only | Yes | Yes (via Cost API) |
+| Claude API Platform | N/A — no seat/overage concept, it's all usage-priced | Only where personal or service-account keys are used (otherwise workspace/API-key granularity) | Same: per actor via the new analytics endpoints, per key otherwise |
+| ChatGPT Enterprise | Partial — credits via the Daily Usage API; pool size/overage rate still console/contract-only | Yes (Daily Usage API, per user per day) | Credits natively, dollars via the vendor estimate or the configured rate |
 | Gemini Enterprise | Yes, at aggregate SKU level via BigQuery | Yes (separate telemetry path, permission-gated) | No — derived/allocated only |
 
 **Implication:** per-employee spend comparison is cleanly supportable today
 for Claude Enterprise and ChatGPT Enterprise, partially for Gemini (usage
 counts real, cost estimated), and not meaningful for Claude API Platform.
 See the Product Design Document's Future Features section for how this
-should be sequenced.
+should be sequenced. *Updated 2026-11-19:* per-user data is now documented for
+Claude (both products, via the analytics endpoints) and ChatGPT (Daily Usage);
+none of it is stored per user yet (Sprint 2).
 
 ## Per-Tenant Credential Types Required (v1 vendors)
 
 | Vendor | Credential type | Who provisions it | Notes |
 |---|---|---|---|
-| Claude Enterprise | Analytics API key | Org primary owner only | `read:analytics` scope |
+| Claude Enterprise | Analytics API key | Org primary owner only | `read:analytics` scope. Roster and spend-limit reads would need `read:members` / `read:spend_limits` (unverified whether one key can hold all three) |
 | Claude API Platform | Admin API key | Org admin | Separate key from Analytics API |
-| ChatGPT Enterprise | Workspace Admin key | Workspace owner/admin | Global Admin Console → Credentials |
+| ChatGPT Enterprise | Workspace Admin key plus the organization ID and, for the Daily Usage API, the workspace ID | Workspace owner/admin | Global Admin Console → Credentials. Scopes: Compliance logging platform → Costs (Read), and Enterprise analytics API (Read) for Daily Usage |
 | Gemini Enterprise | GCP service account (JSON key or workload identity) | GCP project owner/IAM admin | Needs BigQuery IAM roles; billing export enabled once per billing account |
 
 Four distinct credential *shapes* per tenant, not one uniform type — the

@@ -1,10 +1,30 @@
 # Client Spend & Benchmark Report — how it's built
 
-This documents the process behind `artifacts/client-spend-benchmark-report.html`
-(and any future reports like it), since the populated report itself is
-**intentionally excluded from version control** — see the privacy rule below.
-Use this doc to regenerate or extend the report in a future session instead of
-reverse-engineering an old copy or, worse, checking one in.
+This documents the Client Spend & Benchmark Report: what it contains, how it is
+generated, and the design conventions it follows. The report is produced by the
+`report generate` command from the data Meterist has already extracted; the
+populated HTML is **intentionally excluded from version control** — see the
+privacy rule below.
+
+## Generating a report
+
+```powershell
+dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --tenant <another-tenant-id> --from 2026-07-01 --to 2026-11-18 --out artifacts/<name>.html
+```
+
+- `--tenant` is repeatable; each tenant becomes a column or row group in the report.
+- `--from` / `--to` are inclusive. `--out` defaults to
+  `artifacts/client-spend-benchmark-report.html`, and the folder is created if
+  needed. Use a dated file name so earlier reports are kept for comparison.
+- **`report generate` only reads the database; it never calls a vendor.** Run
+  `extract` first (see the [user guide](user-guide.md)) or the report reflects
+  whatever was last stored. Before trusting a report, run
+  `audit coverage` over the same window: a missing day on a seat-priced vendor
+  silently understates the totals.
+- The aggregation lives in `Meterist.Core.Reporting` (`ReportDataAggregator`),
+  and the HTML is rendered by `ClientBenchmarkReportRenderer`. All figures,
+  including the weekly buckets and projections, are computed in code, not by
+  hand.
 
 ## Privacy rule — read this first
 
@@ -53,14 +73,23 @@ bundled into one page:
    Enterprise's subscription fee arrives pre-priced from the BigQuery
    billing export rather than being computed from a configured
    `VendorRateConfig` row — both show `—` by design, not a data gap.
-7. **Audit & reconciliation status** — per vendor, how the numbers were
+7. **Weekly spend by vendor** — per tenant, Wednesday-to-Tuesday weekly
+   buckets with the seat-fee and usage split. A trailing week that hasn't
+   fully elapsed yet is marked with an asterisk.
+8. **Annualized cost projection** — per tenant and vendor, three scenarios
+   (flat, trend-adjusted, latest-week annualized) computed from the weeks
+   that end inside the report period. The trailing partial week is left out,
+   as is any ChatGPT Enterprise week with missing days (see the footnote
+   rules below). A report that starts midweek still counts its leading
+   partial week for every vendor; start reports on a Wednesday to avoid that.
+9. **Audit & reconciliation status** — per vendor, how the numbers were
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the
    planned `meterist audit` command (insight #9).
-8. **Footnote** — methodology and caveats: what "Gross Spend" means, why
+10. **Footnote** — methodology and caveats: what "Gross Spend" means, why
    date ranges can differ by vendor within a tenant, which vendors are
-   excluded and why (e.g., Claude Enterprise pending a live credential),
-   and any zero-activity vendor explained (new account vs. missing pull).
+   excluded and why, and any zero-activity vendor explained (new account vs.
+   missing pull).
    Two ChatGPT Enterprise notes are built from the data rather than fixed
    text: how many days each tenant has from the Daily Usage API versus the
    `COSTS` export (from `DailySpendRecords.Source`), and which weeks, if any,
@@ -73,8 +102,11 @@ bundled into one page:
 ## Data sourcing
 
 The report is built from Meterist's own SQLite store
-(`%LOCALAPPDATA%\Meterist\meterist.db`), specifically `DailySpendRecords`.
-Per-tenant aggregate query used to populate it:
+(`%LOCALAPPDATA%\Meterist\meterist.db`), specifically `DailySpendRecords`
+and, for the rate card, `VendorRateConfigs`. The queries below are what the
+aggregator is equivalent to. They are kept as a way to **spot-check a report
+against the database**, not as a process to follow by hand. Per-tenant
+aggregate:
 
 ```sql
 SELECT TenantId, VendorId, COUNT(*), MIN(Date), MAX(Date),
@@ -145,12 +177,15 @@ re-deriving a design plan from scratch each time.
 
 ## Regeneration checklist
 
-1. Confirm which tenants/vendors and date range to cover.
-2. Run the aggregate query above per tenant — via the user's own terminal
-   if a sandboxed read seems unreliable (see tooling note above).
-3. Compute vendor mix %, a concentration risk flag, and look for a genuine
-   cross-tenant callout worth headlining (don't manufacture one).
-4. Rebuild `artifacts/<name>.html` following the section list and design
-   tokens above. Reuse the existing file's CSS as a starting point rather
-   than rewriting the design system from scratch.
-5. Stop there — do not stage or commit the populated file.
+1. Confirm which tenants and date range to cover.
+2. Extract through the end of the range (`extract`, or the scheduled run
+   described in the user guide).
+3. Run `audit coverage` for the same tenants and range, and resolve any gaps
+   on seat-priced vendors before generating.
+4. Run `report generate` with a dated `--out` file.
+5. Spot-check a few figures against the aggregate query above, and compare
+   against the previous report for large unexplained changes.
+6. Stop there — do not stage or commit the populated file.
+
+Changing the report's layout or design belongs in `ClientBenchmarkReportRenderer`
+(and its tests), following the design system above.
