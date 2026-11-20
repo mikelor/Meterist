@@ -142,13 +142,26 @@ public sealed class HttpClaudeAnalyticsCostReportRepository : IClaudeAnalyticsCo
                 });
             }
 
-            if (!report.HasMore || report.NextPage is null)
+            if (!report.HasMore)
             {
-                break;
+                return;
+            }
+
+            // has_more with no usable cursor would end the read early and look like a smaller month,
+            // so it is an error, not a quiet stop.
+            if (string.IsNullOrWhiteSpace(report.NextPage))
+            {
+                throw new InvalidOperationException(
+                    "Claude Enterprise Analytics user_cost_report reported has_more but gave a missing or blank "
+                    + "next_page cursor; refusing to return a partial result.");
             }
 
             page = report.NextPage;
         }
+
+        throw new InvalidOperationException(
+            $"Claude Enterprise Analytics user_cost_report was still paginating after {MaxPagesPerWindow} pages "
+            + "for one window; refusing to return a partial result.");
     }
 
     private static decimal ParseAmountCentsToDollars(string? amount) =>

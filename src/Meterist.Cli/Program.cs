@@ -67,10 +67,23 @@ builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReport
 });
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeApiPlatformSpendNormalizer>();
 
-builder.Services.AddHttpClient<IClaudeAnalyticsCostReportRepository, HttpClaudeAnalyticsCostReportRepository>(client =>
+// Claude Enterprise cost comes from the newer /analytics/cost endpoint by default, with the legacy
+// user_cost_report behind Meterist:ClaudeEnterprise:UseLegacyCostReport. Both typed clients are
+// registered and one is chosen from the setting.
+builder.Services.Configure<ClaudeEnterpriseOptions>(
+    builder.Configuration.GetSection(ClaudeEnterpriseOptions.ConfigurationSection));
+builder.Services.AddHttpClient<HttpClaudeAnalyticsCostReportRepository>(client =>
 {
     client.BaseAddress = new Uri("https://api.anthropic.com/");
 });
+builder.Services.AddHttpClient<HttpClaudeAnalyticsCostRepository>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com/");
+});
+builder.Services.AddTransient<IClaudeAnalyticsCostReportRepository>(sp =>
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ClaudeEnterpriseOptions>>().Value.UseLegacyCostReport
+        ? sp.GetRequiredService<HttpClaudeAnalyticsCostReportRepository>()
+        : sp.GetRequiredService<HttpClaudeAnalyticsCostRepository>());
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNormalizer>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();

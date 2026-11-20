@@ -53,8 +53,28 @@ not adopted.
 
 ## v1 Vendors (confirmed in scope)
 
-### Claude Enterprise (seat-based — Chat/Code/Cowork) — IMPLEMENTED (2026-07-22)
+### Claude Enterprise (seat-based — Chat/Code/Cowork) — IMPLEMENTED (2026-07-22), MIGRATED to `/analytics/cost` (2026-11-20)
 
+- **Current source (issue #24).** `HttpClaudeAnalyticsCostRepository` reads
+  `GET /v1/organizations/analytics/cost` with `anthropic-beta: analytics-usage-cost-2026-08-24`,
+  `time_bucket_width=1d`, `group_by[]=actor&group_by[]=product`, an explicit
+  `ending_at`, 31-day windows and cursor pagination. It requests **every actor**,
+  not only people, so the daily total counts all cost; each row keeps the actor
+  type (`user_actor`, `service_account_actor`, `api_actor`, `federated_actor`).
+  Rows carry `product`, `requests` (from `cost.requests`, which the spike found
+  equal to `/usage` `requests`, so no second API call) and the actor's
+  `email_address` and `name`. The legacy `user_cost_report` client remains behind
+  `Meterist:ClaudeEnterprise:UseLegacyCostReport`, off by default; a 404 from the
+  new endpoint says so and names the setting. Pagination fails loudly on a blank or
+  repeated cursor in both clients rather than returning a partial month.
+- **Verified end to end 2026-11-20:** a dry run over 50 days on both tenants,
+  against figures first stored from the legacy report, reported every
+  previously stored day unchanged (49 of 49 on each) plus the one new day; the
+  legacy fallback returned the same. Row counts differ by design (the new
+  grouping adds product), the totals do not.
+- **Not done here:** per-user storage (#18) will turn these raw rows into
+  `UserDailyUsageRecords`; the stored daily record is unchanged. `Source` is not
+  set for this vendor (both endpoints agree, so there is nothing to disclose).
 - **API:** Claude Enterprise Analytics API, verified 2026-07-22 against the
   real public reference (`platform.claude.com/docs/en/api/admin/analytics`
   and `.../manage-claude/analytics-api`, both publicly fetchable, same as
