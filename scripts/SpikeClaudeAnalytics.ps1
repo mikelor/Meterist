@@ -7,11 +7,31 @@
 
 .EXAMPLE
     ./scripts/SpikeClaudeAnalytics.ps1 -Tenant <tenant> -Start 2026-10-01 -EndExclusive 2026-11-01 -Out claude-probe.json
-    Reads the Analytics API key from env/<tenant>-claude-enterprise.txt (never pass it on the command line).
-#>
-param([string]$Tenant, [string]$Start = '2026-10-01', [string]$EndExclusive = '2026-11-01', [string]$Out)
+    Reads the Analytics API key from <repo>/env/<tenant>-claude-enterprise.txt, found relative to this
+    script so it works from any checkout. Pass -KeyFile to read it from somewhere else. Never pass the key
+    itself on the command line.
 
-$key = (Get-Content "D:\repos\meterist\env\$Tenant-claude-enterprise.txt" -Raw).Trim()
+    A page that cannot be trusted to be complete (has_more with no usable cursor, a cursor that repeats,
+    or more pages than the safety limit) stops the script with an error. It never reports partial rows
+    as a successful result, because a comparison built on them could support a false conclusion.
+#>
+param(
+    [Parameter(Mandatory)][string]$Tenant,
+    [string]$Start = '2026-10-01',
+    [string]$EndExclusive = '2026-11-01',
+    [Parameter(Mandatory)][string]$Out,
+    [string]$KeyFile
+)
+
+$ErrorActionPreference = 'Stop'
+
+if (-not $KeyFile) {
+    $KeyFile = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'env') "$Tenant-claude-enterprise.txt"
+}
+if (-not (Test-Path -LiteralPath $KeyFile)) {
+    throw "Analytics key file not found: $KeyFile. Put the key in env/$Tenant-claude-enterprise.txt or pass -KeyFile."
+}
+$key = (Get-Content -LiteralPath $KeyFile -Raw).Trim()
 $base = 'https://api.anthropic.com/v1/organizations/analytics'
 $beta = 'analytics-usage-cost-2026-08-24'
 
@@ -24,17 +44,34 @@ function Call([string]$path, [string]$query, [bool]$useBeta) {
     [pscustomobject]@{ Status = [int]$r.StatusCode; Json = $json; Raw = $r.Content }
 }
 
+$MaxPages = 100
+
+# Returns every row, or a non-200 status with no rows. It never returns Status 200 with a partial result:
+# an incomplete read throws, so the numbers built on it cannot quietly support a wrong conclusion.
 function GetAll([string]$path, [string]$query, [bool]$useBeta) {
-    $rows = @(); $page = $null; $n = 0; $first = $null; $refreshed = $null
-    do {
+    $rows = @(); $page = $null; $refreshed = $null
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+    for ($n = 0; $n -lt $MaxPages; $n++) {
         $q = if ($page) { "$query&page=$([uri]::EscapeDataString($page))" } else { $query }
         $r = Call $path $q $useBeta
         if ($r.Status -ne 200) { return [pscustomobject]@{ Status = $r.Status; Rows = @(); Raw = $r.Raw; Refreshed = $null } }
-        $rows += $r.Json.data; $n++
+        if ($null -eq $r.Json) { throw "GetAll ${path}: the response was not valid JSON, so the result cannot be trusted." }
+
+        $rows += $r.Json.data
         $refreshed = $r.Json.data_refreshed_at
-        $page = if ($r.Json.has_more) { $r.Json.next_page } else { $null }
-    } while ($page -and $n -lt 100)
-    [pscustomobject]@{ Status = 200; Rows = $rows; Raw = $null; Refreshed = $refreshed }
+
+        if (-not $r.Json.has_more) {
+            return [pscustomobject]@{ Status = 200; Rows = $rows; Raw = $null; Refreshed = $refreshed }
+        }
+        if ([string]::IsNullOrWhiteSpace($r.Json.next_page)) {
+            throw "GetAll ${path}: the API reported has_more but gave no usable next_page cursor; refusing to return $($rows.Count) partial row(s)."
+        }
+        if (-not $seen.Add([string]$r.Json.next_page)) {
+            throw "GetAll ${path}: the API returned a next_page cursor it had already returned; refusing to loop or return partial data."
+        }
+        $page = [string]$r.Json.next_page
+    }
+    throw "GetAll ${path}: still paginating after $MaxPages pages; refusing to return $($rows.Count) partial row(s)."
 }
 
 $s = "$($Start)T00:00:00Z"; $e = "$($EndExclusive)T00:00:00Z"
