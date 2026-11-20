@@ -61,6 +61,14 @@ bundled into one page:
    date ranges can differ by vendor within a tenant, which vendors are
    excluded and why (e.g., Claude Enterprise pending a live credential),
    and any zero-activity vendor explained (new account vs. missing pull).
+   Two ChatGPT Enterprise notes are built from the data rather than fixed
+   text: how many days each tenant has from the Daily Usage API versus the
+   `COSTS` export (from `DailySpendRecords.Source`), and which weeks, if any,
+   were left out of the trend projections. A ChatGPT week is left out only
+   when a day inside the report period has no stored record (the vendor is
+   seat-priced, so every real day has a record). A week that is short only
+   because the report starts or ends midweek is not treated as missing data,
+   and a complete first week is real data and is included.
 
 ## Data sourcing
 

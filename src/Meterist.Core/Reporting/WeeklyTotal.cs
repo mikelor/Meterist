@@ -11,8 +11,10 @@ namespace Meterist.Core.Reporting;
 /// see the caller in ReportDataAggregator. <see cref="ExcludeFromProjection"/>
 /// is set by the caller (see <see cref="WeeklyBucketer.Bucket"/>'s
 /// excludeWeekIndices parameter) for weeks known to be unreliable for trend
-/// purposes — e.g. ChatGPT Enterprise's first week in any report period,
-/// permanently lost to the vendor's retention window.
+/// purposes. ReportDataAggregator uses it for ChatGPT Enterprise weeks with
+/// fewer stored days than the week has inside the report period: a seat-priced
+/// vendor has a record for every real day, so a day with none is missing data. A
+/// week merely cut short by where the report starts or ends is not.
 /// </summary>
 public readonly record struct WeeklyTotal(
     int WeekIndex,

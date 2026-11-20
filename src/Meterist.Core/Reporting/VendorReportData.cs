@@ -14,6 +14,13 @@ public sealed class VendorReportData
     /// terms for the rate-card section, not day-by-day proration history.</summary>
     public required IReadOnlyList<VendorRateConfig> CurrentRates { get; init; }
 
+    /// <summary>
+    /// How many stored days came from each data source (keyed by a
+    /// <see cref="DailySpendSources"/> value), for vendors that record one.
+    /// Empty for single-source vendors, where there is nothing to disclose.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> SourceDayCounts { get; init; } = new Dictionary<string, int>();
+
     public decimal TotalSeatFee => Weeks.Sum(w => w.SeatFee);
 
     public decimal TotalUsageOrOverage => Weeks.Sum(w => w.UsageOrOverage);
