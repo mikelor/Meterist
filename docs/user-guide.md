@@ -419,6 +419,27 @@ credits" enabled (Organization settings → Usage → Enable, in the Claude
 Console) — that plan type has no overage concept at all until credits are
 turned on.
 
+**Which Anthropic endpoint is used.** By default Meterist reads cost from the
+newer **Usage and Cost Analytics API** (`/analytics/cost`, beta), grouped by user
+and product. It uses the same Analytics key as before; nothing needs to change on
+your side. In a live test on two tenants its daily totals matched the older
+`user_cost_report` to the cent for a full month. It also records each user's
+request count, product and account type for later per-user reporting.
+
+If Anthropic changes or ends that beta, the extraction fails with a message saying
+so and naming the setting below. To go back to the older endpoint, set
+`Meterist:ClaudeEnterprise:UseLegacyCostReport` to `true` in
+[`appsettings.json`](../src/Meterist.Cli/appsettings.json):
+
+```json
+{ "Meterist": { "ClaudeEnterprise": { "UseLegacyCostReport": true } } }
+```
+
+or set the environment variable `Meterist__ClaudeEnterprise__UseLegacyCostReport=true`
+for one run. The setting applies to every tenant. Re-extract after switching: the
+two endpoints agreed in testing, so nothing should change, and `extract --dry-run`
+will show if it does.
+
 ## Configuring rates
 
 Some vendors' APIs don't return a usable dollar figure for everything

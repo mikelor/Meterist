@@ -168,6 +168,33 @@ public class HttpClaudeAnalyticsCostReportRepositoryTests
         Assert.Contains(requestUrls, url => url!.Contains("starting_at=2026-07-02"));
     }
 
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"  \"")]
+    public async Task QueryUserCostRowsAsync_HasMoreWithNoUsableCursor_FailsInsteadOfReturningAPartialMonth(string cursor)
+    {
+        using var server = WireMockServer.Start();
+
+        server
+            .Given(Request.Create().WithPath(UserCostReportPath).UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody($$"""
+                    {
+                      "data": [{"actor": {"user_id": "u1", "email": null, "name": "A", "deleted": false, "type": "user_actor"}, "amount": "100", "starting_at": "2026-07-20T00:00:00Z"}],
+                      "has_more": true,
+                      "next_page": {{cursor}}
+                    }
+                    """));
+
+        var period = new DateRange(new DateOnly(2026, 7, 20), new DateOnly(2026, 7, 20));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server)
+            .QueryUserCostRowsAsync(AnalyticsApiKey, period, TestContext.Current.CancellationToken));
+
+        Assert.Contains("partial", ex.Message);
+    }
+
     private static HttpClaudeAnalyticsCostReportRepository CreateRepository(WireMockServer server)
     {
         var httpClient = new HttpClient { BaseAddress = new Uri(server.Url + "/") };

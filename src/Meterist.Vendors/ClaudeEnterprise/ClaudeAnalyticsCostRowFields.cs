@@ -17,4 +17,13 @@ public static class ClaudeAnalyticsCostRowFields
     public const string UserId = "UserId";
     public const string UserEmail = "UserEmail";
     public const string UserName = "UserName";
+
+    // Present only on rows from the newer /analytics/cost endpoint (HttpClaudeAnalyticsCostRepository);
+    // the legacy report does not carry them. UserId, UserEmail and UserName are personal data.
+    public const string Product = "Product";
+    public const string Requests = "Requests";
+
+    /// <summary>The API's actor type: user_actor, service_account_actor, api_actor or federated_actor. Null when the row has no actor.</summary>
+    public const string ActorType = "ActorType";
+    public const string ActorDeleted = "ActorDeleted";
 }
