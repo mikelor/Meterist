@@ -97,6 +97,7 @@ builder.Services.AddScoped<ConfiguredVendorExtraction>();
 builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
 builder.Services.AddScoped<UserUsageBackfill>();
+builder.Services.AddScoped<UserUsageReporter>();
 
 using var host = builder.Build();
 
@@ -112,6 +113,7 @@ rootCommand.Subcommands.Add(BuildExtractCommand(host));
 rootCommand.Subcommands.Add(BuildReportCommand(host));
 rootCommand.Subcommands.Add(BuildAuditCommand(host));
 rootCommand.Subcommands.Add(BuildBackfillCommand(host));
+rootCommand.Subcommands.Add(BuildUsersCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -568,6 +570,191 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
     if (!any && relabelled == 0)
     {
         AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
+    }
+}
+
+static Command BuildUsersCommand(IHost host)
+{
+    var tenantOption = new Option<string>("--tenant") { Description = "Tenant identifier", Required = true };
+    var fromOption = new Option<DateTime>("--from") { Description = "First day of the period", Required = true };
+    var toOption = new Option<DateTime>("--to") { Description = "Last day of the period (inclusive)", Required = true };
+    var vendorOption = new Option<string?>("--vendor")
+    {
+        Description = "Show only one vendor short name (default: every vendor that has per-user rows)",
+    };
+    var topOption = new Option<int?>("--top")
+    {
+        Description = "Show only the N highest-spending users per vendor, then a line for the rest",
+    };
+
+    var usageCommand = new Command(
+        "usage",
+        "Per-user usage over a period (named by name or email): dollars, credits, requests and days active, "
+        + "followed by the vendor's aggregate for the same period so the two can be compared. Read-only.");
+    usageCommand.Options.Add(tenantOption);
+    usageCommand.Options.Add(fromOption);
+    usageCommand.Options.Add(toOption);
+    usageCommand.Options.Add(vendorOption);
+    usageCommand.Options.Add(topOption);
+
+    usageCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var period = new DateRange(
+            DateOnly.FromDateTime(parseResult.GetValue(fromOption)),
+            DateOnly.FromDateTime(parseResult.GetValue(toOption)));
+        var vendorShortName = parseResult.GetValue(vendorOption);
+        var top = parseResult.GetValue(topOption);
+
+        if (period.Start > period.End)
+        {
+            AnsiConsole.MarkupLine("[red]--from must not be after --to.[/]");
+            return 1;
+        }
+
+        if (top is <= 0)
+        {
+            AnsiConsole.MarkupLine("[red]--top must be a positive number.[/]");
+            return 1;
+        }
+
+        Guid? vendorFilter = null;
+        if (vendorShortName is not null)
+        {
+            var vendor = VendorCatalog.FindByShortName(vendorShortName);
+            if (vendor is null)
+            {
+                AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(vendorShortName)}'.[/] Known vendors: "
+                    + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+                return 1;
+            }
+
+            vendorFilter = vendor.Id;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var reporter = scope.ServiceProvider.GetRequiredService<UserUsageReporter>();
+        var report = await reporter.BuildAsync(tenantId, period, vendorFilter, cancellationToken);
+
+        WriteUserUsageReport(report, top);
+        return 0;
+    });
+
+    var usersCommand = new Command("users", "Per-user views of the stored usage data");
+    usersCommand.Subcommands.Add(usageCommand);
+    return usersCommand;
+}
+
+static void WriteUserUsageReport(UserUsageReport report, int? top)
+{
+    var us = CultureInfo.GetCultureInfo("en-US");
+    static string Money(decimal value, IFormatProvider culture) => value.ToString("C2", culture);
+
+    AnsiConsole.MarkupLine(
+        $"[bold]Meterist[/] — per-user usage for [yellow]{Markup.Escape(report.TenantId)}[/], "
+        + $"{report.Period.Start:yyyy-MM-dd} to {report.Period.End:yyyy-MM-dd}");
+
+    if (report.Vendors.Count == 0)
+    {
+        AnsiConsole.MarkupLine(
+            "[yellow]No per-user rows are stored for this tenant in this period.[/] Run extract for ChatGPT or Claude "
+            + "Enterprise, or backfill user-usage from raw records already stored.");
+        return;
+    }
+
+    foreach (var vendor in report.Vendors)
+    {
+        var anyEstimated = vendor.Users.Any(u => u.IsEstimated);
+        var anyKind = vendor.Users.Any(u => u.Attribution != UsageAttribution.Person);
+
+        var table = new Table()
+            .Title(Markup.Escape(vendor.Vendor.DisplayName))
+            .AddColumn("User")
+            .AddColumn(new TableColumn("Amount").RightAligned())
+            .AddColumn(new TableColumn("Credits").RightAligned())
+            .AddColumn(new TableColumn("Requests").RightAligned())
+            .AddColumn(new TableColumn("Days active").RightAligned());
+
+        var shown = top is { } n ? vendor.Users.Take(n).ToList() : vendor.Users.ToList();
+        foreach (var user in shown)
+        {
+            var kind = user.Attribution switch
+            {
+                UsageAttribution.Person => string.Empty,
+                UsageAttribution.ApiKey => " [grey](API key)[/]",
+                UsageAttribution.Allocated => " [grey](allocated)[/]",
+                _ => " [grey](not a person)[/]",
+            };
+
+            table.AddRow(
+                Markup.Escape(user.DisplayName) + kind,
+                (user.IsEstimated ? "~" : string.Empty) + Money(user.Amount, us),
+                user.Credits is { } credits ? credits.ToString("N0", us) : "-",
+                user.Requests is { } requests ? requests.ToString("N0", us) : "-",
+                user.DaysActive.ToString(us));
+        }
+
+        var rest = vendor.Users.Skip(shown.Count).ToList();
+        if (rest.Count > 0)
+        {
+            table.AddRow(
+                $"[grey]and {rest.Count} more user(s)[/]",
+                Money(rest.Sum(u => u.Amount), us),
+                rest.Any(u => u.Credits is not null) ? rest.Sum(u => u.Credits ?? 0m).ToString("N0", us) : "-",
+                rest.Any(u => u.Requests is not null) ? rest.Sum(u => u.Requests ?? 0L).ToString("N0", us) : "-",
+                string.Empty);
+        }
+
+        table.AddRow(
+            "[bold]All users[/]",
+            "[bold]" + Money(vendor.TotalAmount, us) + "[/]",
+            vendor.TotalCredits is { } totalCredits ? totalCredits.ToString("N0", us) : "-",
+            vendor.TotalRequests is { } totalRequests ? totalRequests.ToString("N0", us) : "-",
+            string.Empty);
+
+        AnsiConsole.Write(table);
+
+        var recon = vendor.Reconciliation;
+        AnsiConsole.MarkupLine(
+            $"  Aggregate usage on the {recon.DaysCompared} day(s) with per-user rows: {Money(recon.AggregateUsage, us)}"
+            + (recon.AggregateUsage == vendor.AggregateUsage
+                ? string.Empty
+                : $" (all days in the period: {Money(vendor.AggregateUsage, us)})")
+            + $". Seat fees for the period ({Money(vendor.AggregateSeatFee, us)}) are not part of per-user figures.");
+
+        if (recon.Reconciles)
+        {
+            AnsiConsole.MarkupLine($"  [green]Per-user total matches the aggregate[/] (difference {Money(recon.Difference, us)}).");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]Per-user total {Money(recon.PerUserAmount, us)} does not match the aggregate "
+                + $"{Money(recon.AggregateUsage, us)} (difference {Money(recon.Difference, us)}).[/] Usually a user the "
+                + "vendor has since deleted, a day whose stored aggregate kept a higher earlier figure, or per-user "
+                + "rows stored from a different pull than the daily total.");
+        }
+
+        if (recon.UsageDaysWithoutUserRows > 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]{recon.UsageDaysWithoutUserRows} day(s) have aggregate usage but no per-user rows[/] "
+                + "(not included above); backfill or re-extract them.");
+        }
+
+        if (anyEstimated)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]~ estimated: dollars derived from credits, not a billed per-user amount.[/]");
+        }
+
+        if (anyKind)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey](API key) and (not a person) rows are usage the vendor did not attribute to a named person.[/]");
+        }
+
+        AnsiConsole.WriteLine();
     }
 }
 

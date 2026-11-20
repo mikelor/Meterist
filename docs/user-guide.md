@@ -621,6 +621,45 @@ The exit code is `0` when no seat-priced vendor has a gap, and non-zero when
 one does (or when the command couldn't run, for example an unknown vendor or
 `--from` after `--to`), so a scheduled run can alert on it.
 
+### Per-user usage
+
+Once per-user rows are stored (ChatGPT Enterprise and Claude Enterprise; see the
+vendor sections above, and `backfill user-usage` for history), `users usage` shows
+who used what over a period, by name or email:
+
+```powershell
+dotnet run --project src/Meterist.Cli -- users usage --tenant <your-tenant-id> --from 2026-11-01 --to 2026-11-19
+dotnet run --project src/Meterist.Cli -- users usage --tenant <your-tenant-id> --from 2026-11-01 --to 2026-11-19 --vendor claude-enterprise --top 10
+```
+
+It is read-only and prints one table per vendor that has per-user rows. Each user has
+their total dollars, credits, requests (messages, for ChatGPT) and days active,
+highest spend first. `--top N` shows only the first N users and one line for the rest.
+`--vendor` limits it to one vendor short name.
+
+**Below each table** the vendor's aggregate for the same days is shown, so you can see
+the per-user figures add up. Seat fees are listed separately: they belong to the
+seats, not to anyone's usage, so they are never in the per-user dollars. Three things
+are called out:
+
+- **A mismatch.** If the per-user total differs from the aggregate by more than about
+  2% (or a few cents), it says so with the difference. Usual causes: a user the vendor
+  has since deleted (ChatGPT leaves them out of per-user data), a day whose stored
+  total kept a higher earlier figure, or per-user rows stored from a different pull
+  than the daily total.
+- **Days without per-user rows.** If the aggregate has usage on days the per-user
+  rows do not cover, they are counted and left out of the comparison, so a short
+  per-user history does not read as a mismatch. Backfill or re-extract those days.
+- **Marked figures.** `~` before an amount means it is an estimate (ChatGPT dollars
+  derived from credits). `(API key)` and `(not a person)` mark usage the vendor did not
+  attribute to a named person, including the `unattributed` bucket for Claude cost with
+  no actor. Treat those as separate from your people.
+
+On a seat-based Claude plan a user can show `$0.00` with hundreds of requests: the
+dollars are usage credits only, so read requests and days active as the activity
+signal. The output names people, so keep it out of anything you commit; reports that
+include it belong under `artifacts/`.
+
 ### Running extraction on a schedule
 
 Run extraction daily. ChatGPT Enterprise's cost export keeps only about 29
