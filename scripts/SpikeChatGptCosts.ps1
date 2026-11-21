@@ -11,15 +11,16 @@
 
 .PARAMETER AdminKeyFile
     Path to a local text file containing the raw Admin API key (Costs: Read scope).
-    Never pass the key on the command line or paste it into chat.
+    Never pass the key on the command line or paste it into chat. Both this and the organization ID are
+    required parameters with no default, so no real tenant value is kept in the repository.
 
 .PARAMETER AfterDays
     How many days back to start the query window. Defaults to 29 to stay inside the
     30-day compliance log retention window.
 #>
 param(
-    [string]$OrganizationId = "org-QfdtNaipyr41iIOkKRw3fa7y",
-    [string]$AdminKeyFile = "..\env\zelleri-chatgpt-admin-key.txt",
+    [Parameter(Mandatory)][string]$OrganizationId,
+    [Parameter(Mandatory)][string]$AdminKeyFile,
     [int]$AfterDays = 29
 )
 
