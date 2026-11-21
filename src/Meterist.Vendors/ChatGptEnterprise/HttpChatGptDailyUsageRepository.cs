@@ -71,7 +71,10 @@ public sealed class HttpChatGptDailyUsageRepository : IChatGptDailyUsageReposito
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.AdminApiKey);
 
-            _logger.LogDebug("Querying ChatGPT Enterprise Daily Usage ({Grouping}): {Url}", grouping, baseUrl);
+            // Not the URL: its path carries the workspace ID.
+            _logger.LogDebug(
+                "Querying ChatGPT Enterprise Daily Usage ({Grouping}), page {Page}, {PeriodStart} to {PeriodEnd}.",
+                grouping, pageNumber + 1, period.Start, period.End);
 
             using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
             ThrowIfNotSuccess(response);

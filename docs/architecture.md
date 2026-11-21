@@ -543,6 +543,11 @@ they are a dated snapshot taken on demand rather than part of `extract`: `IVendo
 refused). Claude Enterprise (#26) and ChatGPT Enterprise (#29) have sources, sharing the one model (amounts are in the vendor's own
 unit, recorded in `Currency`, and credits are not converted). Taking these in the scheduled run is not wired up yet.
 
+**Client identifiers stay out of logs (2026-11-21).** The ChatGPT organisation ID and workspace ID identify a client, and the
+debug log (on by default for the `Meterist` categories) gets pasted into chats and issues. No ChatGPT log line carries either: the
+extractor says only whether each is set, and the Daily Usage and `COSTS` clients log the window and page number, not a URL
+(their paths contain the IDs). `ChatGptLogRedactionTests` uses distinctive IDs and fails if one reappears in a line.
+
 **Member-id cursors stay out of logs and traces (2026-11-20).** The roster
 endpoints paginate with a cursor that is a member id (`after=<last_id>`), so
 their URLs are treated as sensitive. The two roster HTTP clients are registered

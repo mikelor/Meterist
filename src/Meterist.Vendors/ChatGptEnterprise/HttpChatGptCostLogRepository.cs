@@ -137,7 +137,9 @@ public sealed class HttpChatGptCostLogRepository : IChatGptCostLogRepository
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.AdminApiKey);
 
-            _logger.LogDebug("Listing ChatGPT Enterprise COSTS files: {Url}", url);
+            // Not the URL: its path carries the organization ID. The window is what is useful here.
+            _logger.LogDebug(
+                "Listing ChatGPT Enterprise COSTS files, page {Page}, after {After}, before {Before}.", page + 1, after, before);
 
             using var response = await _authenticatedClient.SendAsync(request, cancellationToken)
                 .ConfigureAwait(false);
