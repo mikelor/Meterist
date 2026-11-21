@@ -31,9 +31,22 @@ public sealed class ConfiguredVendorExtraction
 
         foreach (var vendor in VendorCatalog.All.Where(v => vendorFilter is null || v.Id == vendorFilter))
         {
-            var credential = await _secretStore
-                .GetCredentialAsync(tenantId, vendor.Id, cancellationToken)
-                .ConfigureAwait(false);
+            string? credential;
+            try
+            {
+                credential = await _secretStore
+                    .GetCredentialAsync(tenantId, vendor.Id, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // Credentials that exist but cannot be read (wrong Windows account, damaged file) are a failure of
+                // this vendor, not "no credential": skipping it would let a scheduled run exit 0 having collected
+                // nothing. The other vendors still run.
+                results.Add(new VendorExtractionResult(
+                    vendor.Id, vendor.DisplayName, VendorExtractionStatus.Failed, 0, DescribeCredentialFailure(ex)));
+                continue;
+            }
 
             if (string.IsNullOrWhiteSpace(credential))
             {
@@ -50,6 +63,10 @@ public sealed class ConfiguredVendorExtraction
 
         return results;
     }
+
+    // The message of an operator-facing failure is already clear; anything else gets its type, which says what broke.
+    private static string DescribeCredentialFailure(Exception ex) =>
+        ex is InvalidOperationException ? ex.Message : $"Could not read the stored credential: {ex.GetType().Name}: {ex.Message}";
 }
 
 public static class ExtractionExitCode

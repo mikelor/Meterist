@@ -11,8 +11,9 @@
     off at the scheduled time, the task runs at the next opportunity
     (StartWhenAvailable).
 
-    Check the result in Task Scheduler ("Last Run Result": 0 = OK, see
-    RunScheduledExtraction.ps1 for the other codes) or in the dated log under
+    Check the result in Task Scheduler ("Last Run Result": 0 = OK, otherwise the
+    sum of 1 extraction, 2 coverage and 4 roster-snapshot failures; see
+    RunScheduledExtraction.ps1) or in the dated log under
     %LOCALAPPDATA%\Meterist\logs.
 
 .PARAMETER Time

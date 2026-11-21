@@ -19,7 +19,8 @@ public class ConfiguredVendorExtractionTests
     private static ConfiguredVendorExtraction Build(
         IEnumerable<Guid> vendorsWithCredential,
         HashSet<Guid>? vendorsThatFail = null,
-        string? blankValue = null)
+        string? blankValue = null,
+        IReadOnlyDictionary<Guid, Exception>? credentialReadFailures = null)
     {
         vendorsThatFail ??= [];
         var service = new SpendExtractionService(
@@ -28,7 +29,7 @@ public class ConfiguredVendorExtractionTests
             new NoOpRawRepository(), new NoOpDailyRepository(), new NoOpRateRepository(),
             NullLogger<SpendExtractionService>.Instance);
 
-        return new ConfiguredVendorExtraction(service, new FakeSecretStore(vendorsWithCredential, blankValue));
+        return new ConfiguredVendorExtraction(service, new FakeSecretStore(vendorsWithCredential, blankValue, credentialReadFailures));
     }
 
     [Fact]
@@ -86,6 +87,53 @@ public class ConfiguredVendorExtractionTests
     }
 
     [Fact]
+    public async Task AnUnreadableCredential_IsAFailure_NotASkip_AndTheOtherVendorsStillRun()
+    {
+        // Wrong Windows account, damaged file: the credentials exist but cannot be read. Skipping the vendor would let a
+        // scheduled run exit 0 having collected nothing.
+        var unreadable = new UnreadableCredentialException("t", new System.Security.Cryptography.CryptographicException("nope"));
+
+        var results = await Build(
+                [Configured, Unconfigured],
+                credentialReadFailures: new Dictionary<Guid, Exception> { [Configured] = unreadable })
+            .ExtractAsync("t", Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var failed = results.Single(r => r.VendorId == Configured);
+        Assert.Equal(VendorExtractionStatus.Failed, failed.Status);
+        Assert.Equal(unreadable.Message, failed.Detail);
+        Assert.Contains("Windows account", failed.Detail);
+        Assert.Equal(VendorExtractionStatus.Succeeded, results.Single(r => r.VendorId == Unconfigured).Status);
+        Assert.Equal(1, ExtractionExitCode.For(results));
+    }
+
+    [Fact]
+    public async Task AnyOtherCredentialReadFailure_IsThatVendorsFailure_NamedByType()
+    {
+        var results = await Build(
+                [Configured],
+                credentialReadFailures: new Dictionary<Guid, Exception> { [Configured] = new IOException("The file is locked.") })
+            .ExtractAsync("t", Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var failed = results.Single(r => r.VendorId == Configured);
+        Assert.Equal(VendorExtractionStatus.Failed, failed.Status);
+        Assert.Contains("IOException", failed.Detail);
+        Assert.Contains("locked", failed.Detail);
+        Assert.Equal(1, ExtractionExitCode.For(results));
+    }
+
+    [Fact]
+    public async Task ACallersOwnCancellation_DuringACredentialRead_StillStopsTheRun()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Build(
+                [Configured],
+                credentialReadFailures: new Dictionary<Guid, Exception> { [Configured] = new OperationCanceledException(cts.Token) })
+            .ExtractAsync("t", Period, cancellationToken: cts.Token));
+    }
+
+    [Fact]
     public void ExitCode_OnlyFailedCountsAsFailure()
     {
         static VendorExtractionResult R(VendorExtractionStatus s) => new(Guid.NewGuid(), "v", s, 0, null);
@@ -97,12 +145,15 @@ public class ConfiguredVendorExtractionTests
         Assert.Equal(1, ExtractionExitCode.For([R(VendorExtractionStatus.Skipped), R(VendorExtractionStatus.Failed)]));
     }
 
-    private sealed class FakeSecretStore(IEnumerable<Guid> withCredential, string? blankValue) : ISecretStore
+    private sealed class FakeSecretStore(
+        IEnumerable<Guid> withCredential, string? blankValue, IReadOnlyDictionary<Guid, Exception>? readFailures = null) : ISecretStore
     {
         private readonly HashSet<Guid> _with = [.. withCredential];
 
         public Task<string?> GetCredentialAsync(string tenantId, Guid vendorId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_with.Contains(vendorId) ? "secret" : blankValue);
+            readFailures is not null && readFailures.TryGetValue(vendorId, out var failure)
+                ? throw failure
+                : Task.FromResult(_with.Contains(vendorId) ? "secret" : blankValue);
 
         public Task SetCredentialAsync(string tenantId, Guid vendorId, string credential, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;

@@ -44,7 +44,9 @@ public sealed class DataProtectionSecretStore : ISecretStore
         Guid vendorId,
         CancellationToken cancellationToken = default)
     {
-        var credentials = await LoadTenantCredentialsAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        // A read never recovers: an unreadable file is an error here, not an empty store. See LoadTenantCredentialsAsync.
+        var credentials = await LoadTenantCredentialsAsync(tenantId, recoverFromUnreadable: false, cancellationToken)
+            .ConfigureAwait(false);
         return credentials.TryGetValue(vendorId.ToString(), out var value) ? value : null;
     }
 
@@ -54,13 +56,20 @@ public sealed class DataProtectionSecretStore : ISecretStore
         string credential,
         CancellationToken cancellationToken = default)
     {
-        var credentials = await LoadTenantCredentialsAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        var credentials = await LoadTenantCredentialsAsync(tenantId, recoverFromUnreadable: true, cancellationToken)
+            .ConfigureAwait(false);
         credentials[vendorId.ToString()] = credential;
         await SaveTenantCredentialsAsync(tenantId, credentials, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <param name="recoverFromUnreadable">
+    /// True only for the read that precedes a write. A file that will not decrypt is then treated as empty, with a
+    /// warning, so the operator can always reset a tenant. False for every read that feeds an extraction or a
+    /// snapshot, where an unreadable file must surface as an error rather than look like "no credential".
+    /// </param>
     private async Task<Dictionary<string, string>> LoadTenantCredentialsAsync(
         string tenantId,
+        bool recoverFromUnreadable,
         CancellationToken cancellationToken)
     {
         var path = GetTenantFilePath(tenantId);
@@ -77,14 +86,23 @@ public sealed class DataProtectionSecretStore : ISecretStore
             return JsonSerializer.Deserialize<Dictionary<string, string>>(plaintextJson)
                 ?? new Dictionary<string, string>();
         }
-        catch (CryptographicException ex)
+        catch (Exception ex) when (ex is CryptographicException or JsonException)
         {
+            if (!recoverFromUnreadable)
+            {
+                // Reported as unreadable, never as empty. Returning an empty dictionary here made every reader see
+                // "no credential" for the tenant: ConfiguredVendorExtraction and ConfiguredRosterSnapshots would
+                // mark each vendor Skipped and a scheduled run (for example under the wrong Windows account, which
+                // DPAPI cannot decrypt for) would exit 0 having collected nothing.
+                throw new UnreadableCredentialException(tenantId, ex);
+            }
+
             // An undecryptable file must not become a permanent dead end: SetCredentialAsync
             // reads-before-write (to merge in other vendors' credentials for this same
             // tenant), so without this recovery, a corrupted/stale file — e.g. from before
             // the DataProtection application name was pinned, see ServiceCollectionExtensions
             // — would permanently block the operator from ever resetting that tenant, not
-            // just from reading it. Treat it as "nothing usable stored" and move on, loudly.
+            // just from reading it. So a WRITE treats it as "nothing usable stored" and moves on, loudly.
             _logger.LogWarning(ex,
                 "Stored credential file for tenant '{TenantId}' could not be decrypted — treating it "
                 + "as empty rather than blocking. Any other vendor credentials previously stored for "

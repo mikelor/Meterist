@@ -745,7 +745,12 @@ dotnet run --project src/Meterist.Cli -- roster show --tenant <your-tenant-id> -
 - **`roster show`** prints a stored snapshot, by name and email with each member's role and when they were added, and
   says how many snapshots are stored. `--on-or-before 2026-10-31` shows the latest one taken on or before a date.
 - **Take snapshots regularly.** Vendors keep no membership history, so a snapshot is the only record of who was on
-  the list that day. Nothing schedules it yet; running it daily alongside the extraction is the intent.
+  the list that day. The [daily scheduled run](#running-extraction-on-a-schedule) takes them for you, for every tenant,
+  right after extraction and the coverage check.
+- **`roster snapshot-all --tenant a --tenant b [--dry-run]`** is what that scheduled run calls. For each tenant it
+  snapshots every vendor that has a member list **and** that the tenant has a stored credential for, and shows the rest
+  as `Skipped` (a tenant that uses only some vendors is not a failure). One vendor or tenant failing does not stop the
+  others. It exits `1` if any snapshot failed, `0` otherwise.
 - **It stops rather than store a wrong list.** If the member list cannot be read in full (a cursor problem, a member
   with no id) or comes back empty, or the vendor is unavailable (a rate limit, a server error, a timeout, an
   unreadable response), the command prints a message saying so, exits non-zero and stores nothing, because a partial
@@ -767,10 +772,25 @@ This registers a Windows Task Scheduler job ("Meterist daily extraction") that
 runs [`scripts/RunScheduledExtraction.ps1`](../scripts/RunScheduledExtraction.ps1)
 each day. That script extracts every tenant from `2026-07-01` through
 yesterday, runs the [coverage check](#checking-for-missing-days) over the same
-window, and writes everything to `%LOCALAPPDATA%\Meterist\logs\extract-yyyy-MM-dd.log`
-(a second run the same day appends). Its exit code, shown as the task's
-"Last Run Result", is `0` when everything is clean, `1` for an extraction
-failure, `2` for a coverage gap, and `3` for both.
+window, then takes each tenant's [roster snapshots](#rosters-who-holds-a-seat),
+and writes everything to `%LOCALAPPDATA%\Meterist\logs\extract-yyyy-MM-dd.log`
+(a second run the same day appends).
+
+Its exit code, shown as the task's "Last Run Result", is `0` when everything is
+clean. Otherwise it is the **sum** of what failed, so the number tells you exactly
+what went wrong:
+
+| Failure | Adds |
+| --- | --- |
+| A vendor extraction failed | `1` |
+| The coverage check found missing days | `2` |
+| A roster snapshot failed | `4` |
+
+So `1`, `2` and `4` are each one problem alone, `3` is extraction and coverage, `5`
+is extraction and roster, `6` is coverage and roster, and `7` is all three. The
+roster snapshot runs even when extraction failed, because it is independent of it and
+a day without a snapshot cannot be reconstructed later. Before roster snapshots were
+added the codes were only `0` to `3`; those mean the same as before.
 
 - The task runs as you, and only while you're logged on: credentials are
   encrypted per Windows user, so it has to be the account that stored them.
@@ -795,6 +815,14 @@ failures. Skipped and not-implemented vendors don't count as failures.
 
 ## Troubleshooting
 
+- **"The stored credentials for tenant ... could not be read."** The tenant has a credential file, but it will not
+  decrypt (or is damaged). Credentials are encrypted for **one Windows account on one machine**, so this almost always
+  means Meterist is running as a different user (a scheduled task must run as the account that stored them) or on a
+  different machine. It is reported as a **failure**, never as "no credential": extraction shows the vendor as
+  `Failed`, roster snapshots as `Failed`, and the scheduled run exits non-zero, so a run can never look clean while
+  collecting nothing. Run as the original account, or store each vendor's credential again with `credentials set`
+  (a `set` always works, even over an unreadable file; any other vendor's credential in that file is lost and must be
+  set again).
 - **Debug logging is on by default** ([`appsettings.json`](../src/Meterist.Cli/appsettings.json)
   sets `Meterist` categories to `Debug`, while quieting EF Core's own very
   chatty SQL command logging down to `Warning`). This shows the exact
