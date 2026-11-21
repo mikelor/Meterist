@@ -715,7 +715,9 @@ never calls a vendor, so run `roster snapshot` and `extract` first.
   disagree with each other, that is noted as two different measures, not called drift.
 - **Which seats are idle?** A rostered member with no activity in the window. Activity is any stored per-user row for a
   person with spend, credits or **requests** above zero (requests count because cost is zero by design on a seat-based plan, so
-  $0 never means inactive). Usage is matched to the roster by the vendor's member id, then by email. Members added inside the
+  $0 never means inactive). For **Claude Enterprise** the vendor-reported per-person activity (`users activity`) counts too: a
+  person with an activity row that day is active even at $0 cost, and a last-active day before the window is the later of the
+  two sources. The coverage caveats below apply to the union of both. Usage is matched to the roster by the vendor's member id, then by email. Members added inside the
   window are counted as new, not idle. People who are active but not on the roster (left, or not matched) are counted
   separately.
 - **It says when it cannot tell.** With no roster snapshot, or no per-user activity stored for the window, it says idle
