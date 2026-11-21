@@ -74,14 +74,19 @@ bundled into one page:
    billing export rather than being computed from a configured
    `VendorRateConfig` row — both show `—` by design, not a data gap.
 7. **Weekly spend by vendor** — per tenant, Wednesday-to-Tuesday weekly
-   buckets with the seat-fee and usage split. A trailing week that hasn't
-   fully elapsed yet is marked with an asterisk.
+   buckets with the seat-fee and usage split. A week cut short by where the report starts or ends (a short first
+   week, or a trailing week that hasn't fully elapsed) is marked with an asterisk and explained beneath the table.
 8. **Annualized cost projection** — per tenant and vendor, three scenarios
-   (flat, trend-adjusted, latest-week annualized) computed from the weeks
-   that end inside the report period. The trailing partial week is left out,
-   as is any ChatGPT Enterprise week with missing days (see the footnote
-   rules below). A report that starts midweek still counts its leading
-   partial week for every vendor; start reports on a Wednesday to avoid that.
+   (flat, trend-adjusted, latest-week annualized) computed only from weeks
+   that lie **fully inside the report period**, the same rule for every vendor
+   (`ProjectionEligibility`). A report that starts or ends mid-week has a short
+   first or last week; it stays in the weekly table and in the actual totals but
+   is left out of all three projections, because a short week averaged in with
+   full ones drags the average and the trend down even when every requested day
+   is stored. Any ChatGPT Enterprise week with missing days is left out as well
+   (a separate rule, see the footnote rules below). Start a report on a
+   Wednesday to include its first week. Fewer than one full week gives no
+   projection (shown as a dash).
 9. **Audit & reconciliation status** — per vendor, how the numbers were
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the
@@ -129,8 +134,14 @@ bundled into one page:
    were left out of the trend projections. A ChatGPT week is left out only
    when a day inside the report period has no stored record (the vendor is
    seat-priced, so every real day has a record). A week that is short only
-   because the report starts or ends midweek is not treated as missing data,
-   and a complete first week is real data and is included.
+   because the report starts or ends midweek is not treated as missing data
+   (it is handled by the partial-week rule above), and a complete first week
+   is real data and is included.
+   A general **partial-week note** is built from the data for every vendor: it
+   says what day of the week the report starts and ends on, which first or last
+   week was left out of the projections, and, per tenant, which vendors were
+   affected. When the report starts on a Wednesday it says so and that no first
+   week was left out.
 
 ## Data sourcing
 
