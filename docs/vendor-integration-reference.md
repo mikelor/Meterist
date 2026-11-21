@@ -189,6 +189,23 @@ not adopted.
     `period_to_date_spend`. Anthropic calls that figure informational (it can
     read `"0"` when unavailable), so treat it as a headroom signal, not a
     ledger.
+  - **Live test of `/spend_limits/effective` (issue #26, 2026-11-20, read-only, both tenants, the existing Analytics
+    key).**
+    - **One key holds all three scopes.** The Analytics key Meterist already stores for each tenant is accepted by this
+      endpoint, as it is by `/analytics/*` and `/users`, so one key carries `read:analytics`, `read:members` and
+      `read:spend_limits` together and no second credential is needed.
+    - **No beta header** is needed (the `spend-limit-reads-2026-09-26` value exists but is not required).
+    - **Works on both tenants**, including the seat-based one (where most members have no limit), so it is not limited to
+      tenants that spend on usage credits in practice; the documented prerequisite is that usage credits are turned on.
+    - **Shape:** `data` plus `next_page` (opaque cursor, sent back as `page`). A row has `scope` (`type` `user`, `user_id`),
+      `actor` (`type` `user_actor`, `user_id`, `name`, `email_address`, `deleted`), `amount`, `currency` (`USD`), `period`
+      (`monthly`), `source`, `spend_limit_id` and `period_to_date_spend`. 13 and 42 rows came back in one page each.
+    - **Units: `amount` and `period_to_date_spend` are decimal strings in cents**, like `/analytics/cost`. For one tenant the
+      sum of members' `period_to_date_spend` equalled the cost report's month-to-date total in cents to within a tenth of a cent;
+      for the other it was about 8% higher, so the figure is the vendor's running number and not a ledger.
+    - **A null `amount` means no limit.** 9 of 13 members on the seat-based tenant, 2 of 42 on the other.
+    - **`source`** is `{type: seat_tier, seat_tier}`, `{type: rbac_group, rbac_group_id}` or `{type: user, user_id}` (the
+      documented `organization` default did not appear). Meterist stores the type and the tier or group id.
   - **Live test of `/analytics/summaries` (issue #22, 2026-11-20, read-only, both tenants, the existing Analytics
     key).**
     - **No beta header** is needed (unlike `/usage` and `/cost`); the same key works.

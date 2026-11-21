@@ -786,6 +786,33 @@ dotnet run --project src/Meterist.Cli -- activity show --tenant <your-tenant-id>
 - **A failure here marks the vendor failed.** The spend is already saved by then, so nothing is lost, but the run
   exits non-zero and says why (for example a key without the `read:analytics` scope).
 
+### Spend limits and headroom (Claude Enterprise)
+
+Claude Enterprise lets an organisation cap each member's monthly spend (the Spend Limits API; it needs usage credits turned
+on). Meterist reads each member's effective limit and what they have spent against it, with the same key your spend
+extraction already stores (the live test found it carries the `read:spend_limits` scope, so nothing new to set up).
+
+```powershell
+dotnet run --project src/Meterist.Cli -- limits snapshot --tenant <your-tenant-id> --vendor claude-enterprise --dry-run
+dotnet run --project src/Meterist.Cli -- limits snapshot --tenant <your-tenant-id> --vendor claude-enterprise
+dotnet run --project src/Meterist.Cli -- limits show --tenant <your-tenant-id> --vendor claude-enterprise
+```
+
+- **`limits snapshot`** fetches every member's limit and stores it as a snapshot dated today (UTC). `--dry-run` shows the
+  counts and what would change, writing nothing. The vendor keeps no history of these figures, so a snapshot is the only
+  record of where a member stood that day; taking another the same day replaces that day's, and earlier days are kept.
+- **`limits show`** prints the latest stored snapshot as headroom: limit, spent, share used, amount left, and where the
+  limit comes from (a limit set for the member, or inherited from a group, a seat tier or the organisation), most used first.
+  Members with **no limit** are listed last and show `no limit`. `--on-or-before 2026-10-31` shows an earlier snapshot.
+- **A headroom signal, not a ledger.** Anthropic calls the spend figure informational: it can read zero when unavailable
+  and can differ from the cost reports (for one tenant it matched to a fraction of a cent, for another it was several percent
+  higher). Use the cost reports for money, and this to see who is near a cap.
+- **It stops rather than store a wrong list.** If the list cannot be read in full, or comes back empty (which usually means
+  usage credits are off or the key lacks the scope), the command says so, exits non-zero and stores nothing. A `401`/`403` means
+  the key lacks `read:spend_limits` or usage credits are not enabled.
+
+The output names people, so keep it out of anything you commit.
+
 ### Running extraction on a schedule
 
 Run extraction daily. ChatGPT Enterprise's cost export keeps only about 29

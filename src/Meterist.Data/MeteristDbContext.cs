@@ -18,6 +18,7 @@ public sealed class MeteristDbContext : DbContext
 
     public DbSet<MemberRosterRecord> MemberRosterRecords => Set<MemberRosterRecord>();
     public DbSet<ActivitySummaryRecord> ActivitySummaryRecords => Set<ActivitySummaryRecord>();
+    public DbSet<SpendLimitRecord> SpendLimitRecords => Set<SpendLimitRecord>();
 
     public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
@@ -65,6 +66,27 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.Name).HasMaxLength(256);
             entity.Property(r => r.Role).HasMaxLength(64);
             entity.Property(r => r.SeatType).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<SpendLimitRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            // Natural key: one row per member per snapshot day per vendor per tenant. Retaking a snapshot the same
+            // day replaces it.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.SnapshotDate, r.MemberId }).IsUnique();
+
+            entity.Property(r => r.MemberId).HasMaxLength(256);
+            entity.Property(r => r.Email).HasMaxLength(320);
+            entity.Property(r => r.Name).HasMaxLength(256);
+            entity.Property(r => r.LimitAmount).HasPrecision(18, 4);
+            entity.Property(r => r.PeriodToDateSpend).HasPrecision(18, 4);
+            entity.Property(r => r.Currency).HasMaxLength(16);
+            entity.Property(r => r.Period).HasMaxLength(32);
+            entity.Property(r => r.SourceType).HasMaxLength(64);
+            entity.Property(r => r.SourceDetail).HasMaxLength(256);
+            entity.Property(r => r.SpendLimitId).HasMaxLength(256);
         });
 
         modelBuilder.Entity<ActivitySummaryRecord>(entity =>
