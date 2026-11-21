@@ -327,27 +327,6 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         };
     }
 
-    private async Task<ChatGptCredential> LoadCredentialAsync(string tenantId, CancellationToken cancellationToken)
-    {
-        var json = await _secretStore
-            .GetCredentialAsync(tenantId, VendorId, cancellationToken)
-            .ConfigureAwait(false);
-
-        // A missing/malformed credential is a configuration problem, not "no
-        // spend this period" — fail loudly rather than let it look like an
-        // empty-but-successful extraction.
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            throw new InvalidOperationException(
-                $"No ChatGPT Enterprise credential configured for tenant '{tenantId}'.");
-        }
-
-        if (!ChatGptCredential.TryParse(json, out var credential, out var error))
-        {
-            throw new InvalidOperationException(
-                $"ChatGPT Enterprise credential for tenant '{tenantId}' is invalid. {error}");
-        }
-
-        return credential;
-    }
+    private Task<ChatGptCredential> LoadCredentialAsync(string tenantId, CancellationToken cancellationToken) =>
+        ChatGptCredentialLoader.LoadAsync(_secretStore, tenantId, cancellationToken);
 }

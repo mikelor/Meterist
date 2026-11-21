@@ -43,7 +43,7 @@ public class RosterSnapshotServiceTests
         var added = new DateTimeOffset(2026, 3, 30, 0, 4, 14, TimeSpan.Zero);
         var service = Service(repo, [new VendorMember
         {
-            Id = "m1", Email = "a@example.test", Name = "Alex Example", Role = "owner", SeatType = "Premium", AddedAt = added,
+            Id = "m1", Email = "a@example.test", Name = "Alex Example", Role = "owner", SeatType = "Premium", IsScimManaged = true, AddedAt = added,
         }]);
 
         await service.TakeAsync("t1", Vendor, false, TestContext.Current.CancellationToken);
@@ -53,6 +53,7 @@ public class RosterSnapshotServiceTests
         Assert.Equal("Alex Example", stored.Name);
         Assert.Equal("owner", stored.Role);
         Assert.Equal("Premium", stored.SeatType);
+        Assert.True(stored.IsScimManaged);
         Assert.Equal(added, stored.AddedAt);
     }
 

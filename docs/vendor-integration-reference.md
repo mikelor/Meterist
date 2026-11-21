@@ -422,6 +422,21 @@ not adopted.
       and non-token SKUs) as a separate reconciling amount, not to switch source.
     - Reproduce with `scripts/QueryChatGptSourceComparison.sql` (per-day
       totals) and `scripts/QueryChatGptMondayDetail.sql` (per user and SKU).
+  - **Workspace member roster (issue #28, 2026-11-20).** `HttpChatGptWorkspaceUserRepository` reads
+    `GET /v1/manage/workspaces/{workspace_id}/users` (`limit=1000`, `after=` the previous page's `last_id` while
+    `has_more`) with the admin key and workspace ID already stored for the tenant. **The key Meterist already stores is
+    accepted** on both tenants, so no second credential is needed. A member is `object` (`workspace.user`), `id`,
+    `email`, `name`, `role`, `seat_type` and `is_scim_managed`; there is **no join date and no last-active field**
+    (so `AddedAt` is empty, and idle seats are roster members with no Daily Usage rows in the period, a later join).
+    Seen live: roles `owner`, `admin`, `member` and `analytics_viewer`; `seat_type` `chatgpt` on every member (the
+    documented other value is `codex`); `is_scim_managed` false on every member; name and email on every member; ids
+    unique. The list is **active members only**, excludes service accounts and is eventually consistent, so a removed
+    member drops out of the next snapshot. The pagination parameter is `after`: a `page` parameter is silently ignored
+    and returns the first page again, which a naive client would loop on (the client also refuses a cursor it has
+    already seen). Failures are loud: a blank or repeated cursor, a member with no id, or running out of pages throws,
+    because a partial list stored as a snapshot would read as people having left. A 401, 403 or 404 names the
+    `chatgpt.enterprise.user.read` scope and the workspace ID (a key for another workspace gets the same answer).
+    Stored by `meterist roster snapshot`, and by the scheduled run's `roster snapshot-all`.
   - **Per-user rows are stored (issue #17).** With a `WorkspaceId`, each
     extraction also queries the API with the default (per-user) grouping and
     keeps those rows in raw storage tagged `DailyUsageUser`, with the vendor's
@@ -462,7 +477,8 @@ not adopted.
   balance. `GET /v1/manage/workspaces/{workspace_id}/users` (added 2026-08-21)
   returns active members with `role` and `seat_type`, but **no last-active
   field**, so idle seats are computed as roster minus users with Daily Usage
-  rows. Other Compliance Logs event types (`CODEX_TURN`, `CONVERSATION_MESSAGE`,
+  rows. **Built and live-tested 2026-11-20 (issue #28):** see "Workspace member
+  roster" under the Daily Usage notes above. Other Compliance Logs event types (`CODEX_TURN`, `CONVERSATION_MESSAGE`,
   and others) exist; `CONVERSATION_MESSAGE` exposes message content and is not
   needed for spend. Availability of each endpoint is per workspace and plan,
   so confirm per tenant.

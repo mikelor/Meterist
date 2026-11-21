@@ -191,5 +191,6 @@ public sealed class EfMemberRosterRepository : IMemberRosterRepository
         && a.Name == b.Name
         && a.Role == b.Role
         && a.SeatType == b.SeatType
+        && a.IsScimManaged == b.IsScimManaged
         && a.AddedAt == b.AddedAt;
 }

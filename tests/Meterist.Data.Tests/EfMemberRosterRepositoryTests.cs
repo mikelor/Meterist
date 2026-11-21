@@ -40,7 +40,7 @@ public class EfMemberRosterRepositoryTests : IDisposable
         var added = new DateTimeOffset(2026, 3, 30, 0, 4, 14, TimeSpan.Zero);
 
         var result = await _repository.ReplaceSnapshotAsync("t1", Vendor, D1,
-            [Member("m1", D1, email: "a@example.test", name: "Alex Example", role: "owner", seat: "Premium", added: added)], ct);
+            [Member("m1", D1, email: "a@example.test", name: "Alex Example", role: "owner", seat: "Premium", added: added, scim: true)], ct);
 
         Assert.Equal(new RosterSnapshotResult(1, 0, 0, 0), result);
         var snapshot = await _repository.GetLatestSnapshotAsync("t1", Vendor, null, ct);
@@ -52,6 +52,7 @@ public class EfMemberRosterRepositoryTests : IDisposable
         Assert.Equal("Alex Example", stored.Name);
         Assert.Equal("owner", stored.Role);
         Assert.Equal("Premium", stored.SeatType);
+        Assert.True(stored.IsScimManaged);
         Assert.Equal(added, stored.AddedAt);
     }
 
@@ -67,6 +68,7 @@ public class EfMemberRosterRepositoryTests : IDisposable
         Assert.Null(stored.Name);
         Assert.Null(stored.Role);
         Assert.Null(stored.SeatType);
+        Assert.Null(stored.IsScimManaged);   // "the vendor did not say" is not "false"
         Assert.Null(stored.AddedAt);
     }
 
@@ -84,6 +86,22 @@ public class EfMemberRosterRepositoryTests : IDisposable
         var members = (await _repository.GetLatestSnapshotAsync("t1", Vendor, null, ct))!.Members;
         Assert.Equal(["change", "join", "keep"], members.Select(m => m.MemberId).Order());
         Assert.Equal("owner", members.Single(m => m.MemberId == "change").Role);
+    }
+
+    [Fact]
+    public async Task Replace_ChangeInOnlyIsScimManaged_IsAnUpdate_NotUnchanged()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _repository.ReplaceSnapshotAsync("t1", Vendor, D1, [Member("m1", D1, role: "member", scim: false)], ct);
+
+        var same = await _repository.PlanReplaceSnapshotAsync("t1", Vendor, D1, [Member("m1", D1, role: "member", scim: false)], ct);
+        var flipped = await _repository.ReplaceSnapshotAsync("t1", Vendor, D1, [Member("m1", D1, role: "member", scim: true)], ct);
+        var cleared = await _repository.ReplaceSnapshotAsync("t1", Vendor, D1, [Member("m1", D1, role: "member", scim: null)], ct);
+
+        Assert.Equal(new RosterSnapshotResult(0, 0, 1, 0), same);
+        Assert.Equal(new RosterSnapshotResult(0, 1, 0, 0), flipped);
+        Assert.Equal(new RosterSnapshotResult(0, 1, 0, 0), cleared);
+        Assert.Null(Assert.Single((await _repository.GetLatestSnapshotAsync("t1", Vendor, null, ct))!.Members).IsScimManaged);
     }
 
     [Fact]
@@ -281,7 +299,7 @@ public class EfMemberRosterRepositoryTests : IDisposable
 
     private static MemberRosterRecord Member(
         string id, DateOnly date, string? email = null, string? name = null, string? role = null,
-        string? seat = null, DateTimeOffset? added = null, string tenant = "t1", Guid? vendor = null) => new()
+        string? seat = null, DateTimeOffset? added = null, string tenant = "t1", Guid? vendor = null, bool? scim = null) => new()
     {
         TenantId = tenant,
         VendorId = vendor ?? Vendor,
@@ -291,6 +309,7 @@ public class EfMemberRosterRepositoryTests : IDisposable
         Name = name,
         Role = role,
         SeatType = seat,
+        IsScimManaged = scim,
         AddedAt = added,
     };
 }

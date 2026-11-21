@@ -13,6 +13,12 @@ public sealed class VendorMember
 
     public string? SeatType { get; init; }
 
+    /// <summary>
+    /// True when the member is provisioned and managed by the organisation's identity provider (SCIM), which the
+    /// vendor then will not let an API change. Null where the vendor does not say.
+    /// </summary>
+    public bool? IsScimManaged { get; init; }
+
     public DateTimeOffset? AddedAt { get; init; }
 }
 

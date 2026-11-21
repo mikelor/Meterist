@@ -61,6 +61,14 @@ builder.Services.AddHttpClient<IChatGptDailyUsageRepository, HttpChatGptDailyUsa
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IVendorSpendNormalizer, ChatGptEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ChatGptEnterpriseUserUsageNormalizer>();
+// The member list uses the same admin key and workspace ID as the Daily Usage API; auto-redirect stays off because
+// every request carries the bearer token.
+builder.Services.AddHttpClient<IChatGptWorkspaceUserRepository, HttpChatGptWorkspaceUserRepository>(client =>
+    {
+        client.BaseAddress = new Uri("https://api.chatgpt.com/");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<IVendorRosterSource, ChatGptEnterpriseRosterSource>();
 
 builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReportRepository>(client =>
 {
@@ -770,7 +778,7 @@ static Command BuildRosterCommand(IHost host)
             $"[bold]Meterist[/] — roster for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
             + $"snapshot of {snapshot.Date:yyyy-MM-dd} ({dates.Count} snapshot(s) stored)");
 
-        var table = new Table().AddColumns("Member", "Role", "Seat type", "Added");
+        var table = new Table().AddColumns("Member", "Role", "Seat type", "SCIM", "Added");
         foreach (var member in snapshot.Members)
         {
             var who = !string.IsNullOrWhiteSpace(member.Name) && !string.IsNullOrWhiteSpace(member.Email)
@@ -780,6 +788,7 @@ static Command BuildRosterCommand(IHost host)
                 Markup.Escape(who),
                 Markup.Escape(member.Role ?? "-"),
                 Markup.Escape(member.SeatType ?? "-"),
+                member.IsScimManaged switch { true => "yes", false => "no", null => "-" },
                 member.AddedAt is { } added ? added.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "-");
         }
 
