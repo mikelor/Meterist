@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMemberRosterRepository, EfMemberRosterRepository>();
         services.AddScoped<IActivitySummaryRepository, EfActivitySummaryRepository>();
         services.AddScoped<ISpendLimitRepository, EfSpendLimitRepository>();
+        services.AddScoped<IUserActivityRepository, EfUserActivityRepository>();
         services.AddScoped<IRawExtractionRepository, EfRawExtractionRepository>();
         services.AddScoped<IVendorRateConfigRepository, EfVendorRateConfigRepository>();
 

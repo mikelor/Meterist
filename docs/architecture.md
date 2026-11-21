@@ -545,6 +545,13 @@ unit, recorded in `Currency`, and credits are not converted). `ConfiguredSpendLi
 has a credential for (same shape as the roster's), and the scheduled run calls it as `limits snapshot-all` with exit bit 8; a key the
 vendor rejects is a failure, not a skip, because the figures cannot be backfilled (#83).
 
+**Per-person activity (2026-11-21, issue #23).** What each person did by product (messages, Claude Code, Cowork, Office) is a fifth
+opt-in seam, `IVendorUserActivitySource`, stored by `IUserActivityRepository` in `UserActivityRecords` (one row per tenant, vendor,
+day and user; the headline counts as columns and the vendor's whole row as JSON). It is activity, not cost, and sits beside the
+per-user spend rows. The vendor serves one day per request, so `UserActivityDayPlanner` picks the days worth asking about
+(the newest three, which are revised, and any day with no stored rows where the organisation's own active-user count says
+someone was active), and each fetched day is replaced as a whole. Only Claude Enterprise has a source so far.
+
 **Client identifiers stay out of logs (2026-11-21).** The ChatGPT organisation ID and workspace ID identify a client, and the
 debug log (on by default for the `Meterist` categories) gets pasted into chats and issues. No ChatGPT log line carries either: the
 extractor says only whether each is set, and the Daily Usage and `COSTS` clients log the window and page number, not a URL

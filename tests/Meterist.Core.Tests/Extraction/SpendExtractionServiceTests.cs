@@ -817,6 +817,183 @@ public class SpendExtractionServiceTests
             Task.FromResult<IReadOnlyList<ActivitySummaryRecord>>([]);
     }
 
+    [Fact]
+    public async Task ExtractAsync_VendorWithAUserActivitySource_FetchesThePlannedDays_AndStoresThem_AndSaysSo()
+    {
+        var vendorId = Guid.NewGuid();
+        var source = new FakeUserActivitySource(vendorId);
+        var repository = new FakeUserActivityRepository();
+        var today = new DateOnly(2026, 7, 26);   // so the newest fetchable day is the period's end, 2026-07-25
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, [])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            userActivitySources: [source], userActivityRepository: repository,
+            timeProvider: new FixedClock(new DateTimeOffset(today.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)));
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.Equal("ecosync", source.Tenant);
+        Assert.Equal(7, source.RequestedDays.Count);   // nothing stored yet, so the whole week
+        Assert.Equal(source.RequestedDays, repository.ReplacedDays);
+        Assert.Equal(7, repository.Written.Count);
+        Assert.Contains("user activity: 7 inserted", result.Detail);
+        Assert.Equal(7, result.UserActivity!.Inserted);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_AWindowThatIsAlreadyStored_AsksTheVendorOnlyForTheRecentDays()
+    {
+        var vendorId = Guid.NewGuid();
+        var source = new FakeUserActivitySource(vendorId);
+        var repository = new FakeUserActivityRepository();
+        foreach (var day in Period.EnumerateDays())
+        {
+            repository.Stored.Add(new UserActivityRecord { TenantId = "ecosync", VendorId = vendorId, Date = day, UserId = "u1" });
+        }
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, [])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            userActivitySources: [source], userActivityRepository: repository,
+            timeProvider: new FixedClock(new DateTimeOffset(2026, 7, 26, 6, 0, 0, TimeSpan.Zero)));
+
+        await service.ExtractAsync("ecosync", Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(UserActivityDayPlanner.DefaultRevisionDays, source.RequestedDays.Count);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DryRun_PlansTheUserActivityWithoutWritingIt()
+    {
+        var vendorId = Guid.NewGuid();
+        var repository = new FakeUserActivityRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, [])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            userActivitySources: [new FakeUserActivitySource(vendorId)], userActivityRepository: repository,
+            timeProvider: new FixedClock(new DateTimeOffset(2026, 7, 26, 6, 0, 0, TimeSpan.Zero)));
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, dryRun: true, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.Empty(repository.Written);
+        Assert.True(repository.Planned > 0);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_VendorWithNoUserActivitySource_IsUnaffected()
+    {
+        var vendorId = Guid.NewGuid();
+        var repository = new FakeUserActivityRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, [])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            userActivitySources: [new FakeUserActivitySource(Guid.NewGuid())], userActivityRepository: repository);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Null(result.UserActivity);
+        Assert.DoesNotContain("user activity", result.Detail);
+        Assert.Empty(repository.Written);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WhenTheUserActivitySourceFails_TheVendorFails_ButTheDailyTotalsAreAlreadyWritten()
+    {
+        var vendorId = Guid.NewGuid();
+        var dailyRepo = new FakeDailySpendRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), dailyRepo, new FakeVendorRateConfigRepository(),
+            NullLogger<SpendExtractionService>.Instance,
+            userActivitySources: [new FakeUserActivitySource(vendorId, throws: new InvalidOperationException("activity is down"))],
+            userActivityRepository: new FakeUserActivityRepository(),
+            timeProvider: new FixedClock(new DateTimeOffset(2026, 7, 26, 6, 0, 0, TimeSpan.Zero)));
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Failed, result.Status);
+        Assert.Contains("activity is down", result.Detail);
+        Assert.True(dailyRepo.WasCalled);   // a failure here must not lose the spend, which is the source of record
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class FakeUserActivitySource(Guid vendorId, Exception? throws = null) : IVendorUserActivitySource
+    {
+        public Guid VendorId => vendorId;
+
+        public string? Tenant { get; private set; }
+
+        public List<DateOnly> RequestedDays { get; } = [];
+
+        public Task<UserActivityFetch> FetchAsync(
+            string tenantId, IReadOnlyCollection<DateOnly> days, CancellationToken cancellationToken = default)
+        {
+            Tenant = tenantId;
+            RequestedDays.AddRange(days);
+            if (throws is not null)
+            {
+                return Task.FromException<UserActivityFetch>(throws);
+            }
+
+            // One active person on every requested day.
+            var records = days.Select(d => new UserActivityRecord { TenantId = tenantId, VendorId = vendorId, Date = d, UserId = "u1" }).ToList();
+            return Task.FromResult(new UserActivityFetch(records, days));
+        }
+    }
+
+    private sealed class FakeUserActivityRepository : IUserActivityRepository
+    {
+        public List<UserActivityRecord> Stored { get; } = [];
+
+        public List<UserActivityRecord> Written { get; } = [];
+
+        public List<DateOnly> ReplacedDays { get; } = [];
+
+        public int Planned { get; private set; }
+
+        public Task<UserActivityReplaceResult> ReplaceDaysAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> fetchedDays, IEnumerable<UserActivityRecord> records,
+            CancellationToken cancellationToken = default)
+        {
+            var list = records.ToList();
+            Written.AddRange(list);
+            ReplacedDays.AddRange(fetchedDays);
+            return Task.FromResult(new UserActivityReplaceResult(list.Count, 0, 0, 0));
+        }
+
+        public Task<UserActivityReplaceResult> PlanReplaceDaysAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> fetchedDays, IEnumerable<UserActivityRecord> records,
+            CancellationToken cancellationToken = default)
+        {
+            Planned += records.Count();
+            return Task.FromResult(new UserActivityReplaceResult(records.Count(), 0, 0, 0));
+        }
+
+        public Task<IReadOnlyList<UserActivityRecord>> GetAsync(
+            string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<UserActivityRecord>>(
+                Stored.Where(r => r.TenantId == tenantId && r.VendorId == vendorId && r.Date >= range.Start && r.Date <= range.End).ToList());
+    }
+
     private sealed class FakeUserNormalizer(Guid vendorId, IReadOnlyList<UserDailyUsageRecord> rows) : IVendorUserUsageNormalizer
     {
         public Guid VendorId => vendorId;

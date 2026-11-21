@@ -15,7 +15,7 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261121165035_AddSpendLimitPriorPeriodSpend";
+    public override string LastMigrationId => "20261121192631_AddUserActivityRecords";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -289,6 +289,87 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
                     .IsUnique();
 
                 b.ToTable("SpendLimitRecords");
+            });
+
+        modelBuilder.Entity("Meterist.Core.Models.UserActivityRecord", b =>
+            {
+                b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ChatConversations")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ChatMessages")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ClaudeCodeCommits")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ClaudeCodeLinesAdded")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ClaudeCodeLinesRemoved")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ClaudeCodePullRequests")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ClaudeCodeSessions")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("CoworkActions")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("CoworkMessages")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("CoworkSessions")
+                    .HasColumnType("INTEGER");
+
+                b.Property<DateOnly>("Date")
+                    .HasColumnType("TEXT");
+
+                b.Property<long>("DesignMessages")
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("DetailJson")
+                    .HasColumnType("TEXT");
+
+                b.Property<long>("OfficeMessages")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("OfficeSessions")
+                    .HasColumnType("INTEGER");
+
+                b.Property<long>("ScienceMessages")
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("TenantId")
+                    .IsRequired()
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("UserEmail")
+                    .HasMaxLength(320)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("UserId")
+                    .IsRequired()
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid>("VendorId")
+                    .HasColumnType("TEXT");
+
+                b.Property<long>("WebSearches")
+                    .HasColumnType("INTEGER");
+
+                b.HasKey("Id");
+
+                b.HasIndex("TenantId", "VendorId", "Date", "UserId")
+                    .IsUnique();
+
+                b.ToTable("UserActivityRecords");
             });
 
         modelBuilder.Entity("Meterist.Core.Models.UserDailyUsageRecord", b =>

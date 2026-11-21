@@ -4,11 +4,12 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, nine migrations:
+`src/Meterist.Data/Migrations/` — as of this writing, ten migrations:
 `20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
 `20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords`,
 `20261120193404_AddMemberRosterRecords`, `20261121063137_AddMemberRosterIsScimManaged` and
-`20261121065711_AddActivitySummaryRecords` and `20261121071447_AddSpendLimitRecords`, and `20261121165035_AddSpendLimitPriorPeriodSpend`.
+`20261121065711_AddActivitySummaryRecords` and `20261121071447_AddSpendLimitRecords`, `20261121165035_AddSpendLimitPriorPeriodSpend` and
+`20261121192631_AddUserActivityRecords`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -244,6 +245,40 @@ list are removed from that day), other days are never touched, a malformed batch
 an empty list is refused rather than stored. **Personal data:** names and emails stay in the database and out of logs and
 anything committed.
 
+### `UserActivityRecords`
+
+What each person did in the vendor's products on a day (`Meterist.Core.Models.UserActivityRecord`): one row per tenant, vendor,
+day and user, only for people who did something that day. Added by `AddUserActivityRecords`; **Claude Enterprise** (issue #23,
+the Analytics API's `/analytics/users`) populates it during `extract`. Read it with `users activity`. This is **activity, not
+cost**: a person can be busy and cost nothing on a seat plan, and a chat message is not a model request (one message with tool
+use is several requests), so these counts sit beside `UserDailyUsageRecords` and do not replace it. **Personal data:** the email.
+
+| Column | Type (SQLite) | Nullable | Notes |
+|---|---|---|---|
+| `Id` | `INTEGER` | No | Surrogate PK, `AUTOINCREMENT`. Shadow property. |
+| `TenantId` | `TEXT` | No | |
+| `VendorId` | `TEXT` | No | |
+| `Date` | `TEXT` | No | ISO `yyyy-MM-dd`, the UTC day. |
+| `UserId` | `TEXT` | No | The vendor's user id, the same as the roster member id (max 256). Part of the natural key. |
+| `UserEmail` | `TEXT` | Yes | Max 320. **Personal data.** |
+| `ChatMessages`, `ChatConversations` | `INTEGER` | No | Chat messages sent and distinct conversations. |
+| `ClaudeCodeSessions`, `ClaudeCodeCommits`, `ClaudeCodePullRequests`, `ClaudeCodeLinesAdded`, `ClaudeCodeLinesRemoved` | `INTEGER` | No | Claude Code core metrics. |
+| `CoworkSessions`, `CoworkActions`, `CoworkMessages` | `INTEGER` | No | Cowork. |
+| `OfficeSessions`, `OfficeMessages` | `INTEGER` | No | Office add-ins, summed across Excel, PowerPoint, Word and Outlook. |
+| `DesignMessages`, `ScienceMessages`, `WebSearches` | `INTEGER` | No | |
+| `DetailJson` | `TEXT` | Yes | The vendor's whole row for that person and day (every product's full metrics, including ones with no column), without the user's identity, so a count can be promoted to a column later without calling the vendor again. |
+
+All the counts are `0` (not null) for a product the person did not touch: no object for a product means no activity there.
+A fractional or negative count is refused when read, not truncated.
+
+**Primary key:** `Id` (surrogate).
+**Natural key / unique index:** `IX_UserActivityRecords_TenantId_VendorId_Date_UserId` on `(TenantId, VendorId, Date, UserId)`, **unique**.
+
+**Replaced per fetched day.** `extract` fetches only the days worth asking about (the newest three days, which the vendor revises,
+and any day with no stored rows where the organisation's own active-user count says someone was active), and for each fetched
+day the stored rows become exactly what came back: a revised count updates, a person who no longer appears is removed, and a
+day that was not fetched is never touched. The first `extract` after a day is published stores it, so activity trails spend by a day.
+
 ### `RawDailyExtractionRecords`
 
 Raw, unnormalized vendor API responses, kept alongside the normalized
@@ -321,7 +356,7 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
 live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied). The
 `UserDailyUsageRecords` and `DailySpendBreakdownRecords` tables and their indexes at the end
-were added afterwards (as were `MemberRosterRecords`, `ActivitySummaryRecords` and `SpendLimitRecords`), taken from a freshly migrated empty database,
+were added afterwards (as were `MemberRosterRecords`, `ActivitySummaryRecords`, `SpendLimitRecords` and `UserActivityRecords`), taken from a freshly migrated empty database,
 not the live file; regenerate the whole dump from the live database once
 `AddMemberRosterRecords` has been applied there:
 
@@ -454,4 +489,29 @@ CREATE TABLE IF NOT EXISTS "SpendLimitRecords" (
     "SpendLimitId" TEXT NULL
 );
 CREATE UNIQUE INDEX "IX_SpendLimitRecords_TenantId_VendorId_SnapshotDate_MemberId" ON "SpendLimitRecords" ("TenantId", "VendorId", "SnapshotDate", "MemberId");
+CREATE TABLE IF NOT EXISTS "UserActivityRecords" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_UserActivityRecords" PRIMARY KEY AUTOINCREMENT,
+    "TenantId" TEXT NOT NULL,
+    "VendorId" TEXT NOT NULL,
+    "Date" TEXT NOT NULL,
+    "UserId" TEXT NOT NULL,
+    "UserEmail" TEXT NULL,
+    "ChatMessages" INTEGER NOT NULL,
+    "ChatConversations" INTEGER NOT NULL,
+    "ClaudeCodeSessions" INTEGER NOT NULL,
+    "ClaudeCodeCommits" INTEGER NOT NULL,
+    "ClaudeCodePullRequests" INTEGER NOT NULL,
+    "ClaudeCodeLinesAdded" INTEGER NOT NULL,
+    "ClaudeCodeLinesRemoved" INTEGER NOT NULL,
+    "CoworkSessions" INTEGER NOT NULL,
+    "CoworkActions" INTEGER NOT NULL,
+    "CoworkMessages" INTEGER NOT NULL,
+    "OfficeSessions" INTEGER NOT NULL,
+    "OfficeMessages" INTEGER NOT NULL,
+    "DesignMessages" INTEGER NOT NULL,
+    "ScienceMessages" INTEGER NOT NULL,
+    "WebSearches" INTEGER NOT NULL,
+    "DetailJson" TEXT NULL
+);
+CREATE UNIQUE INDEX "IX_UserActivityRecords_TenantId_VendorId_Date_UserId" ON "UserActivityRecords" ("TenantId", "VendorId", "Date", "UserId");
 ```

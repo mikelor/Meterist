@@ -28,12 +28,24 @@ public sealed record VendorExtractionResult(
     IReadOnlyList<DailySpendChange>? Changes = null,
     UserUsageUpsertResult? UserUsage = null,
     BreakdownReplaceResult? Breakdown = null,
-    ActivitySummaryUpsertResult? ActivitySummaries = null);
+    ActivitySummaryUpsertResult? ActivitySummaries = null,
+    UserActivityReplaceResult? UserActivity = null);
 
 public static class DailySpendChangeExtensions
 {
     /// <summary>One-line account of a breakdown replace, e.g. "3 inserted, 40 unchanged, 1 removed". Zero counts are left out.</summary>
     public static string Summarize(this BreakdownReplaceResult result)
+    {
+        var parts = new List<string>();
+        if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");
+        if (result.Updated > 0) parts.Add($"{result.Updated} updated");
+        if (result.Removed > 0) parts.Add($"{result.Removed} removed");
+        if (result.Unchanged > 0) parts.Add($"{result.Unchanged} unchanged");
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
+    }
+
+    /// <summary>One-line account of a per-person activity replace, e.g. "6 inserted, 40 unchanged". Zero counts are left out.</summary>
+    public static string Summarize(this UserActivityReplaceResult result)
     {
         var parts = new List<string>();
         if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");

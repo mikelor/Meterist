@@ -73,6 +73,22 @@ public class RosterHttpClientsLoggingTests
         Assert.DoesNotContain(logs.Lines, l => l.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal));
     }
     [Fact]
+    public async Task TheClaudeUserActivityClient_WritesNoRequestLogAtAll_AndNothingPersonal()
+    {
+        // Its cursor is base64 of a JSON object holding a member's email, so the URL after page one is personal data.
+        var logs = new CapturingProvider();
+        var handler = new PagedHandler(ActivityPage1, ActivityPage2);
+        using var provider = Build(logs, services => services.AddClaudeUserActivityHttpClient(), handler);
+
+        var rows = await provider.GetRequiredService<IClaudeUserActivityRepository>()
+            .QueryDayAsync("the-admin-key", new DateOnly(2026, 11, 18), TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, rows!.Count);
+        Assert.Equal([true, true], handler.Marked);
+        AssertNothingLeaked(logs);
+        Assert.DoesNotContain(logs.Lines, l => l.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal));
+    }
+    [Fact]
     public async Task Control_AnOrdinaryClientInTheSameSetup_DoesLogItsRequests()
     {
         var logs = new CapturingProvider();
@@ -131,6 +147,11 @@ public class RosterHttpClientsLoggingTests
 
     private const string SpendPage2 =
         """{ "data": [ { "id": "user_SECOND", "email": "second@example.test", "name": "Second Person", "current_month_usage": 2 } ], "has_more": false, "cursor": null }""";
+    private const string ActivityPage1 =
+        $$"""{ "data": [ { "user": { "id": "user_FIRST", "email_address": "first@example.test" }, "chat_metrics": { "message_count": 1 } } ], "next_page": "{{Cursor}}" }""";
+
+    private const string ActivityPage2 =
+        """{ "data": [ { "user": { "id": "user_SECOND", "email_address": "second@example.test" }, "chat_metrics": { "message_count": 2 } } ], "next_page": null }""";
     private const string ClaudePage1 = ChatGptPage1;
 
     private const string ClaudePage2 = ChatGptPage2;

@@ -44,6 +44,22 @@ public static class RosterHttpClients
         return services;
     }
 
+    /// <summary>
+    /// The Claude per-person activity endpoint. Its pagination cursor is base64 of JSON holding a member's email address, so the
+    /// factory's request logging is removed and requests are marked sensitive (see <see cref="HttpClaudeUserActivityRepository"/>).
+    /// </summary>
+    public static IServiceCollection AddClaudeUserActivityHttpClient(this IServiceCollection services)
+    {
+        services
+            .AddHttpClient<IClaudeUserActivityRepository, HttpClaudeUserActivityRepository>(client =>
+            {
+                client.BaseAddress = new Uri("https://api.anthropic.com/");
+            })
+            .RemoveAllLoggers();
+
+        return services;
+    }
+
     public static IServiceCollection AddClaudeRosterHttpClient(this IServiceCollection services)
     {
         services

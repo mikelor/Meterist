@@ -209,6 +209,29 @@ not adopted.
       guards, marks its requests sensitive and registers its client without factory request logging (the cursor may encode a
       member). A null limit or `unlimited` is stored as no limit, a limit it cannot read fails the snapshot rather than being stored
       as no limit, and missing usage is stored as missing, never zero.
+  - **Live test of `/analytics/users` (issue #23, 2026-11-21, read-only, both tenants, the existing Analytics key).**
+    - **No beta header** is needed; the same key works.
+    - **Two modes:** `date=` for one day, or `starting_date` and `ending_date` (exclusive end) for a rollup over a range, max 366
+      days, not before 2026-01-01. **The rollup is exactly the sum of the single days:** for seven days, every user's chat message
+      total from seven single-day calls equalled the rollup, and no user appeared in only one. So single days lose nothing.
+    - **Rows exist only for people active in the period**: 5 and 6 rows for single days on one tenant, 10 users in a week and 12
+      over the whole year there, 23 and 37 on the other. A response is `data` and `next_page` (`limit` up to 1000, one page was
+      enough). A whole year as a rollup was about 41 KB and 128 KB.
+    - **Row shape:** `user` (`type` `user`, `id`, `email_address`) beside nested per-product metrics, about 110 integer leaves:
+      `chat_metrics`, `claude_code_metrics` (`core_metrics` with sessions, commits, pull requests and `lines_of_code`, and
+      `tool_actions` accepted and rejected counts), `office_metrics` (`excel`, `outlook`, `powerpoint`, `word`),
+      `cowork_metrics`, `design_metrics`, `science_metrics`, `chat_cowork_unified_metrics` (`chat` and `sessions`),
+      `claude_tag_metrics`, `web_search_count`, `last_activity_date`, and `distinct_user_count` (null per person). A product the
+      person did not touch is an object of zeros or a null, so a missing count is zero activity. `user.id` is the same id as the
+      roster member id.
+    - **Dates:** the newest day is yesterday (UTC); a later `date` or `ending_date` is a 400 naming it ("Latest available data
+      for this query is 2026-11-20"), and a date before 2026-01-01 is a 400 ("Data is only available from 2026-01-01 onwards").
+    - **The cursor is personal data.** `next_page` is base64 of a small JSON object (`last_email`, `date`, `desc`, `qh`), so it
+      carries a member's **email address**. The cursors of `/spend_limits/effective` and `/analytics/cost` are opaque. Meterist
+      therefore registers this client without the HTTP client factory's request logging, marks every request sensitive so
+      OpenTelemetry drops it from traces, and never logs a URL.
+    - **How Meterist uses it:** single-day mode, only for days the planner picks (see the user guide), the headline counts as
+      columns and the whole row as JSON; a day the API does not have yet is skipped and left alone.
   - **Live test of `/spend_limits/effective` (issue #26, 2026-11-20, read-only, both tenants, the existing Analytics
     key).**
     - **One key holds all three scopes.** The Analytics key Meterist already stores for each tenant is accepted by this

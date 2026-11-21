@@ -104,6 +104,8 @@ builder.Services.AddHttpClient<IClaudeSpendLimitRepository, HttpClaudeSpendLimit
     client.BaseAddress = new Uri("https://api.anthropic.com/");
 });
 builder.Services.AddSingleton<IVendorSpendLimitSource, ClaudeEnterpriseSpendLimitSource>();
+builder.Services.AddClaudeUserActivityHttpClient();
+builder.Services.AddSingleton<IVendorUserActivitySource, ClaudeEnterpriseUserActivitySource>();
 builder.Services.AddChatGptSpendControlsHttpClient();
 builder.Services.AddSingleton<IVendorSpendLimitSource, ChatGptEnterpriseSpendLimitSource>();
 
@@ -1209,8 +1211,98 @@ static Command BuildUsersCommand(IHost host)
         return 0;
     });
 
+    var activityTopOption = new Option<int?>("--top") { Description = "Show only the N most active people, then a line for the rest" };
+
+    var activityCommand = new Command(
+        "activity",
+        "Per-person product activity over a period (named by email): days active, last active day, messages, Claude Code "
+        + "sessions, commits and pull requests, Cowork sessions and web searches, from the stored activity rows. Activity is "
+        + "not cost: a person can be busy and cost nothing on a seat plan. Read-only.");
+    activityCommand.Options.Add(tenantOption);
+    activityCommand.Options.Add(fromOption);
+    activityCommand.Options.Add(toOption);
+    activityCommand.Options.Add(activityTopOption);
+
+    activityCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var period = new DateRange(
+            DateOnly.FromDateTime(parseResult.GetValue(fromOption)), DateOnly.FromDateTime(parseResult.GetValue(toOption)));
+        var top = parseResult.GetValue(activityTopOption);
+
+        if (period.Start > period.End)
+        {
+            AnsiConsole.MarkupLine("[red]--from must not be after --to.[/]");
+            return 1;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IUserActivityRepository>();
+        var rows = await repository.GetAsync(tenantId, VendorCatalog.ClaudeEnterprise.Id, period, cancellationToken);
+
+        if (rows.Count == 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No activity rows are stored for {Markup.Escape(tenantId)} / Claude Enterprise from {period.Start:yyyy-MM-dd} "
+                + $"to {period.End:yyyy-MM-dd}.[/] Run extract first (it stores them for the days it has not read yet).");
+            return 0;
+        }
+
+        var people = rows
+            .GroupBy(r => r.UserId, StringComparer.Ordinal)
+            .Select(g => new
+            {
+                Id = g.Key,
+                Email = g.OrderByDescending(r => r.Date).Select(r => r.UserEmail).FirstOrDefault(e => !string.IsNullOrWhiteSpace(e)),
+                Days = g.Select(r => r.Date).Distinct().Count(),
+                Last = g.Max(r => r.Date),
+                Messages = g.Sum(r => r.ChatMessages + r.CoworkMessages + r.OfficeMessages + r.DesignMessages + r.ScienceMessages),
+                CodeSessions = g.Sum(r => r.ClaudeCodeSessions),
+                Commits = g.Sum(r => r.ClaudeCodeCommits),
+                PullRequests = g.Sum(r => r.ClaudeCodePullRequests),
+                CoworkSessions = g.Sum(r => r.CoworkSessions),
+                Searches = g.Sum(r => r.WebSearches),
+            })
+            .OrderByDescending(p => p.Days)
+            .ThenByDescending(p => p.Messages)
+            .ThenBy(p => p.Email ?? p.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        AnsiConsole.MarkupLine(
+            $"[bold]Meterist[/] — activity for [yellow]{Markup.Escape(tenantId)}[/] / Claude Enterprise, "
+            + $"{period.Start:yyyy-MM-dd} to {period.End:yyyy-MM-dd} ({rows.Select(r => r.Date).Distinct().Count()} day(s) with activity stored, "
+            + $"{people.Count} active person(s))");
+
+        var table = new Table().AddColumns("Person", "Days active", "Last active", "Messages", "Code sessions", "Commits", "PRs", "Cowork sessions", "Searches");
+        foreach (var p in people.Take(top ?? people.Count))
+        {
+            table.AddRow(
+                Markup.Escape(p.Email ?? p.Id),
+                p.Days.ToString(CultureInfo.InvariantCulture),
+                p.Last.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                p.Messages.ToString("N0", CultureInfo.InvariantCulture),
+                p.CodeSessions.ToString("N0", CultureInfo.InvariantCulture),
+                p.Commits.ToString("N0", CultureInfo.InvariantCulture),
+                p.PullRequests.ToString("N0", CultureInfo.InvariantCulture),
+                p.CoworkSessions.ToString("N0", CultureInfo.InvariantCulture),
+                p.Searches.ToString("N0", CultureInfo.InvariantCulture));
+        }
+
+        AnsiConsole.Write(table);
+        if (top is { } n && people.Count > n)
+        {
+            AnsiConsole.MarkupLine($"  {people.Count - n} more person(s) not shown.");
+        }
+
+        AnsiConsole.MarkupLine(
+            "  Messages are chat, Cowork, Office, Design and Science messages together. Activity is counts of what people did, not "
+            + "model requests and not cost. The output names people, so keep it out of anything you commit.");
+        return 0;
+    });
+
     var usersCommand = new Command("users", "Per-user views of the stored usage data");
     usersCommand.Subcommands.Add(usageCommand);
+    usersCommand.Subcommands.Add(activityCommand);
     return usersCommand;
 }
 
