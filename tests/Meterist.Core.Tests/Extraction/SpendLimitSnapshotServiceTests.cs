@@ -17,7 +17,7 @@ public class SpendLimitSnapshotServiceTests
         var service = Service(
             new FakeSource(Vendor,
             [
-                new VendorSpendLimit { MemberId = "m1", LimitAmount = 500m, PeriodToDateSpend = 12m, SourceType = "seat_tier", SourceDetail = "tier" },
+                new VendorSpendLimit { MemberId = "m1", LimitAmount = 500m, PeriodToDateSpend = 12m, PriorPeriodSpend = 9m, SourceType = "seat_tier", SourceDetail = "tier" },
                 new VendorSpendLimit { MemberId = "m2", LimitAmount = null, PeriodToDateSpend = 0m },
             ]),
             repository);
@@ -35,6 +35,7 @@ public class SpendLimitSnapshotServiceTests
         });
         var first = repository.Stored.Single(r => r.MemberId == "m1");
         Assert.Equal((500m, 12m, "seat_tier", "tier"), (first.LimitAmount, first.PeriodToDateSpend, first.SourceType, first.SourceDetail));
+        Assert.Equal(9m, first.PriorPeriodSpend);
         Assert.Null(repository.Stored.Single(r => r.MemberId == "m2").LimitAmount);
     }
 

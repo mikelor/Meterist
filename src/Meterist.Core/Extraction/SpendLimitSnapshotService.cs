@@ -76,6 +76,7 @@ public sealed class SpendLimitSnapshotService
             Name = l.Name,
             LimitAmount = l.LimitAmount,
             PeriodToDateSpend = l.PeriodToDateSpend,
+            PriorPeriodSpend = l.PriorPeriodSpend,
             Currency = l.Currency,
             Period = l.Period,
             SourceType = l.SourceType,

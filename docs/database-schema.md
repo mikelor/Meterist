@@ -4,11 +4,11 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, eight migrations:
+`src/Meterist.Data/Migrations/` — as of this writing, nine migrations:
 `20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
 `20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords`,
 `20261120193404_AddMemberRosterRecords`, `20261121063137_AddMemberRosterIsScimManaged` and
-`20261121065711_AddActivitySummaryRecords` and `20261121071447_AddSpendLimitRecords`.
+`20261121065711_AddActivitySummaryRecords` and `20261121071447_AddSpendLimitRecords`, and `20261121165035_AddSpendLimitPriorPeriodSpend`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -209,7 +209,8 @@ because the vendor publishes the newest day the next day and an absent row does 
 
 Each member's spend limit and what they had spent against it, as the vendor reported it on a day
 (`Meterist.Core.Models.SpendLimitRecord`): one row per tenant, vendor, snapshot date and member. Added by
-`AddSpendLimitRecords`; **Claude Enterprise** (issue #26, from the Spend Limits API) populates it with `limits snapshot`.
+`AddSpendLimitRecords` (and `PriorPeriodSpend` by `AddSpendLimitPriorPeriodSpend`); **Claude Enterprise** (issue #26, the Spend
+Limits API) and **ChatGPT Enterprise** (issue #29, Spend Controls) populate it with `limits snapshot`.
 Snapshots are dated and kept, because the vendor exposes no history; one per day shows how fast a member is using their
 limit. Read it with `limits show`.
 
@@ -225,12 +226,13 @@ sum of members' spend equalled the cost report for one tenant and was several pe
 | `MemberId` | `TEXT` | No | The vendor's stable member id (max 256). Part of the natural key. |
 | `Email` | `TEXT` | Yes | Max 320. **Personal data.** |
 | `Name` | `TEXT` | Yes | Max 256. **Personal data.** |
-| `LimitAmount` | `TEXT` | Yes | The limit for the period, in dollars (the API sends cents; stored divided by 100). **`NULL` means the member has no limit, not zero.** |
-| `PeriodToDateSpend` | `TEXT` | Yes | Spend against the limit this period, in dollars, informational. |
-| `Currency` | `TEXT` | Yes | As the vendor states it (`USD`). Max 16. |
+| `LimitAmount` | `TEXT` | Yes | The limit for the period, in `Currency` units (Claude sends cents, stored divided by 100; ChatGPT sends credits as they are). **`NULL` means the member has no limit, not zero.** |
+| `PeriodToDateSpend` | `TEXT` | Yes | Spend against the limit this period, in `Currency` units, informational. |
+| `PriorPeriodSpend` | `TEXT` | Yes | Spend in the previous period, for vendors that report it (ChatGPT `last_month_usage`; Claude never does). `NULL` when unavailable, which is not zero. Both live tenants returned it as null. |
+| `Currency` | `TEXT` | Yes | The unit of the three amounts, as the vendor states it: `USD` for Claude; `credit` (both live ChatGPT tenants) or `usd` for ChatGPT. **Credits are not converted to dollars here.** Max 16. |
 | `Period` | `TEXT` | Yes | The period the limit applies to (`monthly`). Max 32. |
-| `SourceType` | `TEXT` | Yes | Where the limit comes from: `user` (set for this member), `rbac_group`, `seat_tier` or `organization`. Max 64. |
-| `SourceDetail` | `TEXT` | Yes | The group id or seat tier name it is inherited from; `NULL` for a per-member limit. Max 256. |
+| `SourceType` | `TEXT` | Yes | Where the limit comes from. Claude: `user`, `rbac_group`, `seat_tier` or `organization`. ChatGPT: `individual_override`, `group_default`, `workspace_default` or `role_based_personal_budget`. Max 64. |
+| `SourceDetail` | `TEXT` | Yes | What it is inherited from; `NULL` for a per-member limit. Claude: the group id or seat tier. ChatGPT: the group name, else group id, seat type, role name or role id (the most readable one the API gave). Max 256. |
 | `SpendLimitId` | `TEXT` | Yes | The vendor's id for the limit. Max 256. |
 
 **Primary key:** `Id` (surrogate).
@@ -444,6 +446,7 @@ CREATE TABLE IF NOT EXISTS "SpendLimitRecords" (
     "Name" TEXT NULL,
     "LimitAmount" TEXT NULL,
     "PeriodToDateSpend" TEXT NULL,
+    "PriorPeriodSpend" TEXT NULL,
     "Currency" TEXT NULL,
     "Period" TEXT NULL,
     "SourceType" TEXT NULL,

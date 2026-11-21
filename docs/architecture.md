@@ -540,8 +540,8 @@ are written, so a failure marks the vendor failed without losing spend. Only Cla
 **Spend limits (2026-11-20, issue #26).** Per-member spend limits are current state, not a date range, so like the roster
 they are a dated snapshot taken on demand rather than part of `extract`: `IVendorSpendLimitSource`,
 `SpendLimitSnapshotService` and `ISpendLimitRepository` storing `SpendLimitRecords` (replace-whole-snapshot, empty list
-refused). Only Claude Enterprise has a source so far; the ChatGPT counterpart (#29) can share the model. Taking these in
-the scheduled run is not wired up yet.
+refused). Claude Enterprise (#26) and ChatGPT Enterprise (#29) have sources, sharing the one model (amounts are in the vendor's own
+unit, recorded in `Currency`, and credits are not converted). Taking these in the scheduled run is not wired up yet.
 
 **Member-id cursors stay out of logs and traces (2026-11-20).** The roster
 endpoints paginate with a cursor that is a member id (`after=<last_id>`), so

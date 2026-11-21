@@ -44,7 +44,7 @@ public class EfSpendLimitRepositoryTests : IDisposable
             {
                 TenantId = "t1", VendorId = Vendor, SnapshotDate = D1, MemberId = "m1",
                 Email = "a@example.test", Name = "Alex Example",
-                LimitAmount = 500.25m, PeriodToDateSpend = 123.4567m, Currency = "USD", Period = "monthly",
+                LimitAmount = 500.25m, PeriodToDateSpend = 123.4567m, PriorPeriodSpend = 77.125m, Currency = "USD", Period = "monthly",
                 SourceType = "rbac_group", SourceDetail = "grp_1", SpendLimitId = "spl_1",
             },
             Row("m2", D1, limit: null, spent: 0m),
@@ -56,12 +56,13 @@ public class EfSpendLimitRepositoryTests : IDisposable
         Assert.Equal(D1, snapshot.Date);
 
         var first = snapshot.Limits.Single(l => l.MemberId == "m1");
-        Assert.Equal((500.25m, 123.4567m), (first.LimitAmount, first.PeriodToDateSpend));
+        Assert.Equal((500.25m, 123.4567m, 77.125m), (first.LimitAmount, first.PeriodToDateSpend, first.PriorPeriodSpend));
         Assert.Equal(("USD", "monthly", "rbac_group", "grp_1", "spl_1"), (first.Currency, first.Period, first.SourceType, first.SourceDetail, first.SpendLimitId));
         Assert.Equal(("a@example.test", "Alex Example"), (first.Email, first.Name));
 
         var none = snapshot.Limits.Single(l => l.MemberId == "m2");
         Assert.Null(none.LimitAmount);   // no limit is not zero
+        Assert.Null(none.PriorPeriodSpend);   // unavailable is not zero
         Assert.Equal(0m, none.PeriodToDateSpend);
     }
 
@@ -96,6 +97,18 @@ public class EfSpendLimitRepositoryTests : IDisposable
         Assert.Equal(D1, earlier!.Date);
         Assert.Equal(10m, Assert.Single(earlier.Limits).PeriodToDateSpend);   // the earlier day was not touched
         Assert.Null(before);
+    }
+
+    [Fact]
+    public async Task Replace_AChangedPriorPeriodSpend_CountsAsAnUpdate()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _repository.ReplaceSnapshotAsync("t1", Vendor, D1, [Row("m1", D1, 100m, 10m)], ct);
+
+        var result = await _repository.ReplaceSnapshotAsync("t1", Vendor, D1,
+            [new SpendLimitRecord { TenantId = "t1", VendorId = Vendor, SnapshotDate = D1, MemberId = "m1", LimitAmount = 100m, PeriodToDateSpend = 10m, PriorPeriodSpend = 5m }], ct);
+
+        Assert.Equal(new SpendLimitSnapshotResult(0, 1, 0, 0), result);
     }
 
     [Fact]

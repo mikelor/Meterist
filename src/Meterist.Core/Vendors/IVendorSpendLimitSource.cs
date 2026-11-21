@@ -14,6 +14,9 @@ public sealed class VendorSpendLimit
 
     public decimal? PeriodToDateSpend { get; init; }
 
+    /// <summary>What the member spent in the previous period, for vendors that report it. Null where they do not or it is unavailable.</summary>
+    public decimal? PriorPeriodSpend { get; init; }
+
     public string? Currency { get; init; }
 
     public string? Period { get; init; }

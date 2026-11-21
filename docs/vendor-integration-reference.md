@@ -189,6 +189,26 @@ not adopted.
     `period_to_date_spend`. Anthropic calls that figure informational (it can
     read `"0"` when unavailable), so treat it as a headroom signal, not a
     ledger.
+  - **ChatGPT Spend Controls `usage_limits/users` (issue #29, 2026-11-20, read-only, both tenants, the existing admin key and workspace).**
+    - **The stored admin key already works** (it carries `chatgpt.enterprise.usage_limit.read`); no second credential. The
+      write endpoints are deliberately not used.
+    - **Shape:** `object`, `data`, `has_more`, `cursor`, `last_id`. A row has `id`, `account_user_id`, `name`, `email`, `role`
+      (`account-owner`, `account-admin`, `analytics-viewer`, `standard-user`), `seat_type` (`default`, `automation`, or null),
+      `is_scim_managed`, `last_month_usage` (**null on both tenants**), `current_month_usage` plus
+      `current_month_usage_amount {amount, unit}`, `override_monthly_usage_limit` (null even for members whose limit comes from
+      an override), `inherited_monthly_usage_limit` (null) and `effective_monthly_usage_limit`.
+    - **`effective_monthly_usage_limit` is null for no limit** (all 29 members on one tenant, 16 of 33 on the other); otherwise
+      `{limit: {limit, type}, source: {kind, ...}}` with `type` `limited` seen (`unlimited` and a `limit_amount {amount, unit}` are
+      documented but did not appear) and `source.kind` `group_default` (with `group_id` and `group_name`) or `individual_override`
+      (no other fields). Note the nesting: the number is `effective_monthly_usage_limit.limit.limit`.
+    - **Units: credits** on both tenants (`credit`, fractional usage such as 298.0161). Amounts are not converted to dollars; a
+      USD-billed workspace reports `usd`.
+    - **Pagination:** `limit` up to 500 (both tenants fit in one page), and the response's opaque 88-character `cursor` goes
+      back as `cursor` (it is not `last_id`). Paging 5 at a time reproduced exactly the full list on both tenants.
+    - **How Meterist uses it:** `HttpChatGptSpendControlsRepository` follows `has_more` and `cursor` with blank and repeated-cursor
+      guards, marks its requests sensitive and registers its client without factory request logging (the cursor may encode a
+      member). A null limit or `unlimited` is stored as no limit, a limit it cannot read fails the snapshot rather than being stored
+      as no limit, and missing usage is stored as missing, never zero.
   - **Live test of `/spend_limits/effective` (issue #26, 2026-11-20, read-only, both tenants, the existing Analytics
     key).**
     - **One key holds all three scopes.** The Analytics key Meterist already stores for each tenant is accepted by this

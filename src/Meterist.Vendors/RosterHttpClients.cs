@@ -27,6 +27,23 @@ public static class RosterHttpClients
         return services;
     }
 
+    /// <summary>
+    /// The ChatGPT Spend Controls list. Same treatment as the roster client: its cursor is opaque but may encode a
+    /// member, so the factory's request logging is removed and requests are marked sensitive; auto-redirect is off.
+    /// </summary>
+    public static IServiceCollection AddChatGptSpendControlsHttpClient(this IServiceCollection services)
+    {
+        services
+            .AddHttpClient<IChatGptSpendControlsRepository, HttpChatGptSpendControlsRepository>(client =>
+            {
+                client.BaseAddress = new Uri("https://api.chatgpt.com/");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+            .RemoveAllLoggers();
+
+        return services;
+    }
+
     public static IServiceCollection AddClaudeRosterHttpClient(this IServiceCollection services)
     {
         services
