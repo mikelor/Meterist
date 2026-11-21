@@ -34,7 +34,7 @@ public class ChatGptCredentialTests
     }
 
     [Theory]
-    [InlineData("org-p0eqTD5STLjs3cBadNSg9uya")]
+    [InlineData("org-ExamplePlaceholder0000")]   // an organization ID (org-...) pasted where the workspace UUID belongs
     [InlineData("not-a-uuid")]
     [InlineData("")]
     [InlineData("   ")]
