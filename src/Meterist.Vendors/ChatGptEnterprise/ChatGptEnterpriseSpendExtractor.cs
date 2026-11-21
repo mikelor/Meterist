@@ -66,10 +66,14 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
 
         var credential = await LoadCredentialAsync(tenantId, cancellationToken).ConfigureAwait(false);
 
+        // Whether each ID is set, never the ID: both identify a client, and this log is routinely pasted into chats and
+        // issues. Neither is a credential, but the repository is public and the convention is to keep them out of it.
         _logger.LogDebug(
-            "Resolved ChatGPT Enterprise credential for tenant '{TenantId}': organization '{OrganizationId}', "
-            + "workspace '{WorkspaceId}'.",
-            tenantId, credential.OrganizationId, credential.WorkspaceId ?? "(not set)");
+            "Resolved ChatGPT Enterprise credential for tenant '{TenantId}': organization ID {OrganizationIdState}, "
+            + "workspace ID {WorkspaceIdState}.",
+            tenantId,
+            string.IsNullOrWhiteSpace(credential.OrganizationId) ? "not set" : "set",
+            string.IsNullOrWhiteSpace(credential.WorkspaceId) ? "not set" : "set");
 
         if (string.IsNullOrWhiteSpace(credential.WorkspaceId))
         {
