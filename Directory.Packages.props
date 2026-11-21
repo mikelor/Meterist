@@ -6,8 +6,6 @@
        different version, use VersionOverride on that reference and say why. -->
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <!-- Lets a PackageVersion below also fix a package that only arrives transitively (see the pin at the end). -->
-    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
   <!-- Framework-tracking packages: keep these on the same 11.0.x line as the SDK. -->
@@ -45,17 +43,9 @@
   <ItemGroup>
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
-    <PackageVersion Include="WireMock.Net" Version="2.13.0" />
+    <PackageVersion Include="WireMock.Net" Version="2.32.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
-  </ItemGroup>
-
-  <!-- Transitive pin for advisory GHSA-6527-9fp8-r4x6 (CVE-2026-118750, denial of service, fixed in 2.3.14). The vulnerable
-       2.3.0 arrives only through WireMock.Net -> WireMock.Net.Shared -> Microsoft.AspNetCore.Http 2.3.9, which is referenced by
-       the test projects alone: no shipped project depends on it. Remove this pin once WireMock.Net (or
-       Microsoft.AspNetCore.Http) depends on 2.3.14 or later. Check with: dotnet nuget why <test project> Microsoft.AspNetCore.WebUtilities. -->
-  <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.WebUtilities" Version="2.3.14" />
   </ItemGroup>
 
 </Project>
