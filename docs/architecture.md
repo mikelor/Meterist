@@ -541,7 +541,9 @@ are written, so a failure marks the vendor failed without losing spend. Only Cla
 they are a dated snapshot taken on demand rather than part of `extract`: `IVendorSpendLimitSource`,
 `SpendLimitSnapshotService` and `ISpendLimitRepository` storing `SpendLimitRecords` (replace-whole-snapshot, empty list
 refused). Claude Enterprise (#26) and ChatGPT Enterprise (#29) have sources, sharing the one model (amounts are in the vendor's own
-unit, recorded in `Currency`, and credits are not converted). Taking these in the scheduled run is not wired up yet.
+unit, recorded in `Currency`, and credits are not converted). `ConfiguredSpendLimitSnapshots` takes them for every vendor a tenant
+has a credential for (same shape as the roster's), and the scheduled run calls it as `limits snapshot-all` with exit bit 8; a key the
+vendor rejects is a failure, not a skip, because the figures cannot be backfilled (#83).
 
 **Client identifiers stay out of logs (2026-11-21).** The ChatGPT organisation ID and workspace ID identify a client, and the
 debug log (on by default for the `Meterist` categories) gets pasted into chats and issues. No ChatGPT log line carries either: the

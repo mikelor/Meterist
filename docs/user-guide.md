@@ -861,6 +861,10 @@ dotnet run --project src/Meterist.Cli -- limits show --tenant <your-tenant-id> -
 - **It stops rather than store a wrong list.** If the list cannot be read in full, or comes back empty (which usually means
   usage credits are off or the key lacks the scope), the command says so, exits non-zero and stores nothing. A `401`/`403` means
   the key lacks `read:spend_limits` or usage credits are not enabled.
+- **`limits snapshot-all --tenant a --tenant b [--dry-run]`** is what the [daily scheduled run](#running-extraction-on-a-schedule)
+  calls. For each tenant it snapshots every vendor that has spend limits **and** that the tenant has a stored credential for,
+  and shows the rest as `Skipped`. One vendor or tenant failing does not stop the others, and each tenant has its own database
+  context. It exits `1` if any snapshot failed (a key the vendor rejects is a failure, not a skip), `0` otherwise.
 
 The output names people, so keep it out of anything you commit.
 
@@ -877,7 +881,8 @@ This registers a Windows Task Scheduler job ("Meterist daily extraction") that
 runs [`scripts/RunScheduledExtraction.ps1`](../scripts/RunScheduledExtraction.ps1)
 each day. That script extracts every tenant from `2026-07-01` through
 yesterday, runs the [coverage check](#checking-for-missing-days) over the same
-window, then takes each tenant's [roster snapshots](#rosters-who-holds-a-seat),
+window, then takes each tenant's [roster snapshots](#rosters-who-holds-a-seat) and
+[spend-limit snapshots](#spend-limits-and-headroom-claude-enterprise-and-chatgpt-enterprise),
 and writes everything to `%LOCALAPPDATA%\Meterist\logs\extract-yyyy-MM-dd.log`
 (a second run the same day appends).
 
@@ -890,12 +895,28 @@ what went wrong:
 | A vendor extraction failed | `1` |
 | The coverage check found missing days | `2` |
 | A roster snapshot failed | `4` |
+| A spend-limit snapshot failed | `8` |
 
-So `1`, `2` and `4` are each one problem alone, `3` is extraction and coverage, `5`
-is extraction and roster, `6` is coverage and roster, and `7` is all three. The
-roster snapshot runs even when extraction failed, because it is independent of it and
-a day without a snapshot cannot be reconstructed later. Before roster snapshots were
-added the codes were only `0` to `3`; those mean the same as before.
+So `1`, `2`, `4` and `8` are each one problem alone, `3` is extraction and coverage, `5`
+is extraction and roster, `12` is roster and spend limits, `15` is all four, and so on:
+add up the rows that apply. The roster and spend-limit snapshots run even when extraction
+failed, because they are independent of it and a day without a snapshot cannot be
+reconstructed later. Before roster snapshots the codes were only `0` to `3`, and before
+spend-limit snapshots `0` to `7`; those mean the same as before.
+
+**What counts as a spend-limit failure.** Only a vendor with a spend-limit source and a stored
+credential is attempted; one without a credential is skipped, not failed. A key the vendor
+**rejects** for spend limits (Claude: no `read:spend_limits` scope, or usage credits not turned on;
+ChatGPT: no usage-limit scope or no `WorkspaceId`) is a **failure**, not a skip. That is deliberate:
+these figures exist only as a point in time and cannot be backfilled, so quietly skipping a tenant
+that cannot be read would lose days nobody can recover and nobody would notice. The message names
+the scope to check. If a tenant genuinely has no spend limits to read, leave it out of `-Tenants` or
+do not store a credential for that vendor.
+
+**`audit seats` is not in the run.** Seat drift is expected for a day or two after any seat
+change (the billed count changes the day you set the rate, the vendor's figure a day or two later),
+which would set a failure code for no real fault, and the idle list names people, which should not go
+into a log file. Run `audit seats` by hand when you change seats and now and then.
 
 - The task runs as you, and only while you're logged on: credentials are
   encrypted per Windows user, so it has to be the account that stored them.
