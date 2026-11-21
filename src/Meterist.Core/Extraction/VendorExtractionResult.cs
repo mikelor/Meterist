@@ -28,12 +28,35 @@ public sealed record VendorExtractionResult(
     IReadOnlyList<DailySpendChange>? Changes = null,
     UserUsageUpsertResult? UserUsage = null,
     BreakdownReplaceResult? Breakdown = null,
-    ActivitySummaryUpsertResult? ActivitySummaries = null);
+    ActivitySummaryUpsertResult? ActivitySummaries = null,
+    UserActivityReplaceResult? UserActivity = null);
 
 public static class DailySpendChangeExtensions
 {
     /// <summary>One-line account of a breakdown replace, e.g. "3 inserted, 40 unchanged, 1 removed". Zero counts are left out.</summary>
     public static string Summarize(this BreakdownReplaceResult result)
+    {
+        var parts = new List<string>();
+        if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");
+        if (result.Updated > 0) parts.Add($"{result.Updated} updated");
+        if (result.Removed > 0) parts.Add($"{result.Removed} removed");
+        if (result.Unchanged > 0) parts.Add($"{result.Unchanged} unchanged");
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// True when the run would add, change or remove anything other than the daily spend records: per-user rows, the kind
+    /// breakdown, activity summaries or per-person activity. A dry run that only looks at spend days would say "nothing would
+    /// change" over a Detail line reporting thousands of new rows.
+    /// </summary>
+    public static bool WouldChangeOtherStoredData(this VendorExtractionResult result) =>
+        result.UserUsage is { } usage && usage.Inserted + usage.Updated > 0
+        || result.Breakdown is { } breakdown && breakdown.Inserted + breakdown.Updated + breakdown.Removed > 0
+        || result.ActivitySummaries is { } summaries && summaries.Inserted + summaries.Updated > 0
+        || result.UserActivity is { } activity && activity.Inserted + activity.Updated + activity.Removed > 0;
+
+    /// <summary>One-line account of a per-person activity replace, e.g. "6 inserted, 40 unchanged". Zero counts are left out.</summary>
+    public static string Summarize(this UserActivityReplaceResult result)
     {
         var parts = new List<string>();
         if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");

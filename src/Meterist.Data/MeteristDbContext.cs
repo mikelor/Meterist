@@ -19,6 +19,7 @@ public sealed class MeteristDbContext : DbContext
     public DbSet<MemberRosterRecord> MemberRosterRecords => Set<MemberRosterRecord>();
     public DbSet<ActivitySummaryRecord> ActivitySummaryRecords => Set<ActivitySummaryRecord>();
     public DbSet<SpendLimitRecord> SpendLimitRecords => Set<SpendLimitRecord>();
+    public DbSet<UserActivityRecord> UserActivityRecords => Set<UserActivityRecord>();
 
     public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
@@ -66,6 +67,21 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.Name).HasMaxLength(256);
             entity.Property(r => r.Role).HasMaxLength(64);
             entity.Property(r => r.SeatType).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<UserActivityRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            // Natural key: one row per user per day per vendor per tenant. Replacing a fetched day is a replace against this index.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.Date, r.UserId }).IsUnique();
+
+            entity.Property(r => r.UserId).HasMaxLength(256);
+            entity.Property(r => r.UserEmail).HasMaxLength(320);
+
+            // Derived from the counts, not stored.
+            entity.Ignore(r => r.HasHeadlineActivity);
         });
 
         modelBuilder.Entity<SpendLimitRecord>(entity =>

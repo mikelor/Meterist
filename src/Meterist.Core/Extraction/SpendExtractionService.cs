@@ -26,6 +26,9 @@ public sealed class SpendExtractionService
     private readonly IDailySpendBreakdownRepository? _breakdownRepository;
     private readonly IEnumerable<IVendorActivitySummarySource> _activitySources;
     private readonly IActivitySummaryRepository? _activityRepository;
+    private readonly IEnumerable<IVendorUserActivitySource> _userActivitySources;
+    private readonly IUserActivityRepository? _userActivityRepository;
+    private readonly TimeProvider _timeProvider;
 
     public SpendExtractionService(
         IEnumerable<IVendorSpendExtractor> extractors,
@@ -39,7 +42,10 @@ public sealed class SpendExtractionService
         IEnumerable<IVendorSpendBreakdownNormalizer>? breakdownNormalizers = null,
         IDailySpendBreakdownRepository? breakdownRepository = null,
         IEnumerable<IVendorActivitySummarySource>? activitySources = null,
-        IActivitySummaryRepository? activityRepository = null)
+        IActivitySummaryRepository? activityRepository = null,
+        IEnumerable<IVendorUserActivitySource>? userActivitySources = null,
+        IUserActivityRepository? userActivityRepository = null,
+        TimeProvider? timeProvider = null)
     {
         _extractors = extractors;
         _normalizers = normalizers;
@@ -53,6 +59,9 @@ public sealed class SpendExtractionService
         _breakdownRepository = breakdownRepository;
         _activitySources = activitySources ?? [];
         _activityRepository = activityRepository;
+        _userActivitySources = userActivitySources ?? [];
+        _userActivityRepository = userActivityRepository;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <param name="dryRun">
@@ -168,6 +177,11 @@ public sealed class SpendExtractionService
             var activity = await StoreActivitySummariesAsync(tenantId, extractor.VendorId, period, dryRun, cancellationToken)
                 .ConfigureAwait(false);
 
+            // What each person did, day by day. Last, and only for the days worth asking about (see the planner), so a daily run
+            // makes a handful of requests, not one per day of the window.
+            var userActivity = await StoreUserActivityAsync(
+                tenantId, extractor.VendorId, period, dryRun, cancellationToken).ConfigureAwait(false);
+
             var detail = (dryRun ? "dry run: " : string.Empty) + changes.Summarize();
             if (userUsage is not null)
             {
@@ -184,9 +198,14 @@ public sealed class SpendExtractionService
                 detail += $"; activity summaries: {activity.Summarize()}";
             }
 
+            if (userActivity is not null)
+            {
+                detail += $"; user activity: {userActivity.Summarize()}";
+            }
+
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count,
-                detail, changes, userUsage, breakdown, activity);
+                detail, changes, userUsage, breakdown, activity, userActivity);
         }
         catch (NotImplementedException ex)
         {
@@ -303,6 +322,50 @@ public sealed class SpendExtractionService
                 .PlanReplaceAsync(rawData.TenantId, vendorId, days, rows, cancellationToken).ConfigureAwait(false)
             : await _breakdownRepository
                 .ReplaceAsync(rawData.TenantId, vendorId, days, rows, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Null when the vendor has no user-activity source (or no repository is wired), which is normal.
+    private async Task<UserActivityReplaceResult?> StoreUserActivityAsync(
+        string tenantId, Guid vendorId, DateRange period, bool dryRun, CancellationToken cancellationToken)
+    {
+        var source = _userActivitySources.FirstOrDefault(s => s.VendorId == vendorId);
+        if (source is null || _userActivityRepository is null)
+        {
+            return null;
+        }
+
+        var held = (await _userActivityRepository.GetAsync(tenantId, vendorId, period, cancellationToken).ConfigureAwait(false))
+            .Select(r => r.Date)
+            .ToHashSet();
+
+        // The organisation's own active-user count for each day, where the activity summary has stored one, tells the planner a
+        // day with nobody active has nothing to fetch.
+        var dailyActive = new Dictionary<DateOnly, int>();
+        if (_activityRepository is not null)
+        {
+            foreach (var row in await _activityRepository.GetAsync(tenantId, vendorId, period, cancellationToken).ConfigureAwait(false))
+            {
+                if (row.Product == ActivitySummaryRecord.AllProducts && row.DailyActiveUsers is { } active)
+                {
+                    dailyActive[row.Date] = active;
+                }
+            }
+        }
+
+        var today = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime);
+        var days = UserActivityDayPlanner.DaysToFetch(period, today, held, dailyActive);
+        if (days.Count == 0)
+        {
+            return new UserActivityReplaceResult(0, 0, 0, 0);
+        }
+
+        var fetch = await source.FetchAsync(tenantId, days, cancellationToken).ConfigureAwait(false);
+
+        return dryRun
+            ? await _userActivityRepository
+                .PlanReplaceDaysAsync(tenantId, vendorId, fetch.CoveredDays, fetch.Records, cancellationToken).ConfigureAwait(false)
+            : await _userActivityRepository
+                .ReplaceDaysAsync(tenantId, vendorId, fetch.CoveredDays, fetch.Records, cancellationToken).ConfigureAwait(false);
     }
 
     // Null when the vendor has no activity-summary source (or no repository is wired), which is normal.

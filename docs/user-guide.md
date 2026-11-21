@@ -728,6 +728,33 @@ never calls a vendor, so run `roster snapshot` and `extract` first.
 
 The idle list names people, so keep the output out of anything you commit; it stays in your terminal or under `artifacts/`.
 
+### Per-person activity (Claude Enterprise)
+
+For **Claude Enterprise**, `extract` also stores what each person *did* each day (messages, Claude Code sessions, commits and
+pull requests, Cowork sessions, Office add-in use, web searches), from the Analytics API's users endpoint with the same key
+(nothing new to set up). It appears in the extract result as `user activity: 6 inserted, 40 unchanged`. Read it with:
+
+```powershell
+dotnet run --project src/Meterist.Cli -- users activity --tenant <your-tenant-id> --from 2026-11-01 --to 2026-11-20
+dotnet run --project src/Meterist.Cli -- users activity --tenant <your-tenant-id> --from 2026-11-01 --to 2026-11-20 --top 10
+```
+
+- **Activity is not cost.** A person can be busy and cost nothing on a seat plan, and a chat message is not a model request
+  (one message with tool use is several requests), so this sits beside `users usage` and does not replace it. The vendor's own
+  daily active-user counts are in `activity show`.
+- **One request per day, so it only asks for the days worth asking about.** The vendor serves a single day per request, so a
+  daily run that re-reads a long window would otherwise make hundreds of requests. `extract` fetches the newest three days (the
+  vendor revises recent days) and any day that has no stored rows while the organisation's active-user count says someone was
+  active. A first extract over a long window fetches every active day once (a few minutes for a year); after that a daily run
+  fetches about three. A day not published yet (the newest day arrives the next day, around 13:00 UTC) is skipped and picked up
+  later. Nothing is lost by running `extract` often.
+- **Everything the vendor sent is kept.** The headline counts are columns; the full per-product metrics (including products
+  with no column) are stored as JSON with each row, so a count promoted to a column later needs no new call to the vendor.
+- **A failure marks the vendor failed.** The spend is already saved by then, so nothing is lost, but the run exits non-zero and
+  says why (for example a key without the `read:analytics` scope).
+
+The output names people (by email), so keep it out of anything you commit.
+
 ### Per-user usage
 
 Once per-user rows are stored (ChatGPT Enterprise and Claude Enterprise; see the
