@@ -24,6 +24,8 @@ public sealed class SpendExtractionService
     private readonly IUserDailyUsageRepository? _userDailyUsageRepository;
     private readonly IEnumerable<IVendorSpendBreakdownNormalizer> _breakdownNormalizers;
     private readonly IDailySpendBreakdownRepository? _breakdownRepository;
+    private readonly IEnumerable<IVendorActivitySummarySource> _activitySources;
+    private readonly IActivitySummaryRepository? _activityRepository;
 
     public SpendExtractionService(
         IEnumerable<IVendorSpendExtractor> extractors,
@@ -35,7 +37,9 @@ public sealed class SpendExtractionService
         IEnumerable<IVendorUserUsageNormalizer>? userUsageNormalizers = null,
         IUserDailyUsageRepository? userDailyUsageRepository = null,
         IEnumerable<IVendorSpendBreakdownNormalizer>? breakdownNormalizers = null,
-        IDailySpendBreakdownRepository? breakdownRepository = null)
+        IDailySpendBreakdownRepository? breakdownRepository = null,
+        IEnumerable<IVendorActivitySummarySource>? activitySources = null,
+        IActivitySummaryRepository? activityRepository = null)
     {
         _extractors = extractors;
         _normalizers = normalizers;
@@ -47,6 +51,8 @@ public sealed class SpendExtractionService
         _userDailyUsageRepository = userDailyUsageRepository;
         _breakdownNormalizers = breakdownNormalizers ?? [];
         _breakdownRepository = breakdownRepository;
+        _activitySources = activitySources ?? [];
+        _activityRepository = activityRepository;
     }
 
     /// <param name="dryRun">
@@ -148,6 +154,11 @@ public sealed class SpendExtractionService
             var breakdown = await StoreBreakdownAsync(extractor.VendorId, rawData, dryRun, cancellationToken)
                 .ConfigureAwait(false);
 
+            // The vendor's own active-user and seat counts, last: like the rows above they follow the daily totals,
+            // which are the source of record and are already written. Aggregate counts, nothing personal.
+            var activity = await StoreActivitySummariesAsync(tenantId, extractor.VendorId, period, dryRun, cancellationToken)
+                .ConfigureAwait(false);
+
             var detail = (dryRun ? "dry run: " : string.Empty) + changes.Summarize();
             if (userUsage is not null)
             {
@@ -159,9 +170,14 @@ public sealed class SpendExtractionService
                 detail += $"; breakdown rows: {breakdown.Summarize()}";
             }
 
+            if (activity is not null)
+            {
+                detail += $"; activity summaries: {activity.Summarize()}";
+            }
+
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count,
-                detail, changes, userUsage, breakdown);
+                detail, changes, userUsage, breakdown, activity);
         }
         catch (NotImplementedException ex)
         {
@@ -216,6 +232,23 @@ public sealed class SpendExtractionService
                 .PlanReplaceAsync(rawData.TenantId, vendorId, days, rows, cancellationToken).ConfigureAwait(false)
             : await _breakdownRepository
                 .ReplaceAsync(rawData.TenantId, vendorId, days, rows, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Null when the vendor has no activity-summary source (or no repository is wired), which is normal.
+    private async Task<ActivitySummaryUpsertResult?> StoreActivitySummariesAsync(
+        string tenantId, Guid vendorId, DateRange period, bool dryRun, CancellationToken cancellationToken)
+    {
+        var source = _activitySources.FirstOrDefault(s => s.VendorId == vendorId);
+        if (source is null || _activityRepository is null)
+        {
+            return null;
+        }
+
+        var rows = await source.FetchAsync(tenantId, period, cancellationToken).ConfigureAwait(false);
+
+        return dryRun
+            ? await _activityRepository.PlanUpsertAsync(rows, cancellationToken).ConfigureAwait(false)
+            : await _activityRepository.UpsertAsync(rows, cancellationToken).ConfigureAwait(false);
     }
 
     // The never-lower rule used to operate silently. A day it overrides is a

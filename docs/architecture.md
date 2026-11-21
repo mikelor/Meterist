@@ -532,6 +532,11 @@ needs:
   flags exist partly to make this distinction mechanical rather than
   something a human has to remember per vendor.
 
+**Activity summaries (2026-11-20, issue #22).** A vendor's own daily active-user and seat counts are a fourth opt-in
+seam, `IVendorActivitySummarySource`, stored by `IActivitySummaryRepository` in `ActivitySummaryRecords` (one row per
+tenant, vendor, day and product). `SpendExtractionService` calls it after the daily totals, per-user rows and breakdown
+are written, so a failure marks the vendor failed without losing spend. Only Claude Enterprise has one so far.
+
 **Member-id cursors stay out of logs and traces (2026-11-20).** The roster
 endpoints paginate with a cursor that is a member id (`after=<last_id>`), so
 their URLs are treated as sensitive. The two roster HTTP clients are registered

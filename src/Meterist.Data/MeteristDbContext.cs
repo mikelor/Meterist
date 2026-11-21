@@ -17,6 +17,7 @@ public sealed class MeteristDbContext : DbContext
     public DbSet<DailySpendBreakdownRecord> DailySpendBreakdownRecords => Set<DailySpendBreakdownRecord>();
 
     public DbSet<MemberRosterRecord> MemberRosterRecords => Set<MemberRosterRecord>();
+    public DbSet<ActivitySummaryRecord> ActivitySummaryRecords => Set<ActivitySummaryRecord>();
 
     public DbSet<RawDailyExtractionRecord> RawDailyExtractionRecords => Set<RawDailyExtractionRecord>();
 
@@ -64,6 +65,21 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.Name).HasMaxLength(256);
             entity.Property(r => r.Role).HasMaxLength(64);
             entity.Property(r => r.SeatType).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<ActivitySummaryRecord>(entity =>
+        {
+            entity.Property<int>("Id").ValueGeneratedOnAdd();
+            entity.HasKey("Id");
+
+            // Natural key: one row per product per day per vendor per tenant (Product is "all" for the whole
+            // organisation, never null, so the key is enforceable). Re-storing a day is an upsert against it.
+            entity.HasIndex(r => new { r.TenantId, r.VendorId, r.Date, r.Product }).IsUnique();
+
+            entity.Property(r => r.Product).HasMaxLength(64).HasDefaultValue(ActivitySummaryRecord.AllProducts);
+            entity.Property(r => r.DailyAdoptionRate).HasPrecision(9, 4);
+            entity.Property(r => r.WeeklyAdoptionRate).HasPrecision(9, 4);
+            entity.Property(r => r.MonthlyAdoptionRate).HasPrecision(9, 4);
         });
 
         modelBuilder.Entity<DailySpendBreakdownRecord>(entity =>

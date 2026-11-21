@@ -763,6 +763,29 @@ dotnet run --project src/Meterist.Cli -- roster show --tenant <your-tenant-id> -
 
 The output names people, so keep it out of anything you commit; it stays in the database and under `artifacts/`.
 
+### Active users and seat counts (Claude Enterprise)
+
+For **Claude Enterprise**, `extract` also stores the vendor's own daily active-user and seat counts, from the Analytics
+API's summaries endpoint, with the same Analytics key (nothing new to set up). They appear in the extract result as
+`activity summaries: 12 inserted, 300 unchanged`, and `--dry-run` shows what would change without writing it.
+
+```powershell
+dotnet run --project src/Meterist.Cli -- activity show --tenant <your-tenant-id> --vendor claude-enterprise --from 2026-11-01 --to 2026-11-19
+dotnet run --project src/Meterist.Cli -- activity show --tenant <your-tenant-id> --vendor claude-enterprise --from 2026-11-01 --to 2026-11-19 --product claude_code
+```
+
+- **What you get:** per day, how many people were active (daily, weekly and monthly), how many seats were assigned, how
+  many invitations are pending, and the daily adoption rate (active users as a percentage of assigned seats). With
+  `--product` the same counts for one product (`chat`, `claude_code`, `cowork`, and so on; `activity show` lists
+  nothing for a product the tenant does not use). These are Anthropic's figures, counts only, with no names.
+- **The newest day arrives a day late.** Anthropic publishes a day's summary the next day (about 13:00 UTC), so an
+  extract run today stores activity up to yesterday. A later run picks up the rest; nothing is lost.
+- **Data starts on 2026-01-01.** An earlier `--from` is clamped to that day.
+- **Seat counts are history you cannot get back later.** `assigned_seat_count` is stored per day, so it shows seat
+  changes over time, which the roster (a snapshot of who holds a seat today) does not.
+- **A failure here marks the vendor failed.** The spend is already saved by then, so nothing is lost, but the run
+  exits non-zero and says why (for example a key without the `read:analytics` scope).
+
 ### Running extraction on a schedule
 
 Run extraction daily. ChatGPT Enterprise's cost export keeps only about 29

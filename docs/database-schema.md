@@ -4,10 +4,11 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, six migrations:
+`src/Meterist.Data/Migrations/` — as of this writing, seven migrations:
 `20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
 `20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords`,
-`20261120193404_AddMemberRosterRecords` and `20261121063137_AddMemberRosterIsScimManaged`.
+`20261120193404_AddMemberRosterRecords`, `20261121063137_AddMemberRosterIsScimManaged` and
+`20261121065711_AddActivitySummaryRecords`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -169,6 +170,41 @@ anything is staged, and an empty list is refused by the service rather than stor
 **Personal data.** Names and emails stay in the database and in output under `artifacts/`, out of logs and out
 of anything committed. The model is a class with the default `ToString`, and error messages name no member.
 
+### `ActivitySummaryRecords`
+
+The vendor's own daily active-user and seat counts (`Meterist.Core.Models.ActivitySummaryRecord`): one row per tenant,
+vendor, day and product. Added by `AddActivitySummaryRecords`; **Claude Enterprise** (issue #22, from the Analytics API's
+`/analytics/summaries`) populates it during `extract`. **Aggregate counts only: no names or emails.** Use `activity show` to read it.
+
+One row per day with `Product = 'all'` for the whole organisation, plus one per product the vendor breaks out
+(Claude: `chat`, `claude_code`, `cowork`, `chat_cowork_unified`, `office_agent`, `claude_design`, `science`, ...). Products are
+rows rather than columns so one the vendor adds later needs no migration. A product the API reports as null (one the
+organisation does not have) gets no row.
+
+| Column | Type (SQLite) | Nullable | Notes |
+|---|---|---|---|
+| `Id` | `INTEGER` | No | Surrogate PK, `AUTOINCREMENT`. Shadow property. |
+| `TenantId` | `TEXT` | No | |
+| `VendorId` | `TEXT` | No | |
+| `Date` | `TEXT` | No | ISO `yyyy-MM-dd`, the UTC day the counts are for. |
+| `Product` | `TEXT` | No | `all` for the whole organisation, otherwise the product name (max 64). Never null, so the key is enforceable. |
+| `DailyActiveUsers` | `INTEGER` | Yes | Distinct active users that day. |
+| `WeeklyActiveUsers` | `INTEGER` | Yes | Trailing window ending on `Date`, as the vendor defines it. |
+| `MonthlyActiveUsers` | `INTEGER` | Yes | Likewise. |
+| `AssignedSeatCount` | `INTEGER` | Yes | Seats assigned that day. Organisation-wide, so only on the `all` row. |
+| `PendingInviteCount` | `INTEGER` | Yes | Invitations not yet accepted. `all` row only. |
+| `DailyAdoptionRate` | `TEXT` | Yes | Percent of assigned seats active (`30` means 30%), as the vendor reports it. `all` row only. |
+| `WeeklyAdoptionRate` | `TEXT` | Yes | Likewise. |
+| `MonthlyAdoptionRate` | `TEXT` | Yes | Likewise. |
+
+**Primary key:** `Id` (surrogate).
+**Natural key / unique index:** `IX_ActivitySummaryRecords_TenantId_VendorId_Date_Product` on
+`(TenantId, VendorId, Date, Product)`, **unique**.
+
+**Upserted, never deleted.** Re-extracting a day replaces its figures; a day absent from a later pull is left alone,
+because the vendor publishes the newest day the next day and an absent row does not mean no activity. The first
+`extract` after a day is published is what stores it, so a day shows up in this table a day later than its spend.
+
 ### `RawDailyExtractionRecords`
 
 Raw, unnormalized vendor API responses, kept alongside the normalized
@@ -246,7 +282,7 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
 live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied). The
 `UserDailyUsageRecords` and `DailySpendBreakdownRecords` tables and their indexes at the end
-were added afterwards (as was `MemberRosterRecords`), taken from a freshly migrated empty database,
+were added afterwards (as were `MemberRosterRecords` and `ActivitySummaryRecords`), taken from a freshly migrated empty database,
 not the live file; regenerate the whole dump from the live database once
 `AddMemberRosterRecords` has been applied there:
 
@@ -345,4 +381,20 @@ CREATE TABLE IF NOT EXISTS "MemberRosterRecords" (
     "AddedAt" TEXT NULL
 , "IsScimManaged" INTEGER NULL);
 CREATE UNIQUE INDEX "IX_MemberRosterRecords_TenantId_VendorId_SnapshotDate_MemberId" ON "MemberRosterRecords" ("TenantId", "VendorId", "SnapshotDate", "MemberId");
+CREATE TABLE IF NOT EXISTS "ActivitySummaryRecords" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_ActivitySummaryRecords" PRIMARY KEY AUTOINCREMENT,
+    "TenantId" TEXT NOT NULL,
+    "VendorId" TEXT NOT NULL,
+    "Date" TEXT NOT NULL,
+    "Product" TEXT NOT NULL DEFAULT 'all',
+    "DailyActiveUsers" INTEGER NULL,
+    "WeeklyActiveUsers" INTEGER NULL,
+    "MonthlyActiveUsers" INTEGER NULL,
+    "AssignedSeatCount" INTEGER NULL,
+    "PendingInviteCount" INTEGER NULL,
+    "DailyAdoptionRate" TEXT NULL,
+    "WeeklyAdoptionRate" TEXT NULL,
+    "MonthlyAdoptionRate" TEXT NULL
+);
+CREATE UNIQUE INDEX "IX_ActivitySummaryRecords_TenantId_VendorId_Date_Product" ON "ActivitySummaryRecords" ("TenantId", "VendorId", "Date", "Product");
 ```

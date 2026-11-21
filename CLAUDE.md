@@ -346,5 +346,5 @@ expected behavior, not a data gap to investigate.
     migration to `/analytics/cost` (with a legacy fallback setting), the decision that tax and support are never
     counted, and the per-kind Gemini breakdown that also records them as non-usage rows. Findings are in
     `docs/vendor-integration-reference.md`. **Sprint 3 is under way:** the Claude Enterprise roster (#30) and
-    the scheduled roster snapshots (#67) are merged and the ChatGPT roster (#28) is in review; next are seat counts and
-    active users (#22) and the spend-limit views (#26, #29). The user reviews every pull request and says when to merge.
+    the scheduled roster snapshots (#67) and the ChatGPT roster (#28) are merged, and Claude Enterprise active users and
+    seat counts (#22, stored per day in `ActivitySummaryRecords`) are in review; next are the spend-limit views (#26, #29). The user reviews every pull request and says when to merge.

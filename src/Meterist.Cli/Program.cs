@@ -94,6 +94,11 @@ builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNorma
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeEnterpriseUserUsageNormalizer>();
 builder.Services.AddClaudeRosterHttpClient();
 builder.Services.AddSingleton<IVendorRosterSource, ClaudeEnterpriseRosterSource>();
+builder.Services.AddHttpClient<IClaudeActivitySummaryRepository, HttpClaudeActivitySummaryRepository>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com/");
+});
+builder.Services.AddSingleton<IVendorActivitySummarySource, ClaudeEnterpriseActivitySummarySource>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeApiPlatformSpendExtractor>();
@@ -126,6 +131,7 @@ rootCommand.Subcommands.Add(BuildAuditCommand(host));
 rootCommand.Subcommands.Add(BuildBackfillCommand(host));
 rootCommand.Subcommands.Add(BuildUsersCommand(host));
 rootCommand.Subcommands.Add(BuildRosterCommand(host));
+rootCommand.Subcommands.Add(BuildActivityCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -801,6 +807,82 @@ static Command BuildRosterCommand(IHost host)
     rosterCommand.Subcommands.Add(snapshotAllCommand);
     rosterCommand.Subcommands.Add(showCommand);
     return rosterCommand;
+}
+
+static Command BuildActivityCommand(IHost host)
+{
+    var tenantOption = new Option<string>("--tenant") { Description = "Tenant identifier", Required = true };
+    var vendorOption = new Option<string>("--vendor") { Description = "Vendor short name, e.g. claude-enterprise", Required = true };
+    var fromOption = new Option<DateTime>("--from") { Description = "First day of the period", Required = true };
+    var toOption = new Option<DateTime>("--to") { Description = "Last day of the period (inclusive)", Required = true };
+    var productOption = new Option<string?>("--product")
+    {
+        Description = "Show one product's counts (for Claude: chat, claude_code, cowork, ...) instead of the whole organisation",
+    };
+
+    var showCommand = new Command(
+        "show",
+        "Show the vendor's own stored daily active-user and seat counts. Aggregate figures only, no names. Read-only.");
+    showCommand.Options.Add(tenantOption);
+    showCommand.Options.Add(vendorOption);
+    showCommand.Options.Add(fromOption);
+    showCommand.Options.Add(toOption);
+    showCommand.Options.Add(productOption);
+
+    showCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var vendorName = parseResult.GetValue(vendorOption)!;
+        var vendor = VendorCatalog.FindByShortName(vendorName);
+        if (vendor is null)
+        {
+            AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(vendorName)}'.[/] Known vendors: "
+                + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+            return 1;
+        }
+
+        var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
+        var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
+        var product = parseResult.GetValue(productOption) ?? ActivitySummaryRecord.AllProducts;
+
+        using var scope = host.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IActivitySummaryRepository>();
+        var rows = (await repository.GetAsync(tenantId, vendor.Id, new DateRange(from, to), cancellationToken))
+            .Where(r => string.Equals(r.Product, product, StringComparison.Ordinal))
+            .ToList();
+
+        if (rows.Count == 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No activity summaries are stored for {Markup.Escape(tenantId)} / {Markup.Escape(vendor.DisplayName)} "
+                + $"({Markup.Escape(product)}) from {from:yyyy-MM-dd} to {to:yyyy-MM-dd}.[/] Run extract first "
+                + "(only vendors that report them have any).");
+            return 0;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[bold]Meterist[/] — activity for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
+            + $"{Markup.Escape(product)}, {from:yyyy-MM-dd} to {to:yyyy-MM-dd}");
+
+        static string N(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "-";
+        static string Pct(decimal? value) => value is { } v ? v.ToString("0.#", CultureInfo.InvariantCulture) + "%" : "-";
+
+        var table = new Table().AddColumns("Date", "Daily", "Weekly", "Monthly", "Seats", "Pending", "Daily adoption");
+        foreach (var row in rows)
+        {
+            table.AddRow(
+                row.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                N(row.DailyActiveUsers), N(row.WeeklyActiveUsers), N(row.MonthlyActiveUsers),
+                N(row.AssignedSeatCount), N(row.PendingInviteCount), Pct(row.DailyAdoptionRate));
+        }
+
+        AnsiConsole.Write(table);
+        return 0;
+    });
+
+    var activityCommand = new Command("activity", "The vendor's own active-user and seat counts");
+    activityCommand.Subcommands.Add(showCommand);
+    return activityCommand;
 }
 
 static Command BuildUsersCommand(IHost host)

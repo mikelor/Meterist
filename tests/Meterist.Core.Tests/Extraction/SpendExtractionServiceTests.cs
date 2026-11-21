@@ -579,6 +579,146 @@ public class SpendExtractionServiceTests
             Task.FromResult<IReadOnlyList<DailySpendBreakdownRecord>>([]);
     }
 
+    [Fact]
+    public async Task ExtractAsync_VendorWithAnActivitySource_StoresItsSummaries_AndSaysSoInTheDetail()
+    {
+        var vendorId = Guid.NewGuid();
+        var rows = new List<ActivitySummaryRecord>
+        {
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, DailyActiveUsers = 3, AssignedSeatCount = 10 },
+            new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, Product = "chat", DailyActiveUsers = 1 },
+        };
+        var source = new FakeActivitySource(vendorId, rows);
+        var repository = new FakeActivityRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            activitySources: [source], activityRepository: repository);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.Equal(rows, repository.Upserted);
+        Assert.Equal(Period, source.RequestedPeriod);
+        Assert.Equal("ecosync", source.RequestedTenant);
+        Assert.Equal(new ActivitySummaryUpsertResult(2, 0, 0), result.ActivitySummaries);
+        Assert.Contains("activity summaries: 2 inserted", result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DryRun_PlansTheActivitySummariesWithoutWritingThem()
+    {
+        var vendorId = Guid.NewGuid();
+        var repository = new FakeActivityRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            activitySources: [new FakeActivitySource(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            activityRepository: repository);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, dryRun: true, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.Empty(repository.Upserted);
+        Assert.Equal(1, repository.Planned);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_VendorWithNoActivitySource_IsUnaffected()
+    {
+        var vendorId = Guid.NewGuid();
+        var repository = new FakeActivityRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [])],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            activitySources: [new FakeActivitySource(Guid.NewGuid(), [])], activityRepository: repository);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+        Assert.Null(result.ActivitySummaries);
+        Assert.DoesNotContain("activity", result.Detail);
+        Assert.Empty(repository.Upserted);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WhenTheActivitySourceFails_TheVendorIsFailed_ButTheDailyTotalsAreAlreadyWritten()
+    {
+        var vendorId = Guid.NewGuid();
+        var dailyRepo = new FakeDailySpendRepository();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance,
+            activitySources: [new FakeActivitySource(vendorId, [], throws: new InvalidOperationException("summaries are down"))],
+            activityRepository: new FakeActivityRepository());
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Failed, result.Status);
+        Assert.Contains("summaries are down", result.Detail);
+        Assert.True(dailyRepo.WasCalled);   // a failure here must not lose the spend, which is the source of record
+    }
+
+    private sealed class FakeActivitySource(
+        Guid vendorId, IReadOnlyList<ActivitySummaryRecord> rows, Exception? throws = null) : IVendorActivitySummarySource
+    {
+        public Guid VendorId => vendorId;
+
+        public DateRange? RequestedPeriod { get; private set; }
+
+        public string? RequestedTenant { get; private set; }
+
+        public Task<IReadOnlyList<ActivitySummaryRecord>> FetchAsync(
+            string tenantId, DateRange period, CancellationToken cancellationToken = default)
+        {
+            RequestedTenant = tenantId;
+            RequestedPeriod = period;
+            return throws is null ? Task.FromResult(rows) : Task.FromException<IReadOnlyList<ActivitySummaryRecord>>(throws);
+        }
+    }
+
+    private sealed class FakeActivityRepository : IActivitySummaryRepository
+    {
+        public List<ActivitySummaryRecord> Upserted { get; } = [];
+
+        public int Planned { get; private set; }
+
+        public Task<ActivitySummaryUpsertResult> UpsertAsync(
+            IEnumerable<ActivitySummaryRecord> records, CancellationToken cancellationToken = default)
+        {
+            var list = records.ToList();
+            Upserted.AddRange(list);
+            return Task.FromResult(new ActivitySummaryUpsertResult(list.Count, 0, 0));
+        }
+
+        public Task<ActivitySummaryUpsertResult> PlanUpsertAsync(
+            IEnumerable<ActivitySummaryRecord> records, CancellationToken cancellationToken = default)
+        {
+            Planned += records.Count();
+            return Task.FromResult(new ActivitySummaryUpsertResult(records.Count(), 0, 0));
+        }
+
+        public Task<IReadOnlyList<ActivitySummaryRecord>> GetAsync(
+            string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ActivitySummaryRecord>>([]);
+    }
+
     private sealed class FakeUserNormalizer(Guid vendorId, IReadOnlyList<UserDailyUsageRecord> rows) : IVendorUserUsageNormalizer
     {
         public Guid VendorId => vendorId;
