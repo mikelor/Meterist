@@ -215,7 +215,11 @@ internal static class UserSectionsRenderer
                     people[key] = person;
                 }
 
-                person.ByVendor[vendor.Vendor] = (user.Amount, user.IsEstimated);
+                // Two accounts at one vendor can share an email (an old and a recreated one), so a vendor's share is added
+                // to, not replaced; the figure is estimated if either account's is.
+                person.ByVendor[vendor.Vendor] = person.ByVendor.TryGetValue(vendor.Vendor, out var existing)
+                    ? (existing.Amount + user.Amount, existing.Estimated || user.IsEstimated)
+                    : (user.Amount, user.IsEstimated);
             }
         }
 

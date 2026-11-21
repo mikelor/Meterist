@@ -174,6 +174,28 @@ public class UserSectionsRendererTests
     }
 
     [Fact]
+    public void TopConsumers_AddsTwoAccountsAtOneVendorThatShareAnEmail_NotReplacingOneWithTheOther()
+    {
+        // An old and a recreated account for the same person at the same vendor: $40 and $30 is $70, not $30.
+        var html = Render(Tenant(
+            "t1",
+            Vendor(ChatGpt, Usage(ChatGpt,
+            [
+                U("old-account", "Riley Rehired", "riley@example.test", amount: 40m),
+                U("new-account", "Riley Rehired", "RILEY@example.test", amount: 30m, estimated: true),
+                U("other", "Other Person", "other@example.test", amount: 50m),
+            ], aggregateUsage: 120m))));
+
+        var section = Section(html, "Top consumers by spend");
+
+        Assert.Contains("$70.00", section);
+        Assert.Contains("ChatGPT Enterprise $70.00", section);
+        Assert.True(section.IndexOf("Riley Rehired", StringComparison.Ordinal) < section.IndexOf("Other Person", StringComparison.Ordinal));   // 70 outranks 50
+        Assert.Equal(1, CountOf(section, "Riley Rehired"));
+        Assert.Contains("(est.)", section[section.IndexOf("Riley Rehired", StringComparison.Ordinal)..]);   // estimated if either is
+    }
+
+    [Fact]
     public void TopConsumers_LeavesOutKeysAndUnattributedUsage_AndPeopleWithNoSpend()
     {
         var html = Render(Tenant("t1", Vendor(ClaudeApi, Usage(ClaudeApi,
