@@ -580,6 +580,104 @@ public class SpendExtractionServiceTests
     }
 
     [Fact]
+    public async Task ExtractAsync_WhenTheLastDayOfTheDailyWriteIsNotThereOnReadBack_TheVendorFailsNamingTheDate()
+    {
+        // The August symptom: success reported, the newest day absent. It must now be a failure with the date.
+        var vendorId = Guid.NewGuid();
+        var records = Enumerable.Range(0, 3)
+            .Select(i => new DailySpendRecord { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start.AddDays(i) })
+            .ToList();
+        var dailyRepo = new FakeDailySpendRepository();
+        dailyRepo.LoseDays.Add(Period.Start.AddDays(2));
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))], [new FakeNormalizer(vendorId, records)],
+            new FakeRawExtractionRepository(), dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Failed, result.Status);
+        Assert.Contains("daily spend records", result.Detail);
+        Assert.Contains(Period.Start.AddDays(2).ToString("yyyy-MM-dd"), result.Detail);
+        Assert.DoesNotContain(Period.Start.ToString("yyyy-MM-dd"), result.Detail);   // only the missing day is named
+        Assert.Contains("1 day(s)", result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WhenARawDayIsNotThereOnReadBack_TheVendorFailsNamingTheDate()
+    {
+        var vendorId = Guid.NewGuid();
+        var raw = new RawVendorSpendData
+        {
+            VendorId = vendorId,
+            TenantId = "ecosync",
+            Period = Period,
+            RecordsByDate = new Dictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>>
+            {
+                [Period.Start] = [],
+                [Period.Start.AddDays(1)] = [],
+            },
+        };
+        var rawRepo = new FakeRawExtractionRepository();
+        rawRepo.LoseDays.Add(Period.Start.AddDays(1));
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, raw)], [new FakeNormalizer(vendorId, [])],
+            rawRepo, new FakeDailySpendRepository(),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Failed, result.Status);
+        Assert.Contains("raw extraction records", result.Detail);
+        Assert.Contains(Period.Start.AddDays(1).ToString("yyyy-MM-dd"), result.Detail);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_AFailedPostWriteCheck_LogsAnError_AndNamesNoFigure()
+    {
+        var vendorId = Guid.NewGuid();
+        var dailyRepo = new FakeDailySpendRepository();
+        dailyRepo.LoseDays.Add(Period.Start);
+        var logger = new CapturingLogger<SpendExtractionService>();
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start, UsageOrOverage = 98765.43m }])],
+            new FakeRawExtractionRepository(), dailyRepo,
+            new FakeVendorRateConfigRepository(), logger);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.DoesNotContain("98765", result.Detail);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Error && e.Message.Contains("Post-write check failed"));
+        Assert.DoesNotContain(logger.Entries, e => e.Message.Contains("98765"));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DryRun_DoesNotRunThePostWriteCheck()
+    {
+        var vendorId = Guid.NewGuid();
+        var dailyRepo = new FakeDailySpendRepository();
+        dailyRepo.LoseDays.Add(Period.Start);   // would fail the check if it ran: a dry run writes nothing to read back
+
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, EmptyRawData(vendorId))],
+            [new FakeNormalizer(vendorId, [new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start }])],
+            new FakeRawExtractionRepository(), dailyRepo,
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, dryRun: true, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(VendorExtractionStatus.Succeeded, result.Status);
+    }
+
+    [Fact]
     public async Task ExtractAsync_VendorWithAnActivitySource_StoresItsSummaries_AndSaysSoInTheDetail()
     {
         var vendorId = Guid.NewGuid();
@@ -755,7 +853,12 @@ public class SpendExtractionServiceTests
 
     private sealed class FakeRawExtractionRepository : IRawExtractionRepository
     {
+        private readonly HashSet<DateOnly> _stored = [];
+
         public bool WasCalled { get; private set; }
+
+        /// <summary>Days the fake accepts but does not keep, as a write that reports success without persisting.</summary>
+        public HashSet<DateOnly> LoseDays { get; } = [];
 
         public Task UpsertAsync(
             string tenantId,
@@ -765,12 +868,18 @@ public class SpendExtractionServiceTests
             CancellationToken cancellationToken = default)
         {
             WasCalled = true;
+            foreach (var date in recordsByDate.Keys.Where(d => !LoseDays.Contains(d)))
+            {
+                _stored.Add(date);
+            }
+
             return Task.CompletedTask;
         }
 
         public Task<IReadOnlyDictionary<DateOnly, string>> GetRecordsJsonAsync(
             string tenantId, Guid vendorId, DateRange period, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<DateOnly, string>>(new Dictionary<DateOnly, string>());
+            Task.FromResult<IReadOnlyDictionary<DateOnly, string>>(
+                _stored.Where(d => d >= period.Start && d <= period.End).ToDictionary(d => d, _ => "[]"));
     }
 
     private sealed class FakeDailySpendRepository(
@@ -782,6 +891,11 @@ public class SpendExtractionServiceTests
 
         public bool? ReceivedRequiresMonotonicUsage { get; private set; }
 
+        private readonly List<DailySpendRecord> _stored = [];
+
+        /// <summary>Days the fake accepts but does not keep, as a write that reports success without persisting.</summary>
+        public HashSet<DateOnly> LoseDays { get; } = [];
+
         public Task<IReadOnlyList<DailySpendChange>> UpsertAsync(
             IEnumerable<DailySpendRecord> records,
             bool requiresMonotonicUsage = false,
@@ -789,7 +903,9 @@ public class SpendExtractionServiceTests
         {
             WasCalled = true;
             ReceivedRequiresMonotonicUsage = requiresMonotonicUsage;
-            return Task.FromResult(ChangesFor(records));
+            var list = records.ToList();
+            _stored.AddRange(list.Where(r => !LoseDays.Contains(r.Date)));
+            return Task.FromResult(ChangesFor(list));
         }
 
         public Task<IReadOnlyList<DailySpendChange>> PlanUpsertAsync(
@@ -812,6 +928,7 @@ public class SpendExtractionServiceTests
 
         public Task<IReadOnlyList<DailySpendRecord>> GetAsync(
             string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<DailySpendRecord>>([]);
+            Task.FromResult<IReadOnlyList<DailySpendRecord>>(
+                _stored.Where(r => r.TenantId == tenantId && r.VendorId == vendorId && r.Date >= range.Start && r.Date <= range.End).ToList());
     }
 }

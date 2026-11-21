@@ -617,7 +617,7 @@ dotnet run --project src/Meterist.Cli -- extract --tenant <your-tenant-id> --fro
 |---|---|
 | **Succeeded** | Extraction and storage completed; Records shows how many days were processed and Detail says what actually happened to them (see below). |
 | **Not implemented** | This vendor's adapter doesn't exist yet — no v1 vendors are in this state as of 2026-07-22, all four are implemented. |
-| **Failed** | Something went wrong (bad credential, network/auth failure, etc.) — the Detail column has the specific error. |
+| **Failed** | Something went wrong (bad credential, network/auth failure, etc.) — the Detail column has the specific error. Includes a **failed read-back**: after a real (not `--dry-run`) write, Meterist reads back every day it wrote, and if one is missing the vendor fails with the dates, for example `could not read back 1 day(s) (2026-11-19)`. If you see that, the day was not saved: run the window again and check the database file's location and permissions. |
 
 On success, **Detail** breaks the days down so you can check the result
 instead of taking "Succeeded" on trust, e.g. `3 inserted, 118 unchanged`:
@@ -631,9 +631,11 @@ instead of taking "Succeeded" on trust, e.g. `3 inserted, 118 unchanged`:
 | **unchanged** | A record existed and already held exactly these figures. |
 
 A run over days you already have should normally report them as
-`unchanged`; if a run claims to have written days but you see no
-`inserted`, check the data directly (see
-[Inspecting stored data](#troubleshooting)).
+`unchanged`. "Succeeded" now means the days written were read back from the
+database in the same run (see the **Failed** row above). That check runs inside
+Meterist, so for an independent view use [`audit coverage`](#checking-for-missing-days),
+or inspect the data yourself (see [Inspecting stored data](#troubleshooting)) from your own terminal:
+a sandboxed or remote tool can show a stale copy of the database file.
 
 ### Dry runs
 
