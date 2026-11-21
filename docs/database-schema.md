@@ -4,11 +4,11 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, seven migrations:
+`src/Meterist.Data/Migrations/` — as of this writing, eight migrations:
 `20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
 `20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords`,
 `20261120193404_AddMemberRosterRecords`, `20261121063137_AddMemberRosterIsScimManaged` and
-`20261121065711_AddActivitySummaryRecords`.
+`20261121065711_AddActivitySummaryRecords` and `20261121071447_AddSpendLimitRecords`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -205,6 +205,43 @@ organisation does not have) gets no row.
 because the vendor publishes the newest day the next day and an absent row does not mean no activity. The first
 `extract` after a day is published is what stores it, so a day shows up in this table a day later than its spend.
 
+### `SpendLimitRecords`
+
+Each member's spend limit and what they had spent against it, as the vendor reported it on a day
+(`Meterist.Core.Models.SpendLimitRecord`): one row per tenant, vendor, snapshot date and member. Added by
+`AddSpendLimitRecords`; **Claude Enterprise** (issue #26, from the Spend Limits API) populates it with `limits snapshot`.
+Snapshots are dated and kept, because the vendor exposes no history; one per day shows how fast a member is using their
+limit. Read it with `limits show`.
+
+The figures are a **headroom signal, not a ledger**: the vendor calls the spend to date informational. Live-tested, the
+sum of members' spend equalled the cost report for one tenant and was several percent higher for another.
+
+| Column | Type (SQLite) | Nullable | Notes |
+|---|---|---|---|
+| `Id` | `INTEGER` | No | Surrogate PK, `AUTOINCREMENT`. Shadow property. |
+| `TenantId` | `TEXT` | No | |
+| `VendorId` | `TEXT` | No | |
+| `SnapshotDate` | `TEXT` | No | ISO `yyyy-MM-dd`, the **UTC** date the snapshot was taken. |
+| `MemberId` | `TEXT` | No | The vendor's stable member id (max 256). Part of the natural key. |
+| `Email` | `TEXT` | Yes | Max 320. **Personal data.** |
+| `Name` | `TEXT` | Yes | Max 256. **Personal data.** |
+| `LimitAmount` | `TEXT` | Yes | The limit for the period, in dollars (the API sends cents; stored divided by 100). **`NULL` means the member has no limit, not zero.** |
+| `PeriodToDateSpend` | `TEXT` | Yes | Spend against the limit this period, in dollars, informational. |
+| `Currency` | `TEXT` | Yes | As the vendor states it (`USD`). Max 16. |
+| `Period` | `TEXT` | Yes | The period the limit applies to (`monthly`). Max 32. |
+| `SourceType` | `TEXT` | Yes | Where the limit comes from: `user` (set for this member), `rbac_group`, `seat_tier` or `organization`. Max 64. |
+| `SourceDetail` | `TEXT` | Yes | The group id or seat tier name it is inherited from; `NULL` for a per-member limit. Max 256. |
+| `SpendLimitId` | `TEXT` | Yes | The vendor's id for the limit. Max 256. |
+
+**Primary key:** `Id` (surrogate).
+**Natural key / unique index:** `IX_SpendLimitRecords_TenantId_VendorId_SnapshotDate_MemberId` on
+`(TenantId, VendorId, SnapshotDate, MemberId)`, **unique**.
+
+**Stored as a whole,** like the roster: retaking a snapshot replaces that day's rows exactly (members absent from the new
+list are removed from that day), other days are never touched, a malformed batch is rejected before anything is staged, and
+an empty list is refused rather than stored. **Personal data:** names and emails stay in the database and out of logs and
+anything committed.
+
 ### `RawDailyExtractionRecords`
 
 Raw, unnormalized vendor API responses, kept alongside the normalized
@@ -282,7 +319,7 @@ deliberately, so that migrating to a server-based RDBMS later (`architecture.md`
 Captured via `scripts/DumpSchema.cmd` (`sqlite3 <db> ".schema"`) against the
 live database, 2026-11-19 (after `AddDailySpendRecordSource` was applied). The
 `UserDailyUsageRecords` and `DailySpendBreakdownRecords` tables and their indexes at the end
-were added afterwards (as were `MemberRosterRecords` and `ActivitySummaryRecords`), taken from a freshly migrated empty database,
+were added afterwards (as were `MemberRosterRecords`, `ActivitySummaryRecords` and `SpendLimitRecords`), taken from a freshly migrated empty database,
 not the live file; regenerate the whole dump from the live database once
 `AddMemberRosterRecords` has been applied there:
 
@@ -397,4 +434,21 @@ CREATE TABLE IF NOT EXISTS "ActivitySummaryRecords" (
     "MonthlyAdoptionRate" TEXT NULL
 );
 CREATE UNIQUE INDEX "IX_ActivitySummaryRecords_TenantId_VendorId_Date_Product" ON "ActivitySummaryRecords" ("TenantId", "VendorId", "Date", "Product");
+CREATE TABLE IF NOT EXISTS "SpendLimitRecords" (
+    "Id" INTEGER NOT NULL CONSTRAINT "PK_SpendLimitRecords" PRIMARY KEY AUTOINCREMENT,
+    "TenantId" TEXT NOT NULL,
+    "VendorId" TEXT NOT NULL,
+    "SnapshotDate" TEXT NOT NULL,
+    "MemberId" TEXT NOT NULL,
+    "Email" TEXT NULL,
+    "Name" TEXT NULL,
+    "LimitAmount" TEXT NULL,
+    "PeriodToDateSpend" TEXT NULL,
+    "Currency" TEXT NULL,
+    "Period" TEXT NULL,
+    "SourceType" TEXT NULL,
+    "SourceDetail" TEXT NULL,
+    "SpendLimitId" TEXT NULL
+);
+CREATE UNIQUE INDEX "IX_SpendLimitRecords_TenantId_VendorId_SnapshotDate_MemberId" ON "SpendLimitRecords" ("TenantId", "VendorId", "SnapshotDate", "MemberId");
 ```

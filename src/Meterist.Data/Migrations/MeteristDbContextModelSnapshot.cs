@@ -15,7 +15,7 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261121065711_AddActivitySummaryRecords";
+    public override string LastMigrationId => "20261121071447_AddSpendLimitRecords";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -220,6 +220,71 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
                     .IsUnique();
 
                 b.ToTable("MemberRosterRecords");
+            });
+
+        modelBuilder.Entity("Meterist.Core.Models.SpendLimitRecord", b =>
+            {
+                b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("Currency")
+                    .HasMaxLength(16)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Email")
+                    .HasMaxLength(320)
+                    .HasColumnType("TEXT");
+
+                b.Property<decimal?>("LimitAmount")
+                    .HasPrecision(18, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("MemberId")
+                    .IsRequired()
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Name")
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("Period")
+                    .HasMaxLength(32)
+                    .HasColumnType("TEXT");
+
+                b.Property<decimal?>("PeriodToDateSpend")
+                    .HasPrecision(18, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<DateOnly>("SnapshotDate")
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("SourceDetail")
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("SourceType")
+                    .HasMaxLength(64)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("SpendLimitId")
+                    .HasMaxLength(256)
+                    .HasColumnType("TEXT");
+
+                b.Property<string>("TenantId")
+                    .IsRequired()
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid>("VendorId")
+                    .HasColumnType("TEXT");
+
+                b.HasKey("Id");
+
+                b.HasIndex("TenantId", "VendorId", "SnapshotDate", "MemberId")
+                    .IsUnique();
+
+                b.ToTable("SpendLimitRecords");
             });
 
         modelBuilder.Entity("Meterist.Core.Models.UserDailyUsageRecord", b =>

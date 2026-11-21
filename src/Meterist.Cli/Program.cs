@@ -99,6 +99,11 @@ builder.Services.AddHttpClient<IClaudeActivitySummaryRepository, HttpClaudeActiv
     client.BaseAddress = new Uri("https://api.anthropic.com/");
 });
 builder.Services.AddSingleton<IVendorActivitySummarySource, ClaudeEnterpriseActivitySummarySource>();
+builder.Services.AddHttpClient<IClaudeSpendLimitRepository, HttpClaudeSpendLimitRepository>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com/");
+});
+builder.Services.AddSingleton<IVendorSpendLimitSource, ClaudeEnterpriseSpendLimitSource>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeApiPlatformSpendExtractor>();
@@ -112,6 +117,7 @@ builder.Services.AddScoped<CoverageChecker>();
 builder.Services.AddScoped<UserUsageBackfill>();
 builder.Services.AddScoped<SpendBreakdownBackfill>();
 builder.Services.AddScoped<RosterSnapshotService>();
+builder.Services.AddScoped<SpendLimitSnapshotService>();
 builder.Services.AddScoped<ConfiguredRosterSnapshots>();
 builder.Services.AddScoped<UserUsageReporter>();
 
@@ -132,6 +138,7 @@ rootCommand.Subcommands.Add(BuildBackfillCommand(host));
 rootCommand.Subcommands.Add(BuildUsersCommand(host));
 rootCommand.Subcommands.Add(BuildRosterCommand(host));
 rootCommand.Subcommands.Add(BuildActivityCommand(host));
+rootCommand.Subcommands.Add(BuildLimitsCommand(host));
 
 return await rootCommand.Parse(args).InvokeAsync();
 
@@ -883,6 +890,171 @@ static Command BuildActivityCommand(IHost host)
     var activityCommand = new Command("activity", "The vendor's own active-user and seat counts");
     activityCommand.Subcommands.Add(showCommand);
     return activityCommand;
+}
+
+static Command BuildLimitsCommand(IHost host)
+{
+    var tenantOption = new Option<string>("--tenant") { Description = "Tenant identifier", Required = true };
+    var vendorOption = new Option<string>("--vendor")
+    {
+        Description = "Vendor short name (a vendor with spend limits, such as claude-enterprise)",
+        Required = true,
+    };
+
+    static VendorIdentity? ResolveVendor(string shortName)
+    {
+        var vendor = VendorCatalog.FindByShortName(shortName);
+        if (vendor is null)
+        {
+            AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(shortName)}'.[/] Known vendors: "
+                + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+        }
+
+        return vendor;
+    }
+
+    // ---- limits snapshot
+    var dryRunOption = new Option<bool>("--dry-run")
+    {
+        Description = "Fetch the limits and show what would be stored, without writing anything",
+    };
+
+    var snapshotCommand = new Command(
+        "snapshot",
+        "Take a dated snapshot of each member's spend limit and what they have spent against it, and store it. The "
+        + "vendor keeps no history of these, so each snapshot is the only record of where a member stood that day. "
+        + "Taking another on the same day replaces that day's snapshot.");
+    snapshotCommand.Options.Add(tenantOption);
+    snapshotCommand.Options.Add(vendorOption);
+    snapshotCommand.Options.Add(dryRunOption);
+
+    snapshotCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var dryRun = parseResult.GetValue(dryRunOption);
+        var vendor = ResolveVendor(parseResult.GetValue(vendorOption)!);
+        if (vendor is null)
+        {
+            return 1;
+        }
+
+        using var scope = host.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<SpendLimitSnapshotService>();
+
+        try
+        {
+            var outcome = await service.TakeAsync(tenantId, vendor.Id, dryRun, cancellationToken);
+
+            AnsiConsole.MarkupLine(
+                $"[bold]Meterist[/] — spend limits for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
+                + $"{outcome.SnapshotDate:yyyy-MM-dd}" + (dryRun ? " [grey](dry run: nothing written)[/]" : string.Empty));
+            AnsiConsole.MarkupLine(
+                $"  {outcome.MemberCount} member(s), {outcome.WithLimitCount} with a limit and "
+                + $"{outcome.MemberCount - outcome.WithLimitCount} without.");
+
+            var stored = outcome.Stored;
+            var parts = new List<string>();
+            if (stored.Inserted > 0) parts.Add($"{stored.Inserted} added");
+            if (stored.Updated > 0) parts.Add($"{stored.Updated} changed");
+            if (stored.Removed > 0) parts.Add($"{stored.Removed} removed");
+            if (stored.Unchanged > 0) parts.Add($"{stored.Unchanged} unchanged");
+            AnsiConsole.MarkupLine(
+                $"  {(dryRun ? "Would store" : "Stored")} the snapshot: {(parts.Count == 0 ? "nothing" : string.Join(", ", parts))}.");
+            return 0;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+    });
+
+    // ---- limits show
+    var onOrBeforeOption = new Option<DateTime?>("--on-or-before")
+    {
+        Description = "Show the latest snapshot taken on or before this date (default: the latest of all)",
+    };
+
+    var showCommand = new Command(
+        "show",
+        "Show a stored spend-limit snapshot as headroom: each member's limit, what they have spent against it, the "
+        + "share used and where the limit comes from, most used first. Read-only. The vendor calls the spend "
+        + "informational, so treat it as a signal, not a ledger.");
+    showCommand.Options.Add(tenantOption);
+    showCommand.Options.Add(vendorOption);
+    showCommand.Options.Add(onOrBeforeOption);
+
+    showCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantId = parseResult.GetValue(tenantOption)!;
+        var vendor = ResolveVendor(parseResult.GetValue(vendorOption)!);
+        if (vendor is null)
+        {
+            return 1;
+        }
+
+        var onOrBefore = parseResult.GetValue(onOrBeforeOption) is { } d ? DateOnly.FromDateTime(d) : (DateOnly?)null;
+
+        using var scope = host.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<ISpendLimitRepository>();
+        var snapshot = await repository.GetLatestSnapshotAsync(tenantId, vendor.Id, onOrBefore, cancellationToken);
+
+        if (snapshot is null)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No spend-limit snapshot is stored for {Markup.Escape(tenantId)} / {Markup.Escape(vendor.DisplayName)}"
+                + (onOrBefore is { } b ? $" on or before {b:yyyy-MM-dd}" : string.Empty)
+                + ".[/] Run limits snapshot first.");
+            return 0;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[bold]Meterist[/] — spend limits for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
+            + $"snapshot of {snapshot.Date:yyyy-MM-dd}");
+
+        static string Money(decimal? value, string? currency) =>
+            value is { } v ? v.ToString("N2", CultureInfo.InvariantCulture) + (string.IsNullOrWhiteSpace(currency) ? string.Empty : " " + currency) : "-";
+
+        // Most constrained first (a zero limit with spend, then by share of the limit used), members with no limit
+        // last. A zero limit is a limit, so it is ranked and shown, not treated as the absence of one.
+        var ordered = snapshot.Limits
+            .Select(l => (Row: l, Headroom: SpendLimitHeadroom.Of(l)))
+            .OrderByDescending(x => x.Headroom.Pressure)
+            .ThenByDescending(x => x.Row.PeriodToDateSpend ?? 0m)
+            .ThenBy(x => x.Row.Name ?? x.Row.Email ?? x.Row.MemberId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var table = new Table().AddColumns("Member", "Limit", "Spent", "Used", "Left", "Source");
+        foreach (var (l, headroom) in ordered)
+        {
+            var who = !string.IsNullOrWhiteSpace(l.Name) && !string.IsNullOrWhiteSpace(l.Email)
+                ? $"{l.Name} <{l.Email}>"
+                : l.Name ?? l.Email ?? l.MemberId;
+            var used = headroom.UsedFraction;
+            var left = headroom.Left;
+            var source = l.SourceType is null ? "-" : l.SourceDetail is null ? l.SourceType : $"{l.SourceType} ({l.SourceDetail})";
+
+            table.AddRow(
+                Markup.Escape(who),
+                l.LimitAmount is null ? "no limit" : Money(l.LimitAmount, l.Currency),
+                Money(l.PeriodToDateSpend, l.Currency),
+                used is { } u ? (u * 100m).ToString("0", CultureInfo.InvariantCulture) + "%" : headroom.Kind == SpendLimitKind.Zero ? "n/a" : "-",
+                left is { } lf ? Money(lf, l.Currency) : "-",
+                Markup.Escape(source));
+        }
+
+        AnsiConsole.Write(table);
+        var withLimit = snapshot.Limits.Count(l => l.LimitAmount is not null);
+        AnsiConsole.MarkupLine(
+            $"  {snapshot.Limits.Count} member(s), {withLimit} with a limit. The vendor reports spend to date as informational: "
+            + "a headroom signal, not a ledger.");
+        return 0;
+    });
+
+    var limitsCommand = new Command("limits", "Per-member spend limits and headroom");
+    limitsCommand.Subcommands.Add(snapshotCommand);
+    limitsCommand.Subcommands.Add(showCommand);
+    return limitsCommand;
 }
 
 static Command BuildUsersCommand(IHost host)
