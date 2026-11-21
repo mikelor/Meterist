@@ -132,6 +132,50 @@ public class PartialWeekProjectionTests
         Assert.Contains("<span class=\"muted-dash\">—</span>", Projections(html));
     }
 
+    [Fact]
+    public void WhenNoVendorHasAnEligibleWeek_TheTotalRowShowsDashesNotAZeroForecast()
+    {
+        // Friday to Tuesday: every vendor's only week is the short Jul 1-7 one, so nothing is projectable.
+        var period = new DateRange(new DateOnly(2026, 7, 3), new DateOnly(2026, 7, 7));
+        var weeks = new[] { Week(0, 30, days: 5) };
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(period, Tenant("t1", Claude(weeks), ChatGpt(weeks))));
+
+        var total = TotalRow(html);
+        Assert.Equal(3, CountOf(total, "<span class=\"muted-dash\">—</span>"));   // flat, trend, latest
+        Assert.DoesNotContain("$0.00", total);
+        Assert.Contains("$60.00", total);   // the actual column still totals what was spent
+    }
+
+    [Fact]
+    public void WhenSomeVendorsHaveAProjection_TheTotalSumsThoseAndStillShowsNumbers()
+    {
+        // Claude has two full weeks (100 each); ChatGPT has only a short one and so no projection.
+        var period = new DateRange(Anchor, Anchor.AddDays(13));
+        var html = ClientBenchmarkReportRenderer.Render(Report(
+            period,
+            Tenant("t1", Claude(FullWeeks(100, 100)), ChatGpt([Week(0, 9, days: 3, exclude: true)]))));
+
+        var total = TotalRow(html);
+        Assert.Contains("$5,200.00", total);   // Claude's 100 x 52, nothing from ChatGPT
+        Assert.DoesNotContain("muted-dash", total);
+    }
+
+    [Fact]
+    public void TheChatGptFootnote_SaysNoWeekWasExcludedForMissingData_NotThatNoneWasExcluded_WhenOnlyBoundaryWeeksWere()
+    {
+        // A mid-week start leaves the first week out of the projections for every vendor, but no ChatGPT day is missing.
+        var period = new DateRange(new DateOnly(2026, 7, 3), new DateOnly(2026, 7, 21));
+        var weeks = new[] { Week(0, 10, days: 5), Week(1, 100), Week(2, 100) };
+
+        var html = ClientBenchmarkReportRenderer.Render(Report(period, Tenant("t1", ChatGpt(weeks))));
+
+        Assert.Contains("No ChatGPT Enterprise week was excluded from the trend projections for missing data", html);
+        Assert.DoesNotContain("No ChatGPT Enterprise week was excluded from the trend projections.", html);
+        Assert.Contains("partial-week note above covers those", html);
+        // And the partial-week note does say that week was left out, so the two statements agree.
+        Assert.Contains("Left out at the start — t1: ChatGPT Enterprise", html);
+    }
     // ---- what the report says about it
 
     [Fact]
@@ -206,6 +250,12 @@ public class PartialWeekProjectionTests
         return html[start..html.IndexOf("</section>", start, StringComparison.Ordinal)];
     }
 
+    private static string TotalRow(string html)
+    {
+        var start = html.IndexOf("<tr class=\"total-row\">", html.IndexOf("<h2>Annualized cost projection</h2>", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        return html[start..html.IndexOf("</tr>", start, StringComparison.Ordinal)];
+    }
     private static int CountOf(string text, string value)
     {
         var count = 0;

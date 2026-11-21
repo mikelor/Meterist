@@ -310,6 +310,7 @@ public static class ClientBenchmarkReportRenderer
 
             ProjectionCalculator.Projection totalProjection = default;
             decimal totalActual = 0m;
+            var anyProjection = false;
 
             foreach (var vendor in VendorCatalog.All)
             {
@@ -333,6 +334,7 @@ public static class ClientBenchmarkReportRenderer
                     LatestWeek = totalProjection.LatestWeek + latest,
                 };
                 totalActual += actual;
+                anyProjection |= completeWeeks.Count > 0;
 
                 if (completeWeeks.Count == 0)
                 {
@@ -370,9 +372,9 @@ public static class ClientBenchmarkReportRenderer
             html.Append($"""
                           <tr class="total-row">
                             <th scope="row">Total</th>
-                            <td class="figure tabular">{Money(totalProjection.Flat)}</td>
-                            <td class="figure tabular">{Money(totalProjection.TrendAdjusted)}</td>
-                            <td class="figure tabular">{Money(totalProjection.LatestWeek)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.Flat) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.TrendAdjusted) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.LatestWeek) : NoProjection)}</td>
                             <td class="figure tabular">{Money(totalActual)}</td>
                           </tr>
                         </tbody>
@@ -576,9 +578,10 @@ public static class ClientBenchmarkReportRenderer
         if (excluded.Count == 0)
         {
             html.Append(
-                "      <li><b>No ChatGPT Enterprise week was excluded from the trend projections.</b> A week is excluded only "
-                + "when a day inside the report period has no stored record; a week shortened by where the report starts "
-                + "or ends is not treated as missing data.</li>\n");
+                "      <li><b>No ChatGPT Enterprise week was excluded from the trend projections for missing data.</b> A week counts as "
+                + "missing data only when a day inside the report period has no stored record; a week shortened by where the "
+                + "report starts or ends is not treated as missing data (the partial-week note above covers those, which are "
+                + "left out of the projections for every vendor).</li>\n");
             return;
         }
 
@@ -630,6 +633,9 @@ public static class ClientBenchmarkReportRenderer
     }
 
     private static string FormatDate(DateOnly date) => date.ToString("MMM d, yyyy", Culture);
+
+    // Shown where there is no projection, as for a vendor: a total of nothing is not $0.00 a year.
+    private const string NoProjection = "<span class=\"muted-dash\">—</span>";
 
     private static string Money(decimal value) => value.ToString("C2", CultureInfo.GetCultureInfo("en-US"));
 
