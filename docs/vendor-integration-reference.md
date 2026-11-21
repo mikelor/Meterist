@@ -189,6 +189,28 @@ not adopted.
     `period_to_date_spend`. Anthropic calls that figure informational (it can
     read `"0"` when unavailable), so treat it as a headroom signal, not a
     ledger.
+  - **Live test of `/analytics/summaries` (issue #22, 2026-11-20, read-only, both tenants, the existing Analytics
+    key).**
+    - **No beta header** is needed (unlike `/usage` and `/cost`); the same key works.
+    - **Shape:** `data` holds one row per day (the same rows are also under `summaries`), plus `next_page`. A row has
+      `starting_at`, `ending_at`, `daily/weekly/monthly_active_user_count`, `assigned_seat_count`,
+      `pending_invite_count`, `daily/weekly/monthly_adoption_rate` (a percentage, `30` means 30%), and per-product
+      counts named `{product}_{daily|weekly|monthly}_active_user_count` for `chat`, `claude_code`, `cowork`,
+      `chat_cowork_unified`, `office_agent`, `claude_design`, `science` (plus `science_entitled_user_count`) and
+      `claude_tag`. A product the organisation lacks comes back as `null`, not `0` (`claude_tag` did on both tenants).
+    - **Dates:** `starting_date` is inclusive and `ending_date` **exclusive**; `ending_date` is required (a query with
+      only a start is a 400, "starting_date must be before ending_date"). Data starts **2026-01-01** (earlier is a 400,
+      "Data is only available from 2026-01-01 onwards"). The newest day available is **yesterday (UTC)**; an
+      `ending_date` beyond today is a 400 naming the latest day ("Latest available data for this query is
+      2026-11-19"). A whole year (322 days) came back in one request, about 840 KB, with no pagination
+      (`next_page` empty); the documented span cap is 366 days.
+    - **Seat history:** `assigned_seat_count` is per day, so seat changes over time are recoverable from it. One tenant
+      showed 0 seats on 2026-01-01 and 42 on 2026-11-18, the other 10 and 11, so it also shows when a tenant began.
+    - **How Meterist uses it:** `HttpClaudeActivitySummaryRepository` asks for at most 366 days per request, clamps the
+      start to 2026-01-01 and the end to yesterday, and if the API still says its latest day is earlier (before the day's
+      snapshot is published) asks once more for just that. Every numeric field is kept by its API name and the products
+      are found by the `{product}_{period}_active_user_count` pattern, so a new product is stored without a code change.
+      Rate limit: one request per window, far inside the shared 60 per minute.
   - **Live test of `/analytics/usage` and `/analytics/cost` (spike #21, 2026-11-20,
     read-only, both tenants, one Analytics key each). Verdict: GO for migrating
     the Claude Enterprise adapter (#24).**

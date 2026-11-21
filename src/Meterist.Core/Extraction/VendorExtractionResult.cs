@@ -27,7 +27,8 @@ public sealed record VendorExtractionResult(
     string? Detail,
     IReadOnlyList<DailySpendChange>? Changes = null,
     UserUsageUpsertResult? UserUsage = null,
-    BreakdownReplaceResult? Breakdown = null);
+    BreakdownReplaceResult? Breakdown = null,
+    ActivitySummaryUpsertResult? ActivitySummaries = null);
 
 public static class DailySpendChangeExtensions
 {
@@ -38,6 +39,16 @@ public static class DailySpendChangeExtensions
         if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");
         if (result.Updated > 0) parts.Add($"{result.Updated} updated");
         if (result.Removed > 0) parts.Add($"{result.Removed} removed");
+        if (result.Unchanged > 0) parts.Add($"{result.Unchanged} unchanged");
+        return parts.Count == 0 ? "none" : string.Join(", ", parts);
+    }
+
+    /// <summary>One-line account of an activity-summary upsert, e.g. "2 inserted, 40 unchanged". Zero counts are left out.</summary>
+    public static string Summarize(this ActivitySummaryUpsertResult result)
+    {
+        var parts = new List<string>();
+        if (result.Inserted > 0) parts.Add($"{result.Inserted} inserted");
+        if (result.Updated > 0) parts.Add($"{result.Updated} updated");
         if (result.Unchanged > 0) parts.Add($"{result.Unchanged} unchanged");
         return parts.Count == 0 ? "none" : string.Join(", ", parts);
     }

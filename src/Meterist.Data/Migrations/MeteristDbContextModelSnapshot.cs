@@ -15,12 +15,70 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261121063137_AddMemberRosterIsScimManaged";
+    public override string LastMigrationId => "20261121065711_AddActivitySummaryRecords";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
 #pragma warning disable 612, 618
         modelBuilder.HasAnnotation("ProductVersion", "11.0.0");
+
+        modelBuilder.Entity("Meterist.Core.Models.ActivitySummaryRecord", b =>
+            {
+                b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("INTEGER");
+
+                b.Property<int?>("AssignedSeatCount")
+                    .HasColumnType("INTEGER");
+
+                b.Property<int?>("DailyActiveUsers")
+                    .HasColumnType("INTEGER");
+
+                b.Property<decimal?>("DailyAdoptionRate")
+                    .HasPrecision(9, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<DateOnly>("Date")
+                    .HasColumnType("TEXT");
+
+                b.Property<int?>("MonthlyActiveUsers")
+                    .HasColumnType("INTEGER");
+
+                b.Property<decimal?>("MonthlyAdoptionRate")
+                    .HasPrecision(9, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<int?>("PendingInviteCount")
+                    .HasColumnType("INTEGER");
+
+                b.Property<string>("Product")
+                    .IsRequired()
+                    .ValueGeneratedOnAdd()
+                    .HasMaxLength(64)
+                    .HasColumnType("TEXT")
+                    .HasDefaultValue("all");
+
+                b.Property<string>("TenantId")
+                    .IsRequired()
+                    .HasColumnType("TEXT");
+
+                b.Property<Guid>("VendorId")
+                    .HasColumnType("TEXT");
+
+                b.Property<int?>("WeeklyActiveUsers")
+                    .HasColumnType("INTEGER");
+
+                b.Property<decimal?>("WeeklyAdoptionRate")
+                    .HasPrecision(9, 4)
+                    .HasColumnType("TEXT");
+
+                b.HasKey("Id");
+
+                b.HasIndex("TenantId", "VendorId", "Date", "Product")
+                    .IsUnique();
+
+                b.ToTable("ActivitySummaryRecords");
+            });
 
         modelBuilder.Entity("Meterist.Core.Models.DailySpendBreakdownRecord", b =>
             {
