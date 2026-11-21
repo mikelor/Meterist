@@ -59,6 +59,49 @@ public class ClaudeUserActivityTests
         Assert.Contains("limit=1000", request.Url!);
     }
 
+    [Theory]
+    [InlineData("{ \"next_page\": null }")]                       // no data field
+    [InlineData("{ \"data\": null, \"next_page\": null }")]       // null
+    [InlineData("{ \"data\": {}, \"next_page\": null }")]         // an object
+    [InlineData("{ \"data\": \"none\", \"next_page\": null }")]   // a string
+    [InlineData("{ \"data\": 0, \"next_page\": null }")]          // a number
+    [InlineData("[]")]                                            // not even an object
+    public async Task QueryDay_AResponseWithoutADataArray_Throws_ItIsNotAnEmptyDay(string body)
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, body);
+
+        var ex = await Assert.ThrowsAnyAsync<InvalidOperationException>(() =>
+            CreateRepository(server).QueryDayAsync(Key, Day, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Claude user activity", ex.Message);
+    }
+
+    [Fact]
+    public async Task QueryDay_AnExplicitEmptyArray_IsAnEmptyDay_NotNullAndNotAnError()
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, """{ "data": [], "next_page": null }""");
+
+        var rows = await CreateRepository(server).QueryDayAsync(Key, Day, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(rows);   // a looked-at day with nobody active, which may legitimately clear what was stored
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task QueryDay_AnEmptyArrayOnALaterPage_StillEndsTheDayCleanly()
+    {
+        using var server = WireMockServer.Start();
+        server.Given(Request.Create().WithPath(Path).UsingGet().WithParam("page", WireMock.Matchers.MatchBehaviour.RejectOnMatch))
+            .RespondWith(Json($$"""{ "data": [ {{Row("user_1")}} ], "next_page": "p2" }"""));
+        server.Given(Request.Create().WithPath(Path).UsingGet().WithParam("page", "p2"))
+            .RespondWith(Json("""{ "data": [], "next_page": null }"""));
+
+        var rows = await CreateRepository(server).QueryDayAsync(Key, Day, TestContext.Current.CancellationToken);
+
+        Assert.Equal("user_1", Assert.Single(rows!).UserId);
+    }
     [Fact]
     public async Task QueryDay_ADayThePublisherDoesNotHaveYet_IsNullNotAnError()
     {

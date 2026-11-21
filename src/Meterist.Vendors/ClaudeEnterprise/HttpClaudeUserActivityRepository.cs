@@ -97,7 +97,16 @@ public sealed partial class HttpClaudeUserActivityRepository : IClaudeUserActivi
             var root = JsonNode.Parse(body) as JsonObject
                 ?? throw new InvalidOperationException("The Claude user activity response was not a JSON object.");
 
-            foreach (var item in root["data"] as JsonArray ?? [])
+            // Only an explicit empty array means nobody was active that day, and that clears what is stored for it. A response with
+            // no data, a null, or the wrong shape is a malformed response, not an empty day: reading it as empty would erase
+            // good rows and report success.
+            if (root["data"] is not JsonArray data)
+            {
+                throw new InvalidOperationException(
+                    $"The Claude user activity response for {day:yyyy-MM-dd} had no data array; refusing to treat it as a day with nobody active.");
+            }
+
+            foreach (var item in data)
             {
                 if (item is not JsonObject row)
                 {
