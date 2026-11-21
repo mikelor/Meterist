@@ -140,6 +140,15 @@ public sealed class SpendExtractionService
 
             LogKeptHigherUsage(displayName, tenantId, changes, dryRun);
 
+            // Read back what was just written. A success message used to be all there was to show a new day had
+            // been saved, and once it was not (see docs/vendor-integration-reference.md, issue #64), so a day that
+            // is missing now fails the vendor with the dates, instead of reporting success.
+            if (!dryRun)
+            {
+                await VerifyPersistedAsync(tenantId, extractor.VendorId, displayName, rawData, records, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             // Per-user rows go in after the daily totals, which are the source of record and are
             // already written. Counts only: the rows are personal data and are not logged.
             var userUsage = await StoreUserUsageAsync(
@@ -190,6 +199,68 @@ public sealed class SpendExtractionService
             _logger.LogWarning(ex, "[{Vendor}] Extraction failed for tenant '{TenantId}'.", displayName, tenantId);
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Failed, 0, ex.Message);
+        }
+    }
+
+    /// <exception cref="InvalidOperationException">
+    /// A day that was written (a normalized daily record, or a day of the raw pull) cannot be read back. Names the
+    /// dates, never a figure.
+    /// </exception>
+    private async Task VerifyPersistedAsync(
+        string tenantId,
+        Guid vendorId,
+        string displayName,
+        RawVendorSpendData rawData,
+        IReadOnlyList<DailySpendRecord> records,
+        CancellationToken cancellationToken)
+    {
+        var missing = new List<string>();
+
+        if (records.Count > 0)
+        {
+            var range = new DateRange(records.Min(r => r.Date), records.Max(r => r.Date));
+            var stored = (await _dailySpendRepository.GetAsync(tenantId, vendorId, range, cancellationToken).ConfigureAwait(false))
+                .Select(r => r.Date)
+                .ToHashSet();
+
+            var absent = records.Select(r => r.Date).Distinct().Where(d => !stored.Contains(d)).Order().ToList();
+            if (absent.Count > 0)
+            {
+                missing.Add($"daily spend records for {Describe(absent)}");
+            }
+        }
+
+        if (rawData.RecordsByDate.Count > 0)
+        {
+            var range = new DateRange(rawData.RecordsByDate.Keys.Min(), rawData.RecordsByDate.Keys.Max());
+            var stored = await _rawExtractionRepository.GetRecordsJsonAsync(tenantId, vendorId, range, cancellationToken)
+                .ConfigureAwait(false);
+
+            var absent = rawData.RecordsByDate.Keys.Where(d => !stored.ContainsKey(d)).Order().ToList();
+            if (absent.Count > 0)
+            {
+                missing.Add($"raw extraction records for {Describe(absent)}");
+            }
+        }
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        _logger.LogError(
+            "[{Vendor}] Post-write check failed for tenant '{TenantId}': {Missing} could not be read back after being written.",
+            displayName, tenantId, string.Join("; ", missing));
+
+        throw new InvalidOperationException(
+            $"The extraction reported success but could not read back {string.Join(" and ", missing)} after writing them, "
+            + "so they were not saved. Do not trust this window; run it again and check the database file and its permissions.");
+
+        static string Describe(IReadOnlyList<DateOnly> dates)
+        {
+            const int Shown = 5;
+            var text = string.Join(", ", dates.Take(Shown).Select(d => d.ToString("yyyy-MM-dd")));
+            return dates.Count > Shown ? $"{dates.Count} day(s) ({text} and {dates.Count - Shown} more)" : $"{dates.Count} day(s) ({text})";
         }
     }
 

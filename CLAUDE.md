@@ -278,7 +278,7 @@ expected behavior, not a data gap to investigate.
     re-extraction unchanged. Note this only stops *further* damage — days
     already overwritten before this fix don't get resurrected; see
     `docs/vendor-integration-reference.md`'s ChatGPT Enterprise section.
-12. **🔴 Open, urgent, unresolved (found 2026-08-22):** while live-verifying
+12. **✅ Mitigated 2026-11-21, not reproducible (found 2026-08-22, issue #64):** while live-verifying
     item 11's fix, discovered that a day being extracted **for the first
     time** may not actually get persisted, even though `extract` reports
     `Succeeded` with the correct record count. Reproduced 3 times for
@@ -306,8 +306,19 @@ expected behavior, not a data gap to investigate.
     **Update 2026-11:** later runs, including the November catch-up of both
     tenants across all vendors, persisted new days correctly, and `audit
     coverage` now flags any seat-priced day that is missing. Still not
-    root-caused, so the advice stands: do not treat the success message as
-    proof on its own; run the coverage check.
+    root-caused at that point.
+    **Update 2026-11-21 (issue #64):** investigated against a throwaway database *file* (never the live one). The real
+    extraction service over the real EF repositories, read back through a separate raw-SQL connection, persists new
+    trailing days in every case tried: a window widened by several days, one new day per run for a week (as the scheduled
+    run does), two vendors sharing one context, two tenants on one vendor, ChatGPT's never-lower mode on and off, and
+    another connection holding the file open. No path in the current code can report success without storing. The
+    August upsert code has since changed a lot, so this cannot prove what happened then. **Most likely cause (unproven):**
+    the August checks were `sqlite3` reads made through a sandboxed tool, which can return a stale view of the live
+    database file (documented in `docs/client-report-generation.md`), and later runs checked normally persisted fine.
+    **Change:** after every real (non-dry-run) write, extraction now reads back every daily record and raw day it wrote
+    and **fails the vendor, naming the dates, if any is missing**, so the success message now means the days were
+    read back. It runs inside the extracting process, so it proves the write landed in the database that process uses,
+    not what some other tool can see. Keep `audit coverage` as the independent check.
 13. **✅ Resolved 2026-11 (found 2026-08-29):** while re-verifying item 11's
     fix stayed solid, found a subtler, related problem it doesn't cover.
     A ChatGPT week still nominally *inside* the 29-day retention window
