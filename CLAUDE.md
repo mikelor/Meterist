@@ -359,4 +359,4 @@ expected behavior, not a data gap to investigate.
     `docs/vendor-integration-reference.md`. **Sprint 3 is under way:** the Claude Enterprise roster (#30) and
     the scheduled roster snapshots (#67) and the ChatGPT roster (#28) are merged, and Claude Enterprise active users and
     seat counts (#22, `ActivitySummaryRecords`) are merged, and the Claude spend-limit snapshots (#26, `SpendLimitRecords`,
-    `limits snapshot`/`limits show`) are merged; the ChatGPT spend controls (#29, same table and commands) are in review. The user reviews every pull request and says when to merge.
+    `limits snapshot`/`limits show`) and the ChatGPT spend controls (#29) are merged; seat drift and idle seats (#31, `audit seats`) are in review. The user reviews every pull request and says when to merge.

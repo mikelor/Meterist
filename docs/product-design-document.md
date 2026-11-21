@@ -150,11 +150,11 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 | New-date inserts may silently fail to persist | ✅ #64 | Not reproducible against a throwaway database with the current code. Extraction now reads back every day it writes and fails the vendor, naming the dates, if one is missing. `audit coverage` stays as the independent check. |
 | ChatGPT usage erosion inside the retention window | ✅ | The never-lower rule plus the Daily Usage API as source of record (`CLAUDE.md` item 13). 🔵 The remaining early-month gap against a console export is #71. |
 | Missing days go unnoticed | ✅ #12 | `audit coverage`. |
-| Daily extraction so retention windows are never missed | ✅ #13, #67 | `scripts/RunScheduledExtraction.ps1` and `Register-DailyExtractionTask.ps1`, including roster snapshots. Spend-limit snapshots are **not** in the scheduled run yet (no issue; they need a `limits snapshot-all` and an exit-code bit). |
+| Daily extraction so retention windows are never missed | ✅ #13, #67 | `scripts/RunScheduledExtraction.ps1` and `Register-DailyExtractionTask.ps1`, including roster snapshots. Spend-limit snapshots are **not** in the scheduled run yet: 🔵 #83. |
 | Tax and support charges | ✅ #35, #53 | Never counted in any total; recorded as non-usage rows in the Gemini breakdown. |
 | Gemini SKU filter guard | ✅ #34 | |
-| Anomalous-period flagging (mark a tenant, vendor and date unreliable for trends, such as retention-clamped, credit-grant-affected or calendar-partial) | 🔵 no issue | Not started. The retention-clamp case is largely gone now that the Daily Usage API is the source; the report excludes the trailing partial week and ChatGPT weeks with missing days in code. 🔵 Excluding a *leading* partial week for every vendor is #69. A stored reason code is still the cleaner design if more cases appear. |
-| ChatGPT credit-grant manual config (approximate grant day and amount per tenant, as versioned config) | 🔵 no issue | Not started. The grant size and day are still not exposed by any API (re-checked when #29 was built: the Spend Controls API reports per-user usage and caps, not the pool). Pairs with anomalous-period flagging. |
+| Anomalous-period flagging (mark a tenant, vendor and date unreliable for trends, such as retention-clamped, credit-grant-affected or calendar-partial) | 🔵 #84 (decide first) | Not started. The retention-clamp case is largely gone now that the Daily Usage API is the source; the report excludes the trailing partial week and ChatGPT weeks with missing days in code. 🔵 Excluding a *leading* partial week for every vendor is #69. A stored reason code is still the cleaner design if more cases appear. |
+| ChatGPT credit-grant manual config (approximate grant day and amount per tenant, as versioned config) | 🔵 #84 (decide first) | Not started. The grant size and day are still not exposed by any API (re-checked when #29 was built: the Spend Controls API reports per-user usage and caps, not the pool). Pairs with anomalous-period flagging. |
 | ChatGPT credit-pool and overage tracking | ⏸ blocked | No API exposes pool size or grant; waits on a number from the tenant or account team, or on the manual config above. |
 | Assumptions resting on data not yet seen | 🔵 #72 | Revisit once the data exists. |
 
@@ -162,7 +162,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 
 | Item | Status | Where it landed or what is left |
 |---|---|---|
-| Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). 🔵 Left: per-user and active-user sections (#32), leading partial week (#69), and a diff against the previous report's numbers before trusting a new one (no issue). |
+| Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). 🔵 Left: per-user and active-user sections (#32), leading partial week (#69), and a diff against the previous report's numbers before trusting a new one (#85). |
 | Cross-tenant benchmarking | 🟡 | The report compares tenants side by side. A deeper per-seat comparison across tenants needs more tenants with data. |
 | Per-employee spend comparison | 🟡 | Delivered as storage and the `users usage` query (above); the report sections are #32. |
 | `meterist audit` reconciliation command | 🟡 | `audit coverage` and `audit gemini-breakdown` exist. 🔵 Not built, no issue: an optional diff against an exported CSV or spreadsheet baseline. |
@@ -175,7 +175,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 | Member rosters, as dated snapshots | ✅ #28, #30, #67 | Claude Enterprise and ChatGPT Enterprise; `roster snapshot`, `roster show`, taken in the scheduled run. |
 | Claude Enterprise active users and seat counts | ✅ #22 | Stored per day by `extract`; `activity show`. |
 | Per-member spend against limit | ✅ #26, #29 | Claude Spend Limits and ChatGPT Spend Controls; `limits snapshot`, `limits show`. Credits are shown as credits, not converted. |
-| Seat-count drift and idle-seat detection | 🔵 #31 | The inputs now exist (rosters, the vendor's assigned seat count, per-user usage). What is left is the comparison against `VendorRateConfig.SeatCount` and against usage, flagging and never auto-correcting. |
+| Seat-count drift and idle-seat detection | ✅ #31 | `audit seats` compares the billed seat count in the rate configuration with the vendor's assigned seats and the roster size, flags drift without correcting it, and lists rostered members with no activity in a configurable window. Claude Enterprise and ChatGPT Enterprise; Gemini once its roster (#37) lands. Not in the scheduled run yet. |
 | Claude Enterprise per-user activity by product | 🔵 #23 | |
 | Budget alerts and threshold notifications | ⏸ | Natural next step now that the scheduled run and the limit snapshots exist; not yet a requirement. |
 
