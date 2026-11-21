@@ -121,6 +121,7 @@ builder.Services.AddScoped<UserUsageBackfill>();
 builder.Services.AddScoped<SpendBreakdownBackfill>();
 builder.Services.AddScoped<RosterSnapshotService>();
 builder.Services.AddScoped<SpendLimitSnapshotService>();
+builder.Services.AddScoped<ConfiguredSpendLimitSnapshots>();
 builder.Services.AddScoped<ConfiguredRosterSnapshots>();
 builder.Services.AddScoped<UserUsageReporter>();
 
@@ -1070,8 +1071,73 @@ static Command BuildLimitsCommand(IHost host)
         return 0;
     });
 
+    // ---- limits snapshot-all: what the scheduled run calls
+    var tenantsOption = new Option<string[]>("--tenant")
+    {
+        Description = "Tenant identifier to snapshot (repeat for several tenants)",
+        Required = true,
+    };
+
+    var snapshotAllCommand = new Command(
+        "snapshot-all",
+        "Take the spend-limit snapshot for every vendor that has one and that each tenant has a credential for, skipping the "
+        + "rest. One vendor or tenant failing does not stop the others. Exits 1 if any snapshot failed (a key without the "
+        + "spend-limit scope is a failure, not a skip), so a scheduled run can tell. This is what the daily task runs.");
+    snapshotAllCommand.Options.Add(tenantsOption);
+    snapshotAllCommand.Options.Add(dryRunOption);
+
+    snapshotAllCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantIds = parseResult.GetValue(tenantsOption)!;
+        var dryRun = parseResult.GetValue(dryRunOption);
+
+        var all = new List<SpendLimitRunResult>();
+
+        foreach (var tenantId in tenantIds)
+        {
+            // A scope, and so a database context, per tenant: a write that fails for one tenant cannot affect the next.
+            using var scope = host.Services.CreateScope();
+            var snapshots = scope.ServiceProvider.GetRequiredService<ConfiguredSpendLimitSnapshots>();
+            var results = await snapshots.TakeAsync(tenantId, dryRun, cancellationToken);
+            all.AddRange(results);
+
+            var table = new Table()
+                .Title($"{Markup.Escape(tenantId)} spend-limit snapshot{(dryRun ? " (dry run)" : string.Empty)}")
+                .AddColumn("Vendor")
+                .AddColumn("Status")
+                .AddColumn("Detail");
+
+            foreach (var r in results)
+            {
+                var detail = r.Status == SpendLimitRunStatus.Succeeded && r.Outcome is { } o
+                    ? $"{o.MemberCount} member(s), {o.WithLimitCount} with a limit; "
+                        + $"{(dryRun ? "would store" : "stored")} {o.Stored.Inserted} added, {o.Stored.Updated} changed, "
+                        + $"{o.Stored.Removed} removed, {o.Stored.Unchanged} unchanged"
+                    : r.Detail;
+                var status = r.Status switch
+                {
+                    SpendLimitRunStatus.Succeeded => "[green]Succeeded[/]",
+                    SpendLimitRunStatus.Skipped => "[grey]Skipped[/]",
+                    _ => "[red]Failed[/]",
+                };
+                table.AddRow(Markup.Escape(r.DisplayName), status, Markup.Escape(detail));
+            }
+
+            AnsiConsole.Write(table);
+        }
+
+        var failed = all.Count(r => r.Status == SpendLimitRunStatus.Failed);
+        AnsiConsole.MarkupLine(failed == 0
+            ? $"[green]{all.Count(r => r.Status == SpendLimitRunStatus.Succeeded)} spend-limit snapshot(s) taken, "
+                + $"{all.Count(r => r.Status == SpendLimitRunStatus.Skipped)} skipped.[/]"
+            : $"[red]{failed} spend-limit snapshot(s) failed.[/]");
+
+        return SpendLimitExitCode.For(all);
+    });
+
     var limitsCommand = new Command("limits", "Per-member spend limits and headroom");
     limitsCommand.Subcommands.Add(snapshotCommand);
+    limitsCommand.Subcommands.Add(snapshotAllCommand);
     limitsCommand.Subcommands.Add(showCommand);
     return limitsCommand;
 }

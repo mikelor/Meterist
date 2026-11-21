@@ -1,23 +1,31 @@
 <#
 .SYNOPSIS
     Unattended daily run: extract every tenant through yesterday, check that no
-    seat-priced vendor has missing days, then take each tenant's roster
-    snapshots. Meant for Windows Task Scheduler (see Register-DailyExtractionTask.ps1).
+    seat-priced vendor has missing days, then take each tenant's roster snapshots
+    and spend-limit snapshots. Meant for Windows Task Scheduler (see
+    Register-DailyExtractionTask.ps1).
 
 .DESCRIPTION
     Writes everything to a dated log file, extract-yyyy-MM-dd.log in -LogDir
     (a second run on the same day appends). Exits 0 only if every extraction
-    succeeded, the coverage check found no gaps AND every roster snapshot was
-    taken, so Task Scheduler's "Last Run Result" is a real pass/fail. The code is
-    a sum of independent failures: 1 = extraction failure, 2 = coverage gap,
-    4 = roster snapshot failure (so 3 = extraction and coverage, 5 = extraction
-    and roster, 6 = coverage and roster, 7 = all three).
+    succeeded, the coverage check found no gaps AND every roster and spend-limit
+    snapshot was taken, so Task Scheduler's "Last Run Result" is a real pass/fail.
+    The code is a sum of independent failures: 1 = extraction failure, 2 = coverage
+    gap, 4 = roster snapshot failure, 8 = spend-limit snapshot failure (so 3 =
+    extraction and coverage, 5 = extraction and roster, 12 = roster and spend limits,
+    15 = all four).
 
-    The roster snapshot runs after extraction whether or not extraction failed:
-    it is independent of it, and vendors keep no membership history, so a day
-    skipped is a day nobody can later reconstruct. A tenant with no credential
+    The roster and spend-limit snapshots run after extraction whether or not
+    extraction failed: they are independent of it, and the vendors keep no history
+    of either (who held a seat, and how close each member was to their limit), so a
+    day skipped is a day nobody can later reconstruct. A tenant with no credential
     for a vendor is skipped for that vendor, not failed, and one vendor failing
-    does not stop the others.
+    does not stop the others. A key that the vendor rejects for spend limits (missing
+    scope, usage credits off) is a failure, not a skip, so it is noticed; see the user
+    guide.
+
+    `audit seats` is not part of the run: drift is expected for a day or two after any
+    seat change, and the idle list names people, which should not go into a log.
 
     Runs through yesterday, not today: today's data is not complete yet, and a
     run through today would report today as a gap on the vendors that publish
@@ -66,7 +74,11 @@ try {
     dotnet run --project $cli -- roster snapshot-all @tenantArgs
     $rosterFailed = $LASTEXITCODE -ne 0
 
-    $result = Get-ScheduledRunResult -ExtractFailed $extractFailed -CoverageFailed $coverageFailed -RosterFailed $rosterFailed
+    Write-Host "`n=== Spend-limit snapshots ===" -ForegroundColor Cyan
+    dotnet run --project $cli -- limits snapshot-all @tenantArgs
+    $limitsFailed = $LASTEXITCODE -ne 0
+
+    $result = Get-ScheduledRunResult -ExtractFailed $extractFailed -CoverageFailed $coverageFailed -RosterFailed $rosterFailed -LimitsFailed $limitsFailed
     Write-Host ("`n[{0}] {1} (log: {2})" -f (Get-Date -Format "s"), $result.Summary, $log)
 }
 finally {
