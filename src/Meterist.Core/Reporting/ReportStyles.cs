@@ -323,6 +323,13 @@ internal static class ReportStyles
       color: var(--text);
       margin: 4px 0 0;
     }
+    h4.vendor-subhead {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 18px 0 6px;
+    }
     .weekly-table { table-layout: fixed; }
     .weekly-table th, .weekly-table td { padding: 8px 9px; font-size: 13px; }
     .weekly-table thead th { font-size: 10px; white-space: normal; line-height: 1.4; }

@@ -1,3 +1,4 @@
+using Meterist.Core.Auditing;
 using Meterist.Core.Persistence;
 using Meterist.Core.Vendors;
 
@@ -13,15 +14,27 @@ public sealed class ReportDataAggregator
     private readonly IDailySpendRepository _dailySpendRepository;
     private readonly IVendorRateConfigRepository _vendorRateConfigRepository;
     private readonly IDailySpendBreakdownRepository? _breakdownRepository;
+    private readonly UserUsageReporter? _userUsageReporter;
+    private readonly SeatAuditor? _seatAuditor;
+    private readonly IActivitySummaryRepository? _activityRepository;
+
+    /// <summary>Days of activity the seat audit looks back over for "idle", ending on the last day of the report period.</summary>
+    public const int IdleSeatWindowDays = 30;
 
     public ReportDataAggregator(
         IDailySpendRepository dailySpendRepository,
         IVendorRateConfigRepository vendorRateConfigRepository,
-        IDailySpendBreakdownRepository? breakdownRepository = null)
+        IDailySpendBreakdownRepository? breakdownRepository = null,
+        UserUsageReporter? userUsageReporter = null,
+        SeatAuditor? seatAuditor = null,
+        IActivitySummaryRepository? activityRepository = null)
     {
         _dailySpendRepository = dailySpendRepository;
         _vendorRateConfigRepository = vendorRateConfigRepository;
         _breakdownRepository = breakdownRepository;
+        _userUsageReporter = userUsageReporter;
+        _seatAuditor = seatAuditor;
+        _activityRepository = activityRepository;
     }
 
     public async Task<ReportData> AggregateAsync(
@@ -84,6 +97,22 @@ public sealed class ReportDataAggregator
                         .GetAsync(tenantId, vendor.Id, period, cancellationToken)
                         .ConfigureAwait(false));
 
+                // Per-user usage, who holds a seat and the vendor's own active-user counts. Each is optional
+                // (a vendor may report none of them) and read from what is already stored: nothing here calls a vendor.
+                var userUsage = _userUsageReporter is null
+                    ? null
+                    : (await _userUsageReporter.BuildAsync(tenantId, period, vendor.Id, cancellationToken).ConfigureAwait(false))
+                        .Vendors.FirstOrDefault();
+
+                var seats = _seatAuditor is null
+                    ? null
+                    : (await _seatAuditor.AuditAsync(tenantId, period.End, IdleSeatWindowDays, vendor.Id, cancellationToken).ConfigureAwait(false))
+                        .Vendors.FirstOrDefault();
+
+                var activity = _activityRepository is null
+                    ? null
+                    : ActivityOverview.From(await _activityRepository.GetAsync(tenantId, vendor.Id, period, cancellationToken).ConfigureAwait(false));
+
                 vendorReports.Add(new VendorReportData
                 {
                     Vendor = vendor,
@@ -91,6 +120,9 @@ public sealed class ReportDataAggregator
                     CurrentRates = currentRates,
                     SourceDayCounts = sourceDayCounts,
                     Breakdown = breakdown,
+                    UserUsage = userUsage,
+                    Seats = seats,
+                    Activity = activity,
                 });
             }
 

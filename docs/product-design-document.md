@@ -141,7 +141,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
    only to an API key (Claude API Platform workspace keys), it is reported at key level and labelled so. Every per-user
    view reconciles to the aggregate for the same period.
    - ✅ Storage, the `users usage` query, ChatGPT and Claude Enterprise per-user data (#15 to #19).
-   - 🔵 Per-user and active-user sections in the client report (#32).
+   - ✅ Per-user and active-user sections in the client report (#32).
 
 ### Data quality and extraction safeguards
 
@@ -162,9 +162,9 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 
 | Item | Status | Where it landed or what is left |
 |---|---|---|
-| Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). 🔵 Left: per-user and active-user sections (#32), leading partial week (#69), and a diff against the previous report's numbers before trusting a new one (#85). |
+| Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). 🔵 Left: leading partial week (#69), and a diff against the previous report's numbers before trusting a new one (#85). |
 | Cross-tenant benchmarking | 🟡 | The report compares tenants side by side. A deeper per-seat comparison across tenants needs more tenants with data. |
-| Per-employee spend comparison | 🟡 | Delivered as storage and the `users usage` query (above); the report sections are #32. |
+| Per-employee spend comparison | ✅ #15 to #19, #32 | Storage, the `users usage` query, and the report's people sections: active users and seat utilization, top consumers, usage by person (reconciled to each vendor's aggregate) and idle seats. |
 | `meterist audit` reconciliation command | 🟡 | `audit coverage` and `audit gemini-breakdown` exist. 🔵 Not built, no issue: an optional diff against an exported CSV or spreadsheet baseline. |
 | ChatGPT first-week and source footnotes in the report | ✅ | Part of Sprint 1. |
 
