@@ -79,6 +79,7 @@ public sealed class RosterSnapshotService
             Name = m.Name,
             Role = m.Role,
             SeatType = m.SeatType,
+            IsScimManaged = m.IsScimManaged,
             AddedAt = m.AddedAt,
         }).ToList();
 

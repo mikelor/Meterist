@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Meterist.ServiceDefaults\Meterist.ServiceDefaults.csproj" />
+    <PackageReference Include="WireMock.Net" />
+  </ItemGroup>
+
+</Project>

@@ -532,6 +532,16 @@ needs:
   flags exist partly to make this distinction mechanical rather than
   something a human has to remember per vendor.
 
+**Member-id cursors stay out of logs and traces (2026-11-20).** The roster
+endpoints paginate with a cursor that is a member id (`after=<last_id>`), so
+their URLs are treated as sensitive. The two roster HTTP clients are registered
+through `RosterHttpClients` with `.RemoveAllLoggers()` (no HttpClient-factory
+request logging), their requests are marked with `SensitiveRequest.MarkSensitive()`,
+and the OpenTelemetry HTTP instrumentation in ServiceDefaults filters marked
+requests out of traces entirely. .NET 11 already redacts the query string in
+`url.full` and factory logs by default, but that is a switchable framework
+default, so this does not depend on it; tests cover both channels.
+
 ## 11. Testing Strategy — DECIDED (2026-07-21)
 
 **Decision: a mocking environment, split by vendor integration shape**, since

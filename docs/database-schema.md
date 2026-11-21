@@ -4,10 +4,10 @@
 to a server-based RDBMS once hosted).
 **File location:** `%LOCALAPPDATA%\Meterist\meterist.db`.
 **Created/versioned by:** EF Core migrations in
-`src/Meterist.Data/Migrations/` — as of this writing, five migrations:
+`src/Meterist.Data/Migrations/` — as of this writing, six migrations:
 `20260722033812_InitialCreate`, `20261119172104_AddDailySpendRecordSource`,
-`20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords` and
-`20261120193404_AddMemberRosterRecords`.
+`20261120160643_AddUserDailyUsageRecords`, `20261120183237_AddDailySpendBreakdownRecords`,
+`20261120193404_AddMemberRosterRecords` and `20261121063137_AddMemberRosterIsScimManaged`.
 
 This document is generated from the **live database schema**, not from the
 C# model or migration source alone — those can drift from what's actually on
@@ -136,8 +136,9 @@ an uncovered day, a blank category) is rejected before anything is staged.
 ### `MemberRosterRecords`
 
 A vendor's member list as it stood on a day (`Meterist.Core.Models.MemberRosterRecord`): one row per tenant,
-vendor, snapshot date and member. Added by `AddMemberRosterRecords`; **Claude Enterprise populates it**
-(issue #30) with `roster snapshot`. ChatGPT Enterprise follows in a later issue.
+vendor, snapshot date and member. Added by `AddMemberRosterRecords` (and `IsScimManaged` by
+`AddMemberRosterIsScimManaged`); **Claude Enterprise** (issue #30) and **ChatGPT Enterprise** (issue #28) populate it with
+`roster snapshot`, and the scheduled run does so for both.
 
 A roster is what a tenant *has* (who holds a seat), not what people *did*. Snapshots are dated and kept, because
 the vendors expose no membership history: a snapshot is the only record of who was on the list that day.
@@ -152,7 +153,8 @@ the vendors expose no membership history: a snapshot is the only record of who w
 | `Email` | `TEXT` | Yes | Max 320. **Personal data.** |
 | `Name` | `TEXT` | Yes | Max 256. **Personal data.** |
 | `Role` | `TEXT` | Yes | The vendor's own role name (Claude: `user`, `managed`, `owner`, `membership_admin`, `primary_owner`). Max 64. |
-| `SeatType` | `TEXT` | Yes | The seat or licence type, for vendors that report one. Claude does not, so it is `NULL`. Max 64. |
+| `SeatType` | `TEXT` | Yes | The seat or licence type, for vendors that report one: ChatGPT (`chatgpt` or `codex`). Claude does not, so it is `NULL`. Max 64. |
+| `IsScimManaged` | `INTEGER` | Yes | `1` when the member is managed by the organisation's identity provider (SCIM), which the vendor then will not let an API change; `0` when not; `NULL` when the vendor does not say (Claude). `NULL` is not `false`. |
 | `AddedAt` | `TEXT` | Yes | When the member joined, as the vendor reports it (ISO 8601, UTC). |
 
 **Primary key:** `Id` (surrogate).
@@ -248,6 +250,10 @@ were added afterwards (as was `MemberRosterRecords`), taken from a freshly migra
 not the live file; regenerate the whole dump from the live database once
 `AddMemberRosterRecords` has been applied there:
 
+> **Why `MemberRosterRecords` also ends with `, "IsScimManaged" INTEGER NULL);` on its own line:** the same reason as
+> `DailySpendRecords` below: the column was added by a later migration, so the real schema shows it spliced in before the
+> closing parenthesis. The dump here was made from a freshly migrated database, which does the same.
+>
 > **Why `DailySpendRecords` ends with `, "Source" TEXT NULL);` on its own
 > line.** That is not a typo and not hand-edited: it is exactly how SQLite
 > records a column added after a table was created (`ALTER TABLE ... ADD
@@ -337,6 +343,6 @@ CREATE TABLE IF NOT EXISTS "MemberRosterRecords" (
     "Role" TEXT NULL,
     "SeatType" TEXT NULL,
     "AddedAt" TEXT NULL
-);
+, "IsScimManaged" INTEGER NULL);
 CREATE UNIQUE INDEX "IX_MemberRosterRecords_TenantId_VendorId_SnapshotDate_MemberId" ON "MemberRosterRecords" ("TenantId", "VendorId", "SnapshotDate", "MemberId");
 ```

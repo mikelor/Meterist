@@ -730,8 +730,12 @@ include it belong under `artifacts/`.
 ### Rosters: who holds a seat
 
 A roster is a vendor's member list. Spend and usage say what people did; the roster says who *has* a seat, which is
-what you need to spot idle seats later. Today it works for **Claude Enterprise**, using the same key your spend
-extraction already stores (nothing new to set up).
+what you need to spot idle seats later. It works for **Claude Enterprise** and **ChatGPT Enterprise**, using the same key your spend
+extraction already stores (nothing new to set up), with one exception: a ChatGPT tenant's stored credential must include its
+`WorkspaceId` (the same one the Daily Usage API needs; without it the snapshot stops with a message saying so). Use
+`--vendor claude-enterprise` or `--vendor chatgpt-enterprise` in the commands below. `roster show` includes each member's seat
+type (ChatGPT: `chatgpt` or `codex`) and whether they are managed by your identity provider (SCIM). Neither vendor reports a
+last-active date, so who is idle is worked out later by comparing the roster with usage.
 
 ```powershell
 dotnet run --project src/Meterist.Cli -- roster snapshot --tenant <your-tenant-id> --vendor claude-enterprise --dry-run

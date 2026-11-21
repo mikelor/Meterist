@@ -15,7 +15,7 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261120193404_AddMemberRosterRecords";
+    public override string LastMigrationId => "20261121063137_AddMemberRosterIsScimManaged";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -125,6 +125,9 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
                 b.Property<string>("Email")
                     .HasMaxLength(320)
                     .HasColumnType("TEXT");
+
+                b.Property<bool?>("IsScimManaged")
+                    .HasColumnType("INTEGER");
 
                 b.Property<string>("MemberId")
                     .IsRequired()

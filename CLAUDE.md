@@ -345,6 +345,6 @@ expected behavior, not a data gap to investigate.
     check and scheduled extraction, per-user usage storage and query for ChatGPT and Claude Enterprise, the Claude
     migration to `/analytics/cost` (with a legacy fallback setting), the decision that tax and support are never
     counted, and the per-kind Gemini breakdown that also records them as non-usage rows. Findings are in
-    `docs/vendor-integration-reference.md`. **Sprint 3 has begun:** the Claude Enterprise roster snapshot (#30) is
-    in review; next are the ChatGPT roster (#28), seat counts and active users (#22), and the spend-limit views
-    (#26, #29). The user reviews every pull request and says when to merge.
+    `docs/vendor-integration-reference.md`. **Sprint 3 is under way:** the Claude Enterprise roster (#30) and
+    the scheduled roster snapshots (#67) are merged and the ChatGPT roster (#28) is in review; next are seat counts and
+    active users (#22) and the spend-limit views (#26, #29). The user reviews every pull request and says when to merge.

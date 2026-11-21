@@ -37,6 +37,12 @@ public sealed class MemberRosterRecord
     /// <summary>The seat or licence type, for vendors that report one. Null where the vendor does not.</summary>
     public string? SeatType { get; init; }
 
+    /// <summary>
+    /// True when the member is managed by the organisation's identity provider (SCIM). Null where the vendor does not
+    /// say (Claude's member list does not; ChatGPT's does).
+    /// </summary>
+    public bool? IsScimManaged { get; init; }
+
     /// <summary>When the member joined the organisation, as the vendor reports it. Null where the vendor does not.</summary>
     public DateTimeOffset? AddedAt { get; init; }
 }

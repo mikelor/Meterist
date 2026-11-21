@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Meterist.Core.Http;
 using Meterist.Core.Vendors;
 using Microsoft.Extensions.Logging;
 
@@ -58,6 +59,10 @@ public sealed class HttpClaudeMemberRosterRepository : IClaudeMemberRosterReposi
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add("anthropic-version", AnthropicVersion);
             request.Headers.Add("x-api-key", apiKey);
+
+            // After the first page the URL carries a member id (the cursor). Tell anything that writes URLs out, such as
+            // HttpClient tracing, to leave this request alone.
+            request.MarkSensitive();
 
             // Deliberately not the URL: after the first page it carries a cursor, which is a member id.
             _logger.LogDebug("Listing Claude Enterprise members, page {Page} (limit {Limit}).", pageIndex + 1, PageLimit);
