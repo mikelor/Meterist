@@ -537,6 +537,12 @@ seam, `IVendorActivitySummarySource`, stored by `IActivitySummaryRepository` in 
 tenant, vendor, day and product). `SpendExtractionService` calls it after the daily totals, per-user rows and breakdown
 are written, so a failure marks the vendor failed without losing spend. Only Claude Enterprise has one so far.
 
+**Spend limits (2026-11-20, issue #26).** Per-member spend limits are current state, not a date range, so like the roster
+they are a dated snapshot taken on demand rather than part of `extract`: `IVendorSpendLimitSource`,
+`SpendLimitSnapshotService` and `ISpendLimitRepository` storing `SpendLimitRecords` (replace-whole-snapshot, empty list
+refused). Only Claude Enterprise has a source so far; the ChatGPT counterpart (#29) can share the model. Taking these in
+the scheduled run is not wired up yet.
+
 **Member-id cursors stay out of logs and traces (2026-11-20).** The roster
 endpoints paginate with a cursor that is a member id (`after=<last_id>`), so
 their URLs are treated as sensitive. The two roster HTTP clients are registered
