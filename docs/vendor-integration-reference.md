@@ -876,7 +876,7 @@ not adopted.
 **Implication:** per-employee spend comparison is cleanly supportable today
 for Claude Enterprise and ChatGPT Enterprise, partially for Gemini (usage
 counts real, cost estimated), and not meaningful for Claude API Platform.
-See the Product Design Document's Future Features section for how this
+See the Product Design Document's backlog section (§7) for how this
 should be sequenced. *Updated 2026-11-19:* per-user data is now documented for
 Claude (both products, via the analytics endpoints) and ChatGPT (Daily Usage);
 none of it is stored per user yet (Sprint 2).
