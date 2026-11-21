@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Meterist.Core.Secrets;
 using Meterist.Secrets;
 using Microsoft.AspNetCore.DataProtection;
@@ -11,6 +12,8 @@ namespace Meterist.Secrets.Tests;
 /// written under one key ring and read under another is exactly what a scheduled task running as a different
 /// Windows account looks like to DPAPI: the key cannot be recovered.
 /// </summary>
+// The store encrypts with DPAPI, so it and these tests are Windows-only, as the CLI assembly already declares.
+[SupportedOSPlatform("windows")]
 public sealed class DataProtectionSecretStoreTests : IDisposable
 {
     private static readonly Guid Claude = Guid.Parse("8f14e45f-ceea-467e-adde-3f82edcd1a11");
