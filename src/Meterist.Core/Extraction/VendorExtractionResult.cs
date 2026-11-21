@@ -44,6 +44,17 @@ public static class DailySpendChangeExtensions
         return parts.Count == 0 ? "none" : string.Join(", ", parts);
     }
 
+    /// <summary>
+    /// True when the run would add, change or remove anything other than the daily spend records: per-user rows, the kind
+    /// breakdown, activity summaries or per-person activity. A dry run that only looks at spend days would say "nothing would
+    /// change" over a Detail line reporting thousands of new rows.
+    /// </summary>
+    public static bool WouldChangeOtherStoredData(this VendorExtractionResult result) =>
+        result.UserUsage is { } usage && usage.Inserted + usage.Updated > 0
+        || result.Breakdown is { } breakdown && breakdown.Inserted + breakdown.Updated + breakdown.Removed > 0
+        || result.ActivitySummaries is { } summaries && summaries.Inserted + summaries.Updated > 0
+        || result.UserActivity is { } activity && activity.Inserted + activity.Updated + activity.Removed > 0;
+
     /// <summary>One-line account of a per-person activity replace, e.g. "6 inserted, 40 unchanged". Zero counts are left out.</summary>
     public static string Summarize(this UserActivityReplaceResult result)
     {

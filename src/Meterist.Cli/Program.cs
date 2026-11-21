@@ -600,7 +600,10 @@ static void WriteDryRunChanges(IReadOnlyList<VendorExtractionResult> results)
 
     if (!any && relabelled == 0)
     {
-        AnsiConsole.MarkupLine("[green]Nothing would change.[/]");
+        // "Nothing" must mean nothing: the per-user, breakdown, activity-summary and per-person activity rows are written too.
+        AnsiConsole.MarkupLine(results.Any(r => r.WouldChangeOtherStoredData())
+            ? "[green]No day of spend would change.[/] [yellow]Other stored data would (per-user, breakdown, activity): see the Detail column above.[/]"
+            : "[green]Nothing would change.[/]");
     }
 }
 
