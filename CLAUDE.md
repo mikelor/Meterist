@@ -293,7 +293,7 @@ expected behavior, not a data gap to investigate.
     other tenant or vendor. **Until root-caused, don't trust `extract`'s
     success message as proof a new day's data was actually saved** — always
     spot-check via `sqlite3` after extracting a genuinely new date range.
-    See the urgent row atop `docs/product-design-document.md` §7. Not
+    See `docs/product-design-document.md` §7 (now marked mitigated). Not
     fixed — recommend a dedicated debugging session (ideally with a
     debugger attached) rather than more live `extract` runs against real
     tenant data, since each attempt risks another accidental write.
