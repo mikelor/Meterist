@@ -1,3 +1,4 @@
+using Meterist.Core.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
@@ -70,7 +71,10 @@ public static class Extensions
                     )
                     // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
                     //.AddGrpcClientInstrumentation()
-                    .AddHttpClientInstrumentation();
+                    .AddHttpClientInstrumentation(http =>
+                        // A request marked sensitive has a member id in its URL (a pagination cursor), which a span
+                        // would record as url.full, so it is left out of traces altogether.
+                        http.FilterHttpRequestMessage = request => !SensitiveRequest.IsMarked(request));
             });
 
         builder.AddOpenTelemetryExporters();

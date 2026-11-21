@@ -10,6 +10,7 @@ using Meterist.Core.Secrets;
 using Meterist.Core.Vendors;
 using Meterist.Data;
 using Meterist.Secrets;
+using Meterist.Vendors;
 using Meterist.Vendors.ChatGptEnterprise;
 using Meterist.Vendors.ClaudeApiPlatform;
 using Meterist.Vendors.ClaudeEnterprise;
@@ -61,13 +62,9 @@ builder.Services.AddHttpClient<IChatGptDailyUsageRepository, HttpChatGptDailyUsa
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<IVendorSpendNormalizer, ChatGptEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ChatGptEnterpriseUserUsageNormalizer>();
-// The member list uses the same admin key and workspace ID as the Daily Usage API; auto-redirect stays off because
-// every request carries the bearer token.
-builder.Services.AddHttpClient<IChatGptWorkspaceUserRepository, HttpChatGptWorkspaceUserRepository>(client =>
-    {
-        client.BaseAddress = new Uri("https://api.chatgpt.com/");
-    })
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+// The member list uses the same admin key and workspace ID as the Daily Usage API. Its HTTP client is registered through
+// RosterHttpClients, which also keeps its URLs (they carry a member id as the cursor) out of the factory's request logging.
+builder.Services.AddChatGptRosterHttpClient();
 builder.Services.AddSingleton<IVendorRosterSource, ChatGptEnterpriseRosterSource>();
 
 builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReportRepository>(client =>
@@ -95,10 +92,7 @@ builder.Services.AddTransient<IClaudeAnalyticsCostReportRepository>(sp =>
         : sp.GetRequiredService<HttpClaudeAnalyticsCostRepository>());
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeEnterpriseUserUsageNormalizer>();
-builder.Services.AddHttpClient<IClaudeMemberRosterRepository, HttpClaudeMemberRosterRepository>(client =>
-{
-    client.BaseAddress = new Uri("https://api.anthropic.com/");
-});
+builder.Services.AddClaudeRosterHttpClient();
 builder.Services.AddSingleton<IVendorRosterSource, ClaudeEnterpriseRosterSource>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
