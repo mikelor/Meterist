@@ -109,8 +109,23 @@ public sealed partial class ClaudeEnterpriseActivitySummarySource : IVendorActiv
     private static decimal? Get(IReadOnlyDictionary<string, decimal?> values, string name) =>
         values.TryGetValue(name, out var value) ? value : null;
 
-    private static int? Count(IReadOnlyDictionary<string, decimal?> values, string name) =>
-        Get(values, name) is { } value ? (int)value : null;
+    // A count must be a whole number that fits an int. Truncating 2.5 to 2 would store a wrong figure without a word.
+    private static int? Count(IReadOnlyDictionary<string, decimal?> values, string name)
+    {
+        if (Get(values, name) is not { } value)
+        {
+            return null;
+        }
+
+        if (value != decimal.Truncate(value) || value < 0 || value > int.MaxValue)
+        {
+            throw new InvalidOperationException(
+                $"The Claude activity summary field {name} is {value}, which is not a whole count that fits an integer; "
+                + "refusing to store a figure that would be altered.");
+        }
+
+        return (int)value;
+    }
 
     // {product}_{daily|weekly|monthly}_active_user_count with a non-empty product prefix. The unprefixed organisation
     // fields do not match (no prefix), and neither does science_entitled_user_count.

@@ -166,7 +166,7 @@ public class ClaudeActivitySummaryTests
     public async Task Query_ARepeatedCursor_FailsInsteadOfLooping()
     {
         using var server = WireMockServer.Start();
-        Respond(server, """{ "data": [ { "starting_at": "2026-11-01T00:00:00Z" } ], "next_page": "same" }""");
+        Respond(server, """{ "data": [ { "starting_at": "2026-11-01T00:00:00Z", "daily_active_user_count": 1 } ], "next_page": "same" }""");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server).QueryAsync(
             Key, new DateRange(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 2)), TestContext.Current.CancellationToken));
@@ -184,6 +184,53 @@ public class ClaudeActivitySummaryTests
             Key, new DateRange(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 2)), TestContext.Current.CancellationToken));
 
         Assert.Contains("partial", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("{ \"starting_at\": \"2026-11-18T00:00:00Z\" }")]
+    [InlineData("{ \"starting_at\": \"2026-11-18T00:00:00Z\", \"ending_at\": \"2026-11-19T00:00:00Z\", \"note\": \"x\" }")]
+    [InlineData("{ \"starting_at\": \"2026-11-18T00:00:00Z\", \"daily_active_user_count\": null, \"assigned_seat_count\": null }")]
+    public async Task Query_ARowWithADateButNoNumbers_IsRejected_SoItCannotBlankStoredFigures(string row)
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, "{ \"data\": [ " + row + " ], \"next_page\": null }");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server).QueryAsync(
+            Key, new DateRange(new DateOnly(2026, 11, 18), new DateOnly(2026, 11, 18)), TestContext.Current.CancellationToken));
+
+        Assert.Contains("no numeric fields", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("2.5")]
+    [InlineData("-1")]
+    [InlineData("3000000000")]
+    public void Map_ACountThatIsNotAWholeIntInRange_IsRejected_NotTruncated(string value)
+    {
+        var day = new ClaudeActivityDay(new DateOnly(2026, 11, 18), new Dictionary<string, decimal?>
+        {
+            ["daily_active_user_count"] = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture),
+        });
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => ClaudeEnterpriseActivitySummarySource.Map("t1", VendorCatalog.ClaudeEnterprise.Id, [day]));
+
+        Assert.Contains("daily_active_user_count", ex.Message);
+    }
+
+    [Fact]
+    public void Map_AWholeNumberThatArrivedWithADecimalPoint_IsAccepted()
+    {
+        var day = new ClaudeActivityDay(new DateOnly(2026, 11, 18), new Dictionary<string, decimal?>
+        {
+            ["daily_active_user_count"] = 3.0m,
+            ["daily_adoption_rate"] = 33.3m,   // a rate is a percentage and may be fractional
+        });
+
+        var row = Assert.Single(ClaudeEnterpriseActivitySummarySource.Map("t1", VendorCatalog.ClaudeEnterprise.Id, [day]));
+
+        Assert.Equal(3, row.DailyActiveUsers);
+        Assert.Equal(33.3m, row.DailyAdoptionRate);
     }
 
     [Fact]

@@ -196,6 +196,15 @@ public sealed partial class HttpClaudeActivitySummaryRepository : IClaudeActivit
                     }
                 }
 
+                // A row with a date but no figures would be stored as a day with every count blank, and the upsert
+                // would then overwrite that day's good figures with blanks. Refuse it rather than store it.
+                if (values.Values.All(v => v is null))
+                {
+                    throw new InvalidOperationException(
+                        $"The Claude activity summary held a row for {DateOnly.FromDateTime(startingAtUtc):yyyy-MM-dd} with no numeric fields; "
+                        + "refusing to return a partial result.");
+                }
+
                 days.Add(new ClaudeActivityDay(DateOnly.FromDateTime(startingAtUtc), values));
             }
 
