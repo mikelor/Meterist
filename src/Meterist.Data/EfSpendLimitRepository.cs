@@ -168,6 +168,7 @@ public sealed class EfSpendLimitRepository : ISpendLimitRepository
         && a.Name == b.Name
         && a.LimitAmount == b.LimitAmount
         && a.PeriodToDateSpend == b.PeriodToDateSpend
+        && a.PriorPeriodSpend == b.PriorPeriodSpend
         && a.Currency == b.Currency
         && a.Period == b.Period
         && a.SourceType == b.SourceType

@@ -15,7 +15,7 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261121071447_AddSpendLimitRecords";
+    public override string LastMigrationId => "20261121165035_AddSpendLimitPriorPeriodSpend";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -254,6 +254,10 @@ partial class MeteristDbContextModelSnapshot : ModelSnapshot
                     .HasColumnType("TEXT");
 
                 b.Property<decimal?>("PeriodToDateSpend")
+                    .HasPrecision(18, 4)
+                    .HasColumnType("TEXT");
+
+                b.Property<decimal?>("PriorPeriodSpend")
                     .HasPrecision(18, 4)
                     .HasColumnType("TEXT");
 

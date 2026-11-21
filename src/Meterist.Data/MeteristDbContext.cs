@@ -82,6 +82,7 @@ public sealed class MeteristDbContext : DbContext
             entity.Property(r => r.Name).HasMaxLength(256);
             entity.Property(r => r.LimitAmount).HasPrecision(18, 4);
             entity.Property(r => r.PeriodToDateSpend).HasPrecision(18, 4);
+            entity.Property(r => r.PriorPeriodSpend).HasPrecision(18, 4);
             entity.Property(r => r.Currency).HasMaxLength(16);
             entity.Property(r => r.Period).HasMaxLength(32);
             entity.Property(r => r.SourceType).HasMaxLength(64);

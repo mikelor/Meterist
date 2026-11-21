@@ -104,6 +104,8 @@ builder.Services.AddHttpClient<IClaudeSpendLimitRepository, HttpClaudeSpendLimit
     client.BaseAddress = new Uri("https://api.anthropic.com/");
 });
 builder.Services.AddSingleton<IVendorSpendLimitSource, ClaudeEnterpriseSpendLimitSource>();
+builder.Services.AddChatGptSpendControlsHttpClient();
+builder.Services.AddSingleton<IVendorSpendLimitSource, ChatGptEnterpriseSpendLimitSource>();
 
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeEnterpriseSpendExtractor>();
 builder.Services.AddSingleton<IVendorSpendExtractor, ClaudeApiPlatformSpendExtractor>();
@@ -1024,7 +1026,15 @@ static Command BuildLimitsCommand(IHost host)
             .ThenBy(x => x.Row.Name ?? x.Row.Email ?? x.Row.MemberId, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var table = new Table().AddColumns("Member", "Limit", "Spent", "Used", "Left", "Source");
+        // Last month is shown only when the vendor reports it (ChatGPT does when available; Claude never does).
+        var showPrior = ordered.Any(x => x.Row.PriorPeriodSpend is not null);
+        var table = new Table().AddColumns("Member", "Limit", "Spent", "Used", "Left");
+        if (showPrior)
+        {
+            table.AddColumn("Last month");
+        }
+
+        table.AddColumn("Source");
         foreach (var (l, headroom) in ordered)
         {
             var who = !string.IsNullOrWhiteSpace(l.Name) && !string.IsNullOrWhiteSpace(l.Email)
@@ -1034,13 +1044,21 @@ static Command BuildLimitsCommand(IHost host)
             var left = headroom.Left;
             var source = l.SourceType is null ? "-" : l.SourceDetail is null ? l.SourceType : $"{l.SourceType} ({l.SourceDetail})";
 
-            table.AddRow(
+            var cells = new List<string>
+            {
                 Markup.Escape(who),
                 l.LimitAmount is null ? "no limit" : Money(l.LimitAmount, l.Currency),
                 Money(l.PeriodToDateSpend, l.Currency),
                 used is { } u ? (u * 100m).ToString("0", CultureInfo.InvariantCulture) + "%" : headroom.Kind == SpendLimitKind.Zero ? "n/a" : "-",
                 left is { } lf ? Money(lf, l.Currency) : "-",
-                Markup.Escape(source));
+            };
+            if (showPrior)
+            {
+                cells.Add(Money(l.PriorPeriodSpend, l.Currency));
+            }
+
+            cells.Add(Markup.Escape(source));
+            table.AddRow(cells.ToArray());
         }
 
         AnsiConsole.Write(table);

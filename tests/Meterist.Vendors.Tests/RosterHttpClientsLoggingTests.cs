@@ -57,6 +57,22 @@ public class RosterHttpClientsLoggingTests
     }
 
     [Fact]
+    public async Task TheChatGptSpendControlsClient_WritesNoRequestLogAtAll_AndNothingPersonal()
+    {
+        var logs = new CapturingProvider();
+        var handler = new PagedHandler(SpendPage1, SpendPage2);
+        using var provider = Build(logs, services => services.AddChatGptSpendControlsHttpClient(), handler);
+
+        var limits = await provider.GetRequiredService<IChatGptSpendControlsRepository>().ListUserLimitsAsync(
+            new ChatGptCredential { OrganizationId = "org-x", AdminApiKey = "the-admin-key", WorkspaceId = "11111111-2222-3333-4444-555555555555" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal([true, true], handler.Marked);
+        Assert.Equal(2, limits.Count);
+        AssertNothingLeaked(logs);
+        Assert.DoesNotContain(logs.Lines, l => l.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal));
+    }
+    [Fact]
     public async Task Control_AnOrdinaryClientInTheSameSetup_DoesLogItsRequests()
     {
         var logs = new CapturingProvider();
@@ -110,6 +126,11 @@ public class RosterHttpClientsLoggingTests
     private const string ChatGptPage2 =
         """{ "data": [ { "id": "user_SECOND", "email": "second@example.test", "name": "Second Person", "role": "owner" } ], "has_more": false, "last_id": "user_SECOND" }""";
 
+    private const string SpendPage1 =
+        $$"""{ "data": [ { "id": "user_FIRST", "email": "first@example.test", "name": "First Person", "current_month_usage": 1 } ], "has_more": true, "cursor": "{{Cursor}}" }""";
+
+    private const string SpendPage2 =
+        """{ "data": [ { "id": "user_SECOND", "email": "second@example.test", "name": "Second Person", "current_month_usage": 2 } ], "has_more": false, "cursor": null }""";
     private const string ClaudePage1 = ChatGptPage1;
 
     private const string ClaudePage2 = ChatGptPage2;

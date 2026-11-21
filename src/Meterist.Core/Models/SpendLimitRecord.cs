@@ -37,7 +37,16 @@ public sealed class SpendLimitRecord
     /// <summary>What the member had spent against the limit in the current period. Informational, see the class remarks.</summary>
     public decimal? PeriodToDateSpend { get; init; }
 
-    /// <summary>The currency, as the vendor states it (USD for Claude). Null when it does not say.</summary>
+    /// <summary>
+    /// What the member spent in the previous period, for vendors that report it (ChatGPT: last month). Null where the
+    /// vendor does not or it is unavailable; never zero by default.
+    /// </summary>
+    public decimal? PriorPeriodSpend { get; init; }
+
+    /// <summary>
+    /// The unit of the amounts, as the vendor states it: <c>USD</c> for Claude, and <c>credit</c> or <c>usd</c> for ChatGPT
+    /// (a credit-billed workspace is in credits, which are not converted to dollars here). Null when it does not say.
+    /// </summary>
     public string? Currency { get; init; }
 
     /// <summary>The period the limit applies to (Claude: monthly).</summary>

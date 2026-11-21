@@ -786,11 +786,20 @@ dotnet run --project src/Meterist.Cli -- activity show --tenant <your-tenant-id>
 - **A failure here marks the vendor failed.** The spend is already saved by then, so nothing is lost, but the run
   exits non-zero and says why (for example a key without the `read:analytics` scope).
 
-### Spend limits and headroom (Claude Enterprise)
+### Spend limits and headroom (Claude Enterprise and ChatGPT Enterprise)
 
-Claude Enterprise lets an organisation cap each member's monthly spend (the Spend Limits API; it needs usage credits turned
-on). Meterist reads each member's effective limit and what they have spent against it, with the same key your spend
-extraction already stores (the live test found it carries the `read:spend_limits` scope, so nothing new to set up).
+Both vendors let an organisation cap each member's monthly spend. Meterist reads each member's effective limit and what they
+have spent against it, with the key your spend extraction already stores (the live tests found it carries the needed scope,
+so nothing new to set up). Use `--vendor claude-enterprise` or `--vendor chatgpt-enterprise` in the commands below.
+
+- **Claude Enterprise** uses the Spend Limits API, which needs usage credits turned on and the key's `read:spend_limits` scope.
+  Amounts are in US dollars.
+- **ChatGPT Enterprise** uses Spend Controls (read-only; Meterist never changes a limit), which needs the key's
+  `chatgpt.enterprise.usage_limit.read` scope and the credential's `WorkspaceId`. Amounts are in the workspace's own unit:
+  **credits** for a credit-billed workspace (both live tenants), shown as `credit` and **not converted to dollars**, or `usd`.
+  Where the vendor reports it, `limits show` adds a **Last month** column; it was not available on either tenant, and
+  unavailable is shown as `-`, never as zero. The source shows where a limit comes from: `individual_override`,
+  `group_default` (with the group name), `workspace_default` or `role_based_personal_budget`.
 
 ```powershell
 dotnet run --project src/Meterist.Cli -- limits snapshot --tenant <your-tenant-id> --vendor claude-enterprise --dry-run
@@ -807,8 +816,8 @@ dotnet run --project src/Meterist.Cli -- limits show --tenant <your-tenant-id> -
   shown as `0.00`, with the amount left as zero (negative once anything is spent), `n/a` for the share used (a share of zero is
   undefined), and ranked at the top once the member has spent anything. `--on-or-before 2026-10-31` shows an earlier snapshot.
 - **A headroom signal, not a ledger.** Anthropic calls the spend figure informational: it can read zero when unavailable
-  and can differ from the cost reports (for one tenant it matched to a fraction of a cent, for another it was several percent
-  higher). Use the cost reports for money, and this to see who is near a cap.
+  and can differ from the cost reports (for one Claude tenant it matched to a fraction of a cent, for another it was several
+  percent higher). Use the cost reports for money, and this to see who is near a cap.
 - **It stops rather than store a wrong list.** If the list cannot be read in full, or comes back empty (which usually means
   usage credits are off or the key lacks the scope), the command says so, exits non-zero and stores nothing. A `401`/`403` means
   the key lacks `read:spend_limits` or usage credits are not enabled.
