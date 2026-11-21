@@ -201,7 +201,7 @@ public static class ClientBenchmarkReportRenderer
               <section>
                 <div class="eyebrow">Trend &amp; cadence</div>
                 <h2>Weekly spend by vendor</h2>
-                <p class="audit-intro">Weeks run Wednesday–Tuesday. A ChatGPT Enterprise week with missing days is excluded from the trend projections below; the footnote says which weeks, if any.</p>
+                <p class="audit-intro">Weeks run Wednesday–Tuesday. A week cut short by where the report starts or ends is marked * and, like a ChatGPT Enterprise week with missing days, is left out of the projections below ("A ChatGPT Enterprise week with missing days is excluded from the trend projections below"); the footnote says which weeks, if any.</p>
 
             """);
 
@@ -232,7 +232,7 @@ public static class ClientBenchmarkReportRenderer
             for (var i = 0; i < totalWeekCount; i++)
             {
                 var (start, end) = WeekBounds(data.WeekAnchor, i);
-                var partial = end > data.Period.End ? "*" : "";
+                var partial = end > data.Period.End || start < data.Period.Start ? "*" : "";
                 html.Append($"            <th class=\"figure\" style=\"width:{weekColumnWidth.ToString("0.0", Culture)}%;\">{FormatWeekLabel(start, end)}{partial}</th>\n");
             }
             html.Append($"            <th class=\"figure\" style=\"width:{totalColumnWidth.ToString("0.0", Culture)}%;\">Total</th>\n          </tr>\n        </thead>\n        <tbody>\n");
@@ -273,7 +273,7 @@ public static class ClientBenchmarkReportRenderer
             html.Append(cumulativeRow);
 
             html.Append("        </tbody>\n      </table>\n    </div>\n");
-            html.Append("    <p class=\"small-note\">*Partial week — not all 7 days have elapsed yet.</p>\n\n");
+            html.Append("    <p class=\"small-note\">*Partial week — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals, but left out of the projections.</p>\n\n");
         }
 
         html.Append("  </section>\n\n");
@@ -285,7 +285,7 @@ public static class ClientBenchmarkReportRenderer
               <section>
                 <div class="eyebrow">Looking ahead</div>
                 <h2>Annualized cost projection</h2>
-                <p class="audit-intro"><b>Flat</b> averages the complete weeks above and multiplies by 52; <b>Trend-adjusted</b> fits a linear trend across those same weeks and projects the next week's rate forward × 52; <b>Latest week annualized</b> takes only the most recent complete week × 52. The trailing partial week is excluded from all three, as is any ChatGPT Enterprise week with missing days (see the footnote).</p>
+                <p class="audit-intro"><b>Flat</b> averages the complete weeks above and multiplies by 52; <b>Trend-adjusted</b> fits a linear trend across those same weeks and projects the next week's rate forward × 52; <b>Latest week annualized</b> takes only the most recent complete week × 52. A partial week, one cut short by where the report starts or ends, is excluded from all three for every vendor, as is any ChatGPT Enterprise week with missing days (see the footnote).</p>
 
             """);
 
@@ -310,12 +310,13 @@ public static class ClientBenchmarkReportRenderer
 
             ProjectionCalculator.Projection totalProjection = default;
             decimal totalActual = 0m;
+            var anyProjection = false;
 
             foreach (var vendor in VendorCatalog.All)
             {
                 var vendorData = tenant.Vendors.Single(v => v.Vendor.Id == vendor.Id);
                 var completeWeeks = vendorData.Weeks
-                    .Where(w => !w.ExcludeFromProjection && w.WeekEnd <= data.Period.End)
+                    .Where(w => ProjectionEligibility.FeedsProjection(w, data.Period))
                     .OrderBy(w => w.WeekIndex)
                     .ToList();
 
@@ -333,6 +334,7 @@ public static class ClientBenchmarkReportRenderer
                     LatestWeek = totalProjection.LatestWeek + latest,
                 };
                 totalActual += actual;
+                anyProjection |= completeWeeks.Count > 0;
 
                 if (completeWeeks.Count == 0)
                 {
@@ -370,9 +372,9 @@ public static class ClientBenchmarkReportRenderer
             html.Append($"""
                           <tr class="total-row">
                             <th scope="row">Total</th>
-                            <td class="figure tabular">{Money(totalProjection.Flat)}</td>
-                            <td class="figure tabular">{Money(totalProjection.TrendAdjusted)}</td>
-                            <td class="figure tabular">{Money(totalProjection.LatestWeek)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.Flat) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.TrendAdjusted) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.LatestWeek) : NoProjection)}</td>
                             <td class="figure tabular">{Money(totalActual)}</td>
                           </tr>
                         </tbody>
@@ -467,6 +469,7 @@ public static class ClientBenchmarkReportRenderer
 
             """);
 
+        AppendPartialWeekFootnote(html, data);
         AppendChatGptFootnotes(html, data);
 
         html.Append("""
@@ -476,6 +479,68 @@ public static class ClientBenchmarkReportRenderer
               </footer>
 
             """);
+    }
+
+    // Which weeks the report left out of the projections because it starts or ends mid-week, per tenant and for every
+    // vendor alike, built from the data so it names the weeks and vendors that were actually affected.
+    private static void AppendPartialWeekFootnote(StringBuilder html, ReportData data)
+    {
+        var period = data.Period;
+        var leading = new List<string>();
+        var trailing = new List<string>();
+
+        foreach (var tenant in data.Tenants)
+        {
+            var leadingVendors = tenant.Vendors
+                .Where(v => v.Weeks.Any(w => ProjectionEligibility.IsLeadingPartial(w, period)))
+                .Select(v => Encode(v.Vendor.DisplayName)).ToList();
+            var trailingVendors = tenant.Vendors
+                .Where(v => v.Weeks.Any(w => ProjectionEligibility.IsTrailingPartial(w, period)))
+                .Select(v => Encode(v.Vendor.DisplayName)).ToList();
+
+            if (leadingVendors.Count > 0)
+            {
+                leading.Add($"{Encode(tenant.TenantId)}: {string.Join(", ", leadingVendors)}");
+            }
+
+            if (trailingVendors.Count > 0)
+            {
+                trailing.Add($"{Encode(tenant.TenantId)}: {string.Join(", ", trailingVendors)}");
+            }
+        }
+
+        var firstWeek = FormatWeekLabel(data.WeekAnchor, data.WeekAnchor.AddDays(6));
+        var lastStart = WeekBounds(data.WeekAnchor, TotalWeekCount(data) - 1);
+
+        html.Append(
+            "      <li><b>Partial weeks are left out of the projections, for every vendor.</b> Weeks run Wednesday to Tuesday, so a "
+            + "report that starts or ends mid-week has a short first or last week. A week is used in the Flat, Trend-adjusted and "
+            + "Latest-week projections only if it lies fully inside the report period; a short week would drag the average and "
+            + "the trend down even when every requested day is stored. Partial weeks stay in the weekly table (marked *) and in "
+            + "the actual totals.");
+
+        if (leading.Count == 0)
+        {
+            html.Append(
+                $" The report starts on {period.Start.DayOfWeek}, {FormatDate(period.Start)}, which opens a full week, so no first week was left out.");
+        }
+        else
+        {
+            html.Append(
+                $" The report starts on {period.Start.DayOfWeek}, {FormatDate(period.Start)}, partway through the week of {firstWeek}, "
+                + $"so that first week was left out. Left out at the start — {string.Join("; ", leading)}. Start a report on a "
+                + "Wednesday to include its first week.");
+        }
+
+        if (trailing.Count > 0)
+        {
+            html.Append(
+                $" The report ends on {period.End.DayOfWeek}, {FormatDate(period.End)}, before the week of "
+                + $"{FormatWeekLabel(lastStart.Start, lastStart.End)} finished, so that last week was left out. Left out at the end — "
+                + $"{string.Join("; ", trailing)}.");
+        }
+
+        html.Append("</li>\n");
     }
 
     // The two ChatGPT Enterprise notes are built from the data rather than fixed
@@ -513,9 +578,10 @@ public static class ClientBenchmarkReportRenderer
         if (excluded.Count == 0)
         {
             html.Append(
-                "      <li><b>No ChatGPT Enterprise week was excluded from the trend projections.</b> A week is excluded only "
-                + "when a day inside the report period has no stored record; a week shortened by where the report starts "
-                + "or ends is not treated as missing data.</li>\n");
+                "      <li><b>No ChatGPT Enterprise week was excluded from the trend projections for missing data.</b> A week counts as "
+                + "missing data only when a day inside the report period has no stored record; a week shortened by where the "
+                + "report starts or ends is not treated as missing data (the partial-week note above covers those, which are "
+                + "left out of the projections for every vendor).</li>\n");
             return;
         }
 
@@ -567,6 +633,9 @@ public static class ClientBenchmarkReportRenderer
     }
 
     private static string FormatDate(DateOnly date) => date.ToString("MMM d, yyyy", Culture);
+
+    // Shown where there is no projection, as for a vendor: a total of nothing is not $0.00 a year.
+    private const string NoProjection = "<span class=\"muted-dash\">—</span>";
 
     private static string Money(decimal value) => value.ToString("C2", CultureInfo.GetCultureInfo("en-US"));
 
