@@ -175,7 +175,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 | Member rosters, as dated snapshots | ✅ #28, #30, #67 | Claude Enterprise and ChatGPT Enterprise; `roster snapshot`, `roster show`, taken in the scheduled run. |
 | Claude Enterprise active users and seat counts | ✅ #22 | Stored per day by `extract`; `activity show`. |
 | Per-member spend against limit | ✅ #26, #29 | Claude Spend Limits and ChatGPT Spend Controls; `limits snapshot`, `limits show`. Credits are shown as credits, not converted. |
-| Seat-count drift and idle-seat detection | 🔵 #31 | The inputs now exist (rosters, the vendor's assigned seat count, per-user usage). What is left is the comparison against `VendorRateConfig.SeatCount` and against usage, flagging and never auto-correcting. |
+| Seat-count drift and idle-seat detection | ✅ #31 | `audit seats` compares the billed seat count in the rate configuration with the vendor's assigned seats and the roster size, flags drift without correcting it, and lists rostered members with no activity in a configurable window. Claude Enterprise and ChatGPT Enterprise; Gemini once its roster (#37) lands. Not in the scheduled run yet. |
 | Claude Enterprise per-user activity by product | 🔵 #23 | |
 | Budget alerts and threshold notifications | ⏸ | Natural next step now that the scheduled run and the limit snapshots exist; not yet a requirement. |
 

@@ -116,6 +116,7 @@ builder.Services.AddScoped<SpendExtractionService>();
 builder.Services.AddScoped<ConfiguredVendorExtraction>();
 builder.Services.AddScoped<ReportDataAggregator>();
 builder.Services.AddScoped<CoverageChecker>();
+builder.Services.AddScoped<SeatAuditor>();
 builder.Services.AddScoped<UserUsageBackfill>();
 builder.Services.AddScoped<SpendBreakdownBackfill>();
 builder.Services.AddScoped<RosterSnapshotService>();
@@ -1408,6 +1409,90 @@ static Command BuildBackfillCommand(IHost host)
     return backfillCommand;
 }
 
+static void WriteSeatAudit(TenantSeatAudit audit)
+{
+    foreach (var v in audit.Vendors)
+    {
+        AnsiConsole.MarkupLine(
+            $"[bold]Meterist[/] — seats, [yellow]{Markup.Escape(audit.TenantId)}[/] / {Markup.Escape(v.Vendor.DisplayName)}, as of {v.AsOf:yyyy-MM-dd}");
+
+        static string N(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "-";
+
+        var table = new Table().AddColumns("Measure", "Seats", "From");
+        table.AddRow("Billed (rate configuration)", N(v.BilledSeats), v.BilledSeats is null ? "-" : "rates");
+        table.AddRow(
+            "Assigned (vendor)", N(v.AssignedSeats), v.AssignedDate is { } ad ? $"activity summary {ad:yyyy-MM-dd}" : "not reported");
+        table.AddRow(
+            "Roster members", N(v.RosterCount),
+            v.RosterDate is { } rd ? $"snapshot {rd:yyyy-MM-dd}" : "no snapshot");
+        AnsiConsole.Write(table);
+
+        if (v.RosterBySeatType.Count > 0)
+        {
+            AnsiConsole.MarkupLine(
+                "  Roster by seat type: " + string.Join(", ", v.RosterBySeatType.Select(kv => $"{Markup.Escape(kv.Key)} {kv.Value}")) + ".");
+        }
+
+        if (v.HasDrift)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [red]Drift:[/] {v.BilledSeats} seat(s) are billed in the rate configuration but the vendor reports "
+                + $"{v.VendorReportedSeats} ({v.VendorReportedSource}). Check the latest invoice and, if it changed, run "
+                + "'rates set' for the new count. Nothing was changed.");
+        }
+        else if (v.BilledSeats is not null && v.VendorReportedSeats is not null)
+        {
+            AnsiConsole.MarkupLine($"  [green]No drift:[/] billed and vendor-reported seats agree ({v.BilledSeats}).");
+        }
+
+        foreach (var note in v.Notes)
+        {
+            AnsiConsole.MarkupLine($"  [yellow]Note:[/] {Markup.Escape(note)}");
+        }
+
+        var idle = v.Idle;
+        if (!idle.Assessable)
+        {
+            AnsiConsole.MarkupLine($"  [yellow]Idle seats not assessed:[/] {Markup.Escape(idle.Reason ?? "no data")}");
+            AnsiConsole.WriteLine();
+            continue;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"  Idle in the last {idle.Window.End.DayNumber - idle.Window.Start.DayNumber + 1} day(s) "
+            + $"({idle.Window.Start:yyyy-MM-dd} to {idle.Window.End:yyyy-MM-dd}): [bold]{idle.IdleSeats.Count}[/] of "
+            + $"{N(v.RosterCount)} rostered; {idle.ActiveCount} active"
+            + (idle.NewMemberCount > 0 ? $", {idle.NewMemberCount} added inside the window (not counted as idle)" : string.Empty)
+            + (idle.ActiveNotOnRoster > 0 ? $"; {idle.ActiveNotOnRoster} active user(s) not on the roster (left, or not matched)" : string.Empty)
+            + ".");
+
+        if (idle.Reason is not null)
+        {
+            AnsiConsole.MarkupLine($"  [yellow]Caveat:[/] {Markup.Escape(idle.Reason)}");
+        }
+
+        if (idle.IdleSeats.Count > 0)
+        {
+            var idleTable = new Table().AddColumns("Member", "Role", "Seat type", "Last active before the window");
+            foreach (var seat in idle.IdleSeats)
+            {
+                var who = !string.IsNullOrWhiteSpace(seat.Name) && !string.IsNullOrWhiteSpace(seat.Email)
+                    ? $"{seat.Name} <{seat.Email}>"
+                    : seat.Name ?? seat.Email ?? seat.MemberId;
+                idleTable.AddRow(
+                    Markup.Escape(who),
+                    Markup.Escape(seat.Role ?? "-"),
+                    Markup.Escape(seat.SeatType ?? "-"),
+                    seat.LastActiveBeforeWindow is { } last ? last.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "none stored");
+            }
+
+            AnsiConsole.Write(idleTable);
+        }
+
+        AnsiConsole.WriteLine();
+    }
+}
+
 static Command BuildAuditCommand(IHost host)
 {
     var tenantOption = new Option<string[]>("--tenant")
@@ -1577,9 +1662,79 @@ static Command BuildAuditCommand(IHost host)
 
         return 0;
     });
+    var idleDaysOption = new Option<int>("--idle-days")
+    {
+        Description = "A seat counts as idle when its member shows no activity in this many days",
+        DefaultValueFactory = _ => 30,
+    };
+    var asOfOption = new Option<DateTime?>("--as-of")
+    {
+        Description = "The day to audit (default: today, UTC). The rate in force, the latest roster on or before it and the "
+            + "window ending on it are used.",
+    };
+    var seatsVendorOption = new Option<string?>("--vendor")
+    {
+        Description = "Check only one vendor short name (default: every vendor that has a roster)",
+    };
+
+    var seatsCommand = new Command(
+        "seats",
+        "Compare the billed seat count in the rate configuration with what each vendor reports (assigned seats and the "
+        + "roster), and list rostered members with no activity lately. Flags drift, never corrects it. Exits non-zero "
+        + "when a billed count differs from the vendor's, so a scheduled run can alert. Idle seats never set the exit "
+        + "code. Names people, so keep the output out of anything you commit.");
+    seatsCommand.Options.Add(tenantOption);
+    seatsCommand.Options.Add(idleDaysOption);
+    seatsCommand.Options.Add(asOfOption);
+    seatsCommand.Options.Add(seatsVendorOption);
+
+    seatsCommand.SetAction(async (parseResult, cancellationToken) =>
+    {
+        var tenantIds = parseResult.GetValue(tenantOption)!;
+        var idleDays = parseResult.GetValue(idleDaysOption);
+        var vendorShortName = parseResult.GetValue(seatsVendorOption);
+        var asOf = parseResult.GetValue(asOfOption) is { } d
+            ? DateOnly.FromDateTime(d)
+            : DateOnly.FromDateTime(DateTime.UtcNow);
+
+        if (idleDays < 1)
+        {
+            AnsiConsole.MarkupLine("[red]--idle-days must be at least 1.[/]");
+            return 1;
+        }
+
+        Guid? vendorFilter = null;
+        if (vendorShortName is not null)
+        {
+            var vendor = VendorCatalog.FindByShortName(vendorShortName);
+            if (vendor is null)
+            {
+                AnsiConsole.MarkupLine($"[red]Unknown vendor short name '{Markup.Escape(vendorShortName)}'.[/] Known vendors: "
+                    + string.Join(", ", VendorCatalog.All.Select(v => v.ShortName)));
+                return 1;
+            }
+
+            vendorFilter = vendor.Id;
+        }
+
+        var anyDrift = false;
+        foreach (var tenantId in tenantIds)
+        {
+            // A scope, and so a database context, per tenant.
+            using var scope = host.Services.CreateScope();
+            var auditor = scope.ServiceProvider.GetRequiredService<SeatAuditor>();
+            var audit = await auditor.AuditAsync(tenantId, asOf, idleDays, vendorFilter, cancellationToken);
+            anyDrift |= audit.HasDrift;
+            WriteSeatAudit(audit);
+        }
+
+        return anyDrift ? 1 : 0;
+    });
+
     var auditCommand = new Command("audit", "Data-quality checks on the stored spend data");
     auditCommand.Subcommands.Add(coverageCommand);
     auditCommand.Subcommands.Add(breakdownCommand);
+    auditCommand.Subcommands.Add(seatsCommand);
     return auditCommand;
 }
 

@@ -690,6 +690,38 @@ The exit code is `0` when no seat-priced vendor has a gap, and non-zero when
 one does (or when the command couldn't run, for example an unknown vendor or
 `--from` after `--to`), so a scheduled run can alert on it.
 
+### Seat drift and idle seats
+
+```powershell
+dotnet run --project src/Meterist.Cli -- audit seats --tenant <your-tenant-id>
+dotnet run --project src/Meterist.Cli -- audit seats --tenant <your-tenant-id> --vendor chatgpt-enterprise --idle-days 45
+```
+
+`audit seats` answers two questions per tenant and vendor, for Claude Enterprise and ChatGPT Enterprise (any vendor with a
+roster; Gemini will join when its roster lands). `--tenant` can be repeated, `--vendor` narrows it, `--as-of <date>` audits
+an earlier day (default: today, UTC) and `--idle-days` sets the idle window (default 30). It only reads stored data and
+never calls a vendor, so run `roster snapshot` and `extract` first.
+
+- **Are we billed for the seats the vendor says we have?** It compares the **billed** seat count (the `SeatCount` on the
+  seat rate in force that day, from `rates set`) with the vendor's own figure: the **assigned seats** from Claude's
+  activity summary where there is one, otherwise the **roster** size. A difference is **drift**: the rate card is stale
+  (a seat was added or removed and nobody ran `rates set`) or the vendor changed something. It is flagged, never corrected:
+  check the latest invoice, then run `rates set`. The roster size, the assigned count and the roster's seat types are shown
+  alongside. If the roster and the assigned count disagree with each other, that is noted as two different measures, not
+  called drift.
+- **Which seats are idle?** A rostered member with no activity in the window. Activity is any stored per-user row for a
+  person with spend, credits or **requests** above zero (requests count because cost is zero by design on a seat-based plan, so
+  $0 never means inactive). Usage is matched to the roster by the vendor's member id, then by email. Members added inside the
+  window are counted as new, not idle. People who are active but not on the roster (left, or not matched) are counted
+  separately.
+- **It says when it cannot tell.** With no roster snapshot, or no per-user activity stored for the window, it says idle
+  seats were not assessed instead of listing everyone. If stored usage starts partway through the window it still answers,
+  with a caveat naming the date it starts.
+- **Exit code.** Non-zero when a billed count differs from the vendor's, so a scheduled run can alert; idle seats and notes
+  never set it.
+
+The idle list names people, so keep the output out of anything you commit; it stays in your terminal or under `artifacts/`.
+
 ### Per-user usage
 
 Once per-user rows are stored (ChatGPT Enterprise and Claude Enterprise; see the
