@@ -1276,7 +1276,18 @@ static Command BuildUsersCommand(IHost host)
             + $"{period.Start:yyyy-MM-dd} to {period.End:yyyy-MM-dd} ({rows.Select(r => r.Date).Distinct().Count()} day(s) with activity stored, "
             + $"{people.Count} active person(s))");
 
-        var table = new Table().AddColumns("Person", "Days active", "Last active", "Messages", "Code sessions", "Commits", "PRs", "Cowork sessions", "Searches");
+        // The person column never wraps (an email split over three lines is unreadable); the numeric headings are short so the
+        // numbers can share the rest of a normal-width terminal. Messages is chat, Cowork, Office, Design and Science together.
+        var table = new Table()
+            .AddColumn(new TableColumn("Person").NoWrap())
+            .AddColumn(new TableColumn("Days").RightAligned())
+            .AddColumn(new TableColumn("Last active").NoWrap())
+            .AddColumn(new TableColumn("Msgs").RightAligned())
+            .AddColumn(new TableColumn("Code").RightAligned())
+            .AddColumn(new TableColumn("Commits").RightAligned())
+            .AddColumn(new TableColumn("PRs").RightAligned())
+            .AddColumn(new TableColumn("Cowork").RightAligned())
+            .AddColumn(new TableColumn("Searches").RightAligned());
         foreach (var p in people.Take(top ?? people.Count))
         {
             table.AddRow(
@@ -1298,8 +1309,9 @@ static Command BuildUsersCommand(IHost host)
         }
 
         AnsiConsole.MarkupLine(
-            "  Messages are chat, Cowork, Office, Design and Science messages together. Activity is counts of what people did, not "
-            + "model requests and not cost. The output names people, so keep it out of anything you commit.");
+            "  Days = days active. Msgs = chat, Cowork, Office, Design and Science messages together. Code = Claude Code sessions. "
+            + "Cowork = Cowork sessions. Activity is counts of what people did, not model requests and not cost. The output names "
+            + "people, so keep it out of anything you commit.");
         return 0;
     });
 
