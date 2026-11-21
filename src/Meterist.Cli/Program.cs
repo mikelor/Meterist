@@ -1438,7 +1438,14 @@ static void WriteSeatAudit(TenantSeatAudit audit)
             AnsiConsole.MarkupLine(
                 $"  [red]Drift:[/] {v.BilledSeats} seat(s) are billed in the rate configuration but the vendor reports "
                 + $"{v.VendorReportedSeats} ({v.VendorReportedSource}). Check the latest invoice and, if it changed, run "
-                + "'rates set' for the new count. Nothing was changed.");
+                + "'rates set' for the new count ('activity show' lists the assigned seats day by day, to date the change). "
+                + "Nothing was changed.");
+        }
+        else if (v.UnusedBilledSeats is { } unused)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [green]No drift:[/] no more members than billed seats. [grey]Info:[/] {unused} of the {v.BilledSeats} billed seat(s) "
+                + "have no member on the roster (committed but unused, or not yet provisioned). Not drift.");
         }
         else if (v.BilledSeats is not null && v.VendorReportedSeats is not null)
         {

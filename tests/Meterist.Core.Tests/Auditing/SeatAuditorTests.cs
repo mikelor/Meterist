@@ -95,6 +95,49 @@ public class SeatAuditorTests
     }
 
     [Fact]
+    public async Task ABilledCountAboveTheRoster_IsUnusedCommittedSeats_NotDrift()
+    {
+        // The real zelleri case: 50 seats billed, 29 members. A commitment larger than the roster is not a stale rate card.
+        var w = new World();
+        w.Rates.Add(SeatRate(ChatGpt, 50));
+        w.Rosters[ChatGpt] = Roster(Enumerable.Range(0, 29).Select(i => Member(ChatGpt, $"m{i}")).ToArray());
+
+        var audit = await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken);
+
+        var v = Assert.Single(audit.Vendors);
+        Assert.False(v.HasDrift);
+        Assert.False(audit.HasDrift);   // so the exit code stays clean
+        Assert.Equal(21, v.UnusedBilledSeats);
+    }
+
+    [Fact]
+    public async Task MoreRosterMembersThanBilledSeats_IsDrift_AndHasNoUnusedSeats()
+    {
+        var w = new World();
+        w.Rates.Add(SeatRate(ChatGpt, 2));
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "a"), Member(ChatGpt, "b"), Member(ChatGpt, "c"));
+
+        var v = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors);
+
+        Assert.True(v.HasDrift);
+        Assert.Null(v.UnusedBilledSeats);
+    }
+
+    [Fact]
+    public async Task AssignedSeatsBelowTheBilledCount_IsStillDrift_BecauseBillingFollowsAssignedSeats()
+    {
+        var w = new World();
+        w.Rates.Add(SeatRate(Claude, 12));
+        w.Rosters[Claude] = Roster(Member(Claude, "m1"));
+        w.Activity.Add(new ActivitySummaryRecord { TenantId = "t1", VendorId = Claude, Date = AsOf.AddDays(-1), AssignedSeatCount = 10 });
+
+        var v = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors);
+
+        Assert.True(v.HasDrift);
+        Assert.Null(v.UnusedBilledSeats);   // the "unused" reading applies only to a roster comparison
+    }
+
+    [Fact]
     public async Task NoBilledCount_IsAnExplainedNote_NotDrift()
     {
         var w = new World();

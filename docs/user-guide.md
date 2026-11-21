@@ -704,11 +704,15 @@ never calls a vendor, so run `roster snapshot` and `extract` first.
 
 - **Are we billed for the seats the vendor says we have?** It compares the **billed** seat count (the `SeatCount` on the
   seat rate in force that day, from `rates set`) with the vendor's own figure: the **assigned seats** from Claude's
-  activity summary where there is one, otherwise the **roster** size. A difference is **drift**: the rate card is stale
-  (a seat was added or removed and nobody ran `rates set`) or the vendor changed something. It is flagged, never corrected:
-  check the latest invoice, then run `rates set`. The roster size, the assigned count and the roster's seat types are shown
-  alongside. If the roster and the assigned count disagree with each other, that is noted as two different measures, not
-  called drift.
+  activity summary where there is one, otherwise the **roster** size. The rule depends on which figure it is. Billing
+  follows **assigned seats**, so any difference from the billed count is **drift**: the rate card is stale (a seat was
+  added or removed and nobody ran `rates set`) or the vendor changed something. A **roster** is only who has been
+  provisioned, and the billed count may be a commitment larger than that (50 billed, 29 members), so fewer members than
+  billed seats is reported as information (`21 of the 50 billed seats have no member on the roster`), **not drift**, and
+  never sets the exit code. More members than billed seats is drift either way. Drift is flagged, never corrected: check the
+  latest invoice, then run `rates set` (`activity show` lists Claude's assigned seats day by day, which dates the change).
+  The roster size, the assigned count and the roster's seat types are shown alongside. If the roster and the assigned count
+  disagree with each other, that is noted as two different measures, not called drift.
 - **Which seats are idle?** A rostered member with no activity in the window. Activity is any stored per-user row for a
   person with spend, credits or **requests** above zero (requests count because cost is zero by design on a seat-based plan, so
   $0 never means inactive). Usage is matched to the roster by the vendor's member id, then by email. Members added inside the
@@ -717,8 +721,8 @@ never calls a vendor, so run `roster snapshot` and `extract` first.
 - **It says when it cannot tell.** With no roster snapshot, or no per-user activity stored for the window, it says idle
   seats were not assessed instead of listing everyone. If stored usage starts partway through the window it still answers,
   with a caveat naming the date it starts.
-- **Exit code.** Non-zero when a billed count differs from the vendor's, so a scheduled run can alert; idle seats and notes
-  never set it.
+- **Exit code.** Non-zero on drift as defined above, so a scheduled run can alert; unused billed seats, idle seats and
+  notes never set it.
 
 The idle list names people, so keep the output out of anything you commit; it stays in your terminal or under `artifacts/`.
 

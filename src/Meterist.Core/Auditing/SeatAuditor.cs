@@ -37,8 +37,15 @@ public sealed record IdleSeatAssessment(
 
 /// <summary>
 /// What one vendor reports and what Meterist is configured with, for the same day. <see cref="HasDrift"/> is the headline:
-/// the seat count being billed (from the versioned rate configuration) differs from the vendor's own figure, so either
+/// the seat count being billed (from the versioned rate configuration) disagrees with the vendor's own figure, so either
 /// the rate card is stale or the vendor changed something. Drift is flagged, never corrected.
+/// <para>
+/// The rule depends on what the vendor's figure is. An <b>assigned-seat</b> count is what billing follows, so any
+/// difference from the billed count is drift. A <b>roster</b> is only who has been provisioned, and the billed count may
+/// be a commitment larger than that (billed 50, 29 members), so fewer members than billed seats is
+/// <see cref="UnusedBilledSeats"/>, reported but not drift. More members than billed seats is drift either way: people
+/// are using seats that are not being paid for.
+/// </para>
 /// </summary>
 public sealed record VendorSeatAudit(
     VendorIdentity Vendor,
@@ -57,8 +64,19 @@ public sealed record VendorSeatAudit(
 
     public string? VendorReportedSource => AssignedSeats is not null ? "assigned seats" : RosterCount is not null ? "roster" : null;
 
-    /// <summary>True when a billed seat count is configured, the vendor reports one, and they differ.</summary>
-    public bool HasDrift => BilledSeats is not null && VendorReportedSeats is not null && BilledSeats != VendorReportedSeats;
+    /// <summary>True when a billed seat count is configured, the vendor reports one, and they disagree by the rule above.</summary>
+    public bool HasDrift =>
+        BilledSeats is not null && VendorReportedSeats is not null
+        && (AssignedSeats is not null ? BilledSeats != VendorReportedSeats : VendorReportedSeats > BilledSeats);
+
+    /// <summary>
+    /// Billed seats beyond the roster, when the comparison is against a roster: committed or not yet provisioned, so
+    /// information and not drift. Null otherwise.
+    /// </summary>
+    public int? UnusedBilledSeats =>
+        AssignedSeats is null && BilledSeats is not null && RosterCount is not null && BilledSeats > RosterCount
+            ? BilledSeats - RosterCount
+            : null;
 }
 
 public sealed record TenantSeatAudit(string TenantId, IReadOnlyList<VendorSeatAudit> Vendors)
