@@ -1015,30 +1015,30 @@ static Command BuildLimitsCommand(IHost host)
         static string Money(decimal? value, string? currency) =>
             value is { } v ? v.ToString("N2", CultureInfo.InvariantCulture) + (string.IsNullOrWhiteSpace(currency) ? string.Empty : " " + currency) : "-";
 
-        // Most used first (by share of the limit), then members with no limit, which have no share to rank.
+        // Most constrained first (a zero limit with spend, then by share of the limit used), members with no limit
+        // last. A zero limit is a limit, so it is ranked and shown, not treated as the absence of one.
         var ordered = snapshot.Limits
-            .OrderBy(l => l.LimitAmount is > 0 ? 0 : 1)
-            .ThenByDescending(l => l.LimitAmount is > 0 && l.PeriodToDateSpend is { } s ? s / l.LimitAmount.Value : -1m)
-            .ThenByDescending(l => l.PeriodToDateSpend ?? 0m)
-            .ThenBy(l => l.Name ?? l.Email ?? l.MemberId, StringComparer.OrdinalIgnoreCase)
+            .Select(l => (Row: l, Headroom: SpendLimitHeadroom.Of(l)))
+            .OrderByDescending(x => x.Headroom.Pressure)
+            .ThenByDescending(x => x.Row.PeriodToDateSpend ?? 0m)
+            .ThenBy(x => x.Row.Name ?? x.Row.Email ?? x.Row.MemberId, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var table = new Table().AddColumns("Member", "Limit", "Spent", "Used", "Left", "Source");
-        foreach (var l in ordered)
+        foreach (var (l, headroom) in ordered)
         {
             var who = !string.IsNullOrWhiteSpace(l.Name) && !string.IsNullOrWhiteSpace(l.Email)
                 ? $"{l.Name} <{l.Email}>"
                 : l.Name ?? l.Email ?? l.MemberId;
-            var hasLimit = l.LimitAmount is > 0;
-            var used = hasLimit && l.PeriodToDateSpend is { } spent ? spent / l.LimitAmount!.Value : (decimal?)null;
-            var left = hasLimit && l.PeriodToDateSpend is { } sp ? l.LimitAmount!.Value - sp : (decimal?)null;
+            var used = headroom.UsedFraction;
+            var left = headroom.Left;
             var source = l.SourceType is null ? "-" : l.SourceDetail is null ? l.SourceType : $"{l.SourceType} ({l.SourceDetail})";
 
             table.AddRow(
                 Markup.Escape(who),
                 l.LimitAmount is null ? "no limit" : Money(l.LimitAmount, l.Currency),
                 Money(l.PeriodToDateSpend, l.Currency),
-                used is { } u ? (u * 100m).ToString("0", CultureInfo.InvariantCulture) + "%" : "-",
+                used is { } u ? (u * 100m).ToString("0", CultureInfo.InvariantCulture) + "%" : headroom.Kind == SpendLimitKind.Zero ? "n/a" : "-",
                 left is { } lf ? Money(lf, l.Currency) : "-",
                 Markup.Escape(source));
         }

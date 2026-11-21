@@ -803,7 +803,9 @@ dotnet run --project src/Meterist.Cli -- limits show --tenant <your-tenant-id> -
   record of where a member stood that day; taking another the same day replaces that day's, and earlier days are kept.
 - **`limits show`** prints the latest stored snapshot as headroom: limit, spent, share used, amount left, and where the
   limit comes from (a limit set for the member, or inherited from a group, a seat tier or the organisation), most used first.
-  Members with **no limit** are listed last and show `no limit`. `--on-or-before 2026-10-31` shows an earlier snapshot.
+  Members with **no limit** are listed last and show `no limit`. A limit of **zero** is a limit, not the absence of one: it is
+  shown as `0.00`, with the amount left as zero (negative once anything is spent), `n/a` for the share used (a share of zero is
+  undefined), and ranked at the top once the member has spent anything. `--on-or-before 2026-10-31` shows an earlier snapshot.
 - **A headroom signal, not a ledger.** Anthropic calls the spend figure informational: it can read zero when unavailable
   and can differ from the cost reports (for one tenant it matched to a fraction of a cent, for another it was several percent
   higher). Use the cost reports for money, and this to see who is near a cap.

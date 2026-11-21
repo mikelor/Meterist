@@ -213,6 +213,13 @@ public sealed partial class HttpClaudeActivitySummaryRepository : IClaudeActivit
                 return;
             }
 
+            // A cursor that is only whitespace cannot be sent back and is not the end: stop rather than request again.
+            if (string.IsNullOrWhiteSpace(report.NextPage))
+            {
+                throw new InvalidOperationException(
+                    "The Claude activity summary gave a blank next_page cursor; refusing to return a partial result.");
+            }
+
             // A repeated cursor means the server is looping, and the result would never end or would double count.
             if (!seenCursors.Add(report.NextPage))
             {

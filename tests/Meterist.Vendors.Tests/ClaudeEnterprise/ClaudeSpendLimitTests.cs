@@ -127,6 +127,32 @@ public class ClaudeSpendLimitTests
         Assert.Contains("already returned", ex.Message);
     }
 
+    [Theory]
+    [InlineData("\" \"")]
+    [InlineData("\"   \"")]
+    [InlineData("\"\\u0009\"")]
+    public async Task List_AWhitespaceOnlyCursor_IsRejectedAtOnce_WithoutAnotherRequest(string cursor)
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, "{ \"data\": [ " + Row("u1", "1", "0") + " ], \"next_page\": " + cursor + " }");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateRepository(server).ListEffectiveLimitsAsync(Key, TestContext.Current.CancellationToken));
+
+        Assert.Contains("blank next_page", ex.Message);
+        Assert.Single(server.LogEntries);
+    }
+
+    [Fact]
+    public async Task List_AnEmptyStringCursor_IsTheEndOfTheList()
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, "{ \"data\": [ " + Row("u1", "1", "0") + " ], \"next_page\": \"\" }");
+
+        Assert.Single(await CreateRepository(server).ListEffectiveLimitsAsync(Key, TestContext.Current.CancellationToken));
+        Assert.Single(server.LogEntries);
+    }
+
     [Fact]
     public async Task List_ARowWithNoMemberId_FailsInsteadOfBeingSkipped()
     {

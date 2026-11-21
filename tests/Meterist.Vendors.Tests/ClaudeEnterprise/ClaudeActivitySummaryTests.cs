@@ -175,6 +175,19 @@ public class ClaudeActivitySummaryTests
     }
 
     [Fact]
+    public async Task Query_AWhitespaceOnlyCursor_IsRejectedAtOnce_WithoutAnotherRequest()
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, "{ \"data\": [ { \"starting_at\": \"2026-11-01T00:00:00Z\", \"daily_active_user_count\": 1 } ], \"next_page\": \"  \" }");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateRepository(server).QueryAsync(
+            Key, new DateRange(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 2)), TestContext.Current.CancellationToken));
+
+        Assert.Contains("blank next_page", ex.Message);
+        Assert.Single(server.LogEntries);
+    }
+
+    [Fact]
     public async Task Query_ARowWithNoUsableDate_FailsInsteadOfBeingSkipped()
     {
         using var server = WireMockServer.Start();

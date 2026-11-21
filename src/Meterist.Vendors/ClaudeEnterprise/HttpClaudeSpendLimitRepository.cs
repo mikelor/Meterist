@@ -112,6 +112,14 @@ public sealed class HttpClaudeSpendLimitRepository : IClaudeSpendLimitRepository
                 return limits;
             }
 
+            // A cursor that is only whitespace is not the end of the list and cannot be sent back: stop here rather
+            // than make another request with an unusable page parameter.
+            if (string.IsNullOrWhiteSpace(report.NextPage))
+            {
+                throw new InvalidOperationException(
+                    "The Claude spend limits gave a blank next_page cursor; refusing to store a partial result.");
+            }
+
             if (!seenCursors.Add(report.NextPage))
             {
                 throw new InvalidOperationException(
