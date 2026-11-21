@@ -29,6 +29,18 @@ public sealed class VendorReportData
     public IReadOnlyList<BreakdownCategoryTotal> Breakdown { get; init; } = [];
 
     /// <summary>
+    /// Named per-user usage for the period, with the check that it reconciles to this vendor's aggregate. Null when no
+    /// per-user rows are stored for the vendor in the period (which is not the same as no usage).
+    /// </summary>
+    public VendorUserUsage? UserUsage { get; init; }
+
+    /// <summary>Billed versus vendor-reported seats and the idle seats, as of the end of the period. Null for a vendor with no roster source.</summary>
+    public Auditing.VendorSeatAudit? Seats { get; init; }
+
+    /// <summary>The vendor's own active-user figures for the period. Null when none are stored.</summary>
+    public ActivityOverview? Activity { get; init; }
+
+    /// <summary>
     /// True when the breakdown says something the weekly figures do not: a usage kind other than the seat fee,
     /// or any non-usage charge, that is worth at least half a cent. A vendor that is only a seat fee, or a seat
     /// fee plus invoice rounding, has nothing to add.

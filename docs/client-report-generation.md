@@ -92,6 +92,31 @@ bundled into one page:
    is notable. A kind under half a cent (invoice rounding) is not listed, though it stays in the
    subtotals, and does not by itself make the section appear. Informational: the weekly figures and
    projections do not use it.
+9b. **People sections** — four sections that sit between the spend sections and the projections, each left out when
+   the stored data has nothing for it. They **name people** (name and email), by operator decision, so a populated
+   report is personal data (see the privacy rule above). Per-user dollars are **usage only**: a seat fee is a flat
+   charge and is not attributed to individuals.
+   - **Active users and seat utilization** — per tenant and vendor: billed seats (from the rate configuration), the
+     vendor-reported seats (its assigned-seat count where it gives one, otherwise the roster size), roster members,
+     people active and idle in the 30 days ending on the last day of the report, utilization against billed seats and
+     against the roster, and the vendor's own daily, weekly and monthly active users where it reports them (Claude
+     Enterprise). Seat drift, unused billed seats and any data caveat (no roster, usage stored only from part-way
+     through the window, usage that ends early) are noted beneath, with the same rules as `audit seats`. A vendor with
+     no assessable idle data shows a dash, never a zero.
+   - **Top consumers by spend** — per tenant, the ten people with the most usage dollars across all vendors, matched by
+     email (case-insensitive) where a vendor gives one, with each vendor's share. Usage attributed to an API key or left
+     unattributed is not a person's spend and is left out, and so is anyone with no usage dollars (on a seat-based plan
+     cost is zero by design, so use shows in requests, in the next section).
+   - **Usage by person** — beneath each vendor's aggregate: each person (named) with spend, credits, requests and days
+     active, the first 25 rows then the rest summed in one line, and a total. Each table says where its figures come
+     from and ends with a reconciliation line comparing the per-user total with the vendor's aggregate usage for the
+     same days (`Reconciles`, or `Does not reconcile` with the difference), and how many usage days have no per-user
+     rows. Rows are labelled: **(est.)** for a price estimated from credits (ChatGPT) or an allocation, **API key
+     (key-level)** for usage the vendor attributes to a key (Claude API Platform workspace keys), and **Unattributed** for
+     usage the vendor did not tie to anyone.
+   - **Idle seats** — per tenant and vendor, the rostered people with no activity in the 30 days, longest idle first, with
+     role, seat type and last active day before the window (`none stored` means no earlier activity is on file, not that
+     there was none). Up to 40 are listed.
 10. **Footnote** — methodology and caveats: what "Gross Spend" means, that tax
    and support fees are not included (so a figure can differ from an invoice;
    see `docs/architecture.md` §5.2), why
@@ -111,7 +136,9 @@ bundled into one page:
 
 The report is built from Meterist's own SQLite store
 (`%LOCALAPPDATA%\Meterist\meterist.db`), specifically `DailySpendRecords`
-and, for the rate card, `VendorRateConfigs`. The queries below are what the
+and, for the rate card, `VendorRateConfigs`; the people sections also read `UserDailyUsageRecords`,
+`MemberRosterRecords` and `ActivitySummaryRecords` (all stored by `extract` and `roster snapshot`, so `report generate`
+still never calls a vendor). The queries below are what the
 aggregator is equivalent to. They are kept as a way to **spot-check a report
 against the database**, not as a process to follow by hand. Per-tenant
 aggregate:
@@ -187,7 +214,8 @@ re-deriving a design plan from scratch each time.
 
 1. Confirm which tenants and date range to cover.
 2. Extract through the end of the range (`extract`, or the scheduled run
-   described in the user guide).
+   described in the user guide), and take a roster snapshot (`roster snapshot-all`), so the people sections have a
+   roster to compare with and per-user usage to read.
 3. Run `audit coverage` for the same tenants and range, and resolve any gaps
    on seat-priced vendors before generating.
 4. Run `report generate` with a dated `--out` file.

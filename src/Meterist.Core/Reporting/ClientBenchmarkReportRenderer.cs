@@ -40,6 +40,7 @@ public static class ClientBenchmarkReportRenderer
         RenderRateCard(html, data);
         RenderWeeklySpend(html, data, totalWeekCount);
         RenderSpendByKind(html, data);
+        UserSectionsRenderer.Render(html, data);
         RenderProjections(html, data, totalWeekCount);
         RenderPendingSections(html);
         RenderFootnote(html, data);
@@ -461,6 +462,7 @@ public static class ClientBenchmarkReportRenderer
                 <ul>
                   <li><b>Figures are Gross Spend</b> (seat fee + usage/overage), pulled live from each vendor's API through Meterist — not estimated or modeled.</li>
                   <li><b>Tax and support fees are not included.</b> Figures are the usage and seat charges each vendor reports, so a figure can differ from the amount on that vendor's invoice. In particular, tax and cloud support fees (which Google bills on the same account as Gemini Enterprise) are left out of the figures on purpose; where they were recorded, the Spend by kind of charge section lists them.</li>
+                  <li><b>People are named.</b> The usage-by-person, top-consumer and idle-seat sections show names and emails, so a populated report is personal data: it stays under the git-ignored <code>artifacts/</code> folder and is not shared outside the engagement. Per-user dollars are usage only (seat fees are not attributed to people), and any figure marked estimated is derived, not vendor-reported.</li>
                   <li><b>Date ranges differ by vendor within a tenant</b> — this reflects each vendor's actual available extraction window at pull time, not a data gap.</li>
 
             """);
