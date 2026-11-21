@@ -719,8 +719,10 @@ never calls a vendor, so run `roster snapshot` and `extract` first.
   window are counted as new, not idle. People who are active but not on the roster (left, or not matched) are counted
   separately.
 - **It says when it cannot tell.** With no roster snapshot, or no per-user activity stored for the window, it says idle
-  seats were not assessed instead of listing everyone. If stored usage starts partway through the window it still answers,
-  with a caveat naming the date it starts.
+  seats were not assessed instead of listing everyone. If stored usage starts partway through the window, or **ends more than
+  three days before the audit date**, it still answers but with a caveat naming the date, because a seat active only in the
+  missing stretch would be listed as idle (run `extract` to bring the data up to date). Any window from 1 to 3650 days is
+  read in full; a longer or shorter `--idle-days` is rejected.
 - **Exit code.** Non-zero on drift as defined above, so a scheduled run can alert; unused billed seats, idle seats and
   notes never set it.
 

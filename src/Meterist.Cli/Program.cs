@@ -1704,9 +1704,9 @@ static Command BuildAuditCommand(IHost host)
             ? DateOnly.FromDateTime(d)
             : DateOnly.FromDateTime(DateTime.UtcNow);
 
-        if (idleDays < 1)
+        if (idleDays < 1 || idleDays > SeatAuditor.MaxIdleDays)
         {
-            AnsiConsole.MarkupLine("[red]--idle-days must be at least 1.[/]");
+            AnsiConsole.MarkupLine($"[red]--idle-days must be between 1 and {SeatAuditor.MaxIdleDays}.[/]");
             return 1;
         }
 

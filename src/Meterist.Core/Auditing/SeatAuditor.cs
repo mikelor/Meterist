@@ -106,8 +106,17 @@ public sealed class SeatAuditor
     // The roster is a snapshot: older than this and a comparison against it says little about today.
     private const int StaleRosterDays = 7;
 
-    // How far back to look for the first stored per-user row, to say when stored usage starts.
-    private const int UsageHistoryDays = 365;
+    // How far back before the window to look, for the first stored per-user row (to say when stored usage starts) and for
+    // a member's last activity before the window. The lookback is this much before the window starts, so a long window
+    // is never cut short: it is always read in full.
+    private const int HistoryBeforeWindowDays = 365;
+
+    // The longest idle window accepted. Far beyond any useful audit, and keeps the date arithmetic well inside range.
+    public const int MaxIdleDays = 3650;
+
+    // Vendors publish the newest day late, so stored usage ending a day or two before the audit date is normal. Past this,
+    // activity since the last stored day is unknown and an idle list would include people who simply have not been pulled yet.
+    private const int AllowedUsageLagDays = 3;
 
     private readonly IEnumerable<IVendorRosterSource> _rosterSources;
     private readonly IVendorRateConfigRepository _rates;
@@ -137,9 +146,10 @@ public sealed class SeatAuditor
         Guid? vendorFilter = null,
         CancellationToken cancellationToken = default)
     {
-        if (idleDays < 1)
+        if (idleDays < 1 || idleDays > MaxIdleDays)
         {
-            throw new ArgumentOutOfRangeException(nameof(idleDays), "The idle window must be at least one day.");
+            throw new ArgumentOutOfRangeException(
+                nameof(idleDays), $"The idle window must be between 1 and {MaxIdleDays} days.");
         }
 
         var vendors = new List<VendorSeatAudit>();
@@ -231,7 +241,7 @@ public sealed class SeatAuditor
         var window = new DateRange(asOf.AddDays(1 - idleDays), asOf);
 
         var history = await _usage.GetAsync(
-            tenantId, vendor.Id, new DateRange(asOf.AddDays(-UsageHistoryDays), asOf), cancellationToken).ConfigureAwait(false);
+            tenantId, vendor.Id, new DateRange(window.Start.AddDays(-HistoryBeforeWindowDays), asOf), cancellationToken).ConfigureAwait(false);
         var people = history.Where(r => r.Attribution == UsageAttribution.Person && IsActive(r)).ToList();
 
         var inWindow = people.Where(r => r.Date >= window.Start && r.Date <= window.End).ToList();
@@ -328,14 +338,26 @@ public sealed class SeatAuditor
             .ThenBy(i => i.Name ?? i.Email ?? i.MemberId, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        string? reason = null;
+        var caveats = new List<string>();
         if (firstStored > window.Start.AddDays(1))
         {
             // Stored usage begins after the window does, so a member could have been active in the part that is missing.
-            reason = $"Stored per-user activity starts on {firstStored:yyyy-MM-dd}, after the window began ({window.Start:yyyy-MM-dd}); a seat may have been active earlier in the window.";
+            caveats.Add($"Stored per-user activity starts on {firstStored:yyyy-MM-dd}, after the window began ({window.Start:yyyy-MM-dd}); a seat may have been active earlier in the window.");
         }
 
-        return new IdleSeatAssessment(window, true, reason, activeIds.Count, newMembers, notOnRoster.Count, ordered);
+        // And the other end: usage that stops well before the audit date says nothing about the days since, so anyone active
+        // only in that stretch looks idle. Any stored row counts (a day with rows was pulled), not only active ones.
+        var lastStored = history.Max(r => r.Date);
+        if (asOf.DayNumber - lastStored.DayNumber > AllowedUsageLagDays)
+        {
+            caveats.Add(
+                $"Stored per-user activity ends on {lastStored:yyyy-MM-dd}, {asOf.DayNumber - lastStored.DayNumber} days before the audit date; "
+                + "a seat that was active only since then is listed as idle (run 'extract' to bring the data up to date).");
+        }
+
+        return new IdleSeatAssessment(
+            window, true, caveats.Count == 0 ? null : string.Join(" ", caveats),
+            activeIds.Count, newMembers, notOnRoster.Count, ordered);
     }
 
     // Spend, credits or requests above zero. Requests count because cost is zero by design on a seat-based plan.

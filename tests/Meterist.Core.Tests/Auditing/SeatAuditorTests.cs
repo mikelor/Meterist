@@ -344,6 +344,105 @@ public class SeatAuditorTests
     }
 
     [Fact]
+    public async Task UsageThatStopsTwentyDaysBeforeTheAuditDate_IsAssessableOnlyWithACaveatNamingWhereItEnds()
+    {
+        var w = new World();
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "a"), Member(ChatGpt, "b"));
+        w.Usage.Add(Use(ChatGpt, "a", 60, credits: 1m));   // history before the window, so the start is covered
+        w.Usage.Add(Use(ChatGpt, "a", 25, credits: 1m));
+        w.Usage.Add(Use(ChatGpt, "a", 20, credits: 1m));   // and then nothing for twenty days
+
+        var idle = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.True(idle.Assessable);
+        Assert.NotNull(idle.Reason);
+        Assert.Contains($"ends on {AsOf.AddDays(-20):yyyy-MM-dd}", idle.Reason);
+        Assert.Contains("20 days before the audit date", idle.Reason);
+        Assert.Equal("b", Assert.Single(idle.IdleSeats).MemberId);
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(3, false)]   // the vendor publishes late: a few days behind is normal
+    [InlineData(4, true)]
+    [InlineData(10, true)]
+    public async Task TheTrailingCaveatAppearsOnlyBeyondTheAllowedLag(int lastRowDaysAgo, bool caveat)
+    {
+        var w = new World();
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "a"), Member(ChatGpt, "b"));
+        w.Usage.Add(Use(ChatGpt, "a", 60, credits: 1m));
+        w.Usage.Add(Use(ChatGpt, "a", lastRowDaysAgo, credits: 1m));
+
+        var idle = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.True(idle.Assessable);
+        Assert.Equal(caveat, idle.Reason?.Contains("ends on") == true);
+    }
+
+    [Fact]
+    public async Task ADayWithOnlyZeroActivityRows_CountsAsPulled_SoItDoesNotTriggerTheTrailingCaveat()
+    {
+        var w = new World();
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "a"), Member(ChatGpt, "b"));
+        w.Usage.Add(Use(ChatGpt, "a", 60, credits: 1m));
+        w.Usage.Add(Use(ChatGpt, "a", 25, credits: 1m));
+        w.Usage.Add(Use(ChatGpt, "b", 1));   // a recent row with no activity: the day was pulled
+
+        var idle = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Null(idle.Reason);
+    }
+
+    [Fact]
+    public async Task ALongWindow_IsReadInFull_SoActivityOverAYearAgoStillCounts()
+    {
+        var w = new World();
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "old"), Member(ChatGpt, "quiet"), Member(ChatGpt, "now"));
+        w.Usage.Add(Use(ChatGpt, "old", 380, credits: 1m));   // beyond the 365 days the lookback used to stop at
+        w.Usage.Add(Use(ChatGpt, "now", 1, credits: 1m));
+
+        var idle = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 400, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Equal(new DateRange(AsOf.AddDays(-399), AsOf), idle.Window);
+        Assert.Equal(["quiet"], idle.IdleSeats.Select(s => s.MemberId));   // "old" was active inside the 400-day window
+        Assert.Equal(2, idle.ActiveCount);
+    }
+
+    [Fact]
+    public async Task ALongWindow_StillFindsAnEarlierLastActiveDayBeforeIt()
+    {
+        var w = new World();
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "was"), Member(ChatGpt, "now"));
+        w.Usage.Add(Use(ChatGpt, "was", 700, credits: 1m));   // 300 days before a 400-day window starts
+        w.Usage.Add(Use(ChatGpt, "now", 1, credits: 1m));
+
+        var idle = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, 400, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Equal(AsOf.AddDays(-700), Assert.Single(idle.IdleSeats).LastActiveBeforeWindow);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    [InlineData(SeatAuditor.MaxIdleDays + 1)]
+    public async Task AnIdleWindowOutsideTheSupportedRange_IsRejected(int days)
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            new World().Auditor(Claude).AuditAsync("t1", AsOf, days, cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task TheLargestSupportedWindow_IsAccepted()
+    {
+        var w = new World();
+        w.Rosters[ChatGpt] = Roster(Member(ChatGpt, "a"));
+        w.Usage.Add(Use(ChatGpt, "a", 1, credits: 1m));
+
+        var idle = Assert.Single((await w.Auditor(ChatGpt).AuditAsync("t1", AsOf, SeatAuditor.MaxIdleDays, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.True(idle.Assessable);
+    }
+    [Fact]
     public async Task AnIdleMemberWhoWasActiveEarlier_ShowsTheirLastActiveDay_AndNeverSeenSortsFirst()
     {
         var w = new World();
