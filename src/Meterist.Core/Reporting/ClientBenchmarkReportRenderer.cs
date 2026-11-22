@@ -24,7 +24,7 @@ public static class ClientBenchmarkReportRenderer
 {
     private static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
 
-    public static string Render(ReportData data)
+    public static string Render(ReportData data, ReportDiff? diff = null)
     {
         var totalWeekCount = TotalWeekCount(data);
 
@@ -35,6 +35,7 @@ public static class ClientBenchmarkReportRenderer
 
         RenderMasthead(html, data);
         RenderKpiCards(html, data);
+        ReportDiffRenderer.Render(html, diff);
         RenderVendorLedger(html, data);
         RenderConcentrationRisk(html, data);
         RenderRateCard(html, data);

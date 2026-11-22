@@ -162,7 +162,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 
 | Item | Status | Where it landed or what is left |
 |---|---|---|
-| Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). ✅ Leading partial week for every vendor (#69). 🔵 Left: a diff against the previous report's numbers before trusting a new one (#85). |
+| Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). ✅ Leading partial week for every vendor (#69). ✅ A diff of each vendor week against the previous report's manifest, with decreases marked and a non-zero exit on request (#85). |
 | Cross-tenant benchmarking | 🟡 | The report compares tenants side by side. A deeper per-seat comparison across tenants needs more tenants with data. |
 | Per-employee spend comparison | ✅ #15 to #19, #32 | Storage, the `users usage` query, and the report's people sections: active users and seat utilization, top consumers, usage by person (reconciled to each vendor's aggregate) and idle seats. |
 | `meterist audit` reconciliation command | 🟡 | `audit coverage` and `audit gemini-breakdown` exist. 🔵 Not built, no issue: an optional diff against an exported CSV or spreadsheet baseline. |
