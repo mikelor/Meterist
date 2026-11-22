@@ -452,10 +452,18 @@ not adopted.
   degree of parallelism (default 4, `Meterist:ChatGpt:CostsCrossCheck:MaxParallelDownloads`), read back in listing order so the
   rows and the first-listed duplicate are exactly what the sequential loop gave; `RecentDays` limits the window to the last N
   days; `Enabled` turns it off. The scheduled run uses the last 7 days. Every run reports `COSTS cross-check: N file(s) in
-  Ns (up to P at a time)`. **After timings are not yet recorded**: they have to be measured against a real tenant, so paste the
-  `extract --dry-run` Detail line (before: `MaxParallelDownloads=1`, after: the defaults, and with `RecentDays=7`) and they go
-  here. Concurrency is a guess at what the endpoint tolerates (no rate limit is documented for the file download), so 4 is a
-  conservative start, and the shared resilience handler still retries a 429 or 5xx.
+  Ns (up to P at a time)`.
+  - **Before (measured 2026-11-22, one tenant, `extract --dry-run` over 2026-10-24 to 2026-11-21, 29 days):** listing the
+    files took 10 pages of up to 100; **912 files were downloaded one at a time in 615 s (about 0.67 s per file)**,
+    giving 3,479 deduplicated events and 2,433 billing-line rows. That is the 12 minutes the issue reported; the
+    cost is the number of requests.
+  - **After:** not yet measured. By the sequential rate, the default of 4 at a time should take roughly 150 s if the endpoint
+    scales (a guess), and `RecentDays=7` should read roughly a quarter of the files (the files are about 31 a day, so about
+    220), so about 150 s sequential or a minute or less in parallel. Paste the `COSTS cross-check: N file(s) in Ns` line from
+    a run with the defaults and one with `RecentDays=7`, and they go here, along with whether the rows and the
+    day-by-day comparison match the sequential run (the row counts above are what they must reproduce).
+  - Concurrency is a guess at what the endpoint tolerates (no rate limit is documented for the file download), so 4 is a
+    conservative start, and the shared resilience handler still retries a 429 or 5xx.
 - **Daily Usage API — the source of record, IMPLEMENTED (2026-11).** `GET
   https://api.chatgpt.com/v1/analytics/workspaces/{workspace_id}/usage`,
   the Unified Daily Usage API (GA 2026-09-17), queried with
