@@ -15,6 +15,29 @@ public static class ProjectionCalculator
 
     private const int WeeksPerYear = 52;
 
+    /// <summary>The <c>ModelOrSku</c> of a vendor's seat rate row (the same key the vendor adapters use).</summary>
+    public const string SeatModelOrSku = "seat";
+
+    /// <summary>
+    /// The annual seat cost implied by a seat rate: <c>SeatCount × Rate</c> for an annual rate, × 12 for a monthly one.
+    /// Null when the contract cannot be annualised (no rate, no seat count, or a one-time cadence), in which case the
+    /// caller falls back to projecting the seat part from the weekly series.
+    /// </summary>
+    public static decimal? AnnualSeatCostFromContract(Models.VendorRateConfig? seatRate)
+    {
+        if (seatRate?.SeatCount is not int seats)
+        {
+            return null;
+        }
+
+        return seatRate.BillingCadence switch
+        {
+            Models.BillingCadence.Annual => seats * seatRate.Rate,
+            Models.BillingCadence.Monthly => seats * seatRate.Rate * 12m,
+            _ => null,
+        };
+    }
+
     /// <summary>
     /// Flat = average(values) × 52. Trend-adjusted = an OLS linear regression
     /// over the series (x = 0..n-1), projected one step past the last point,

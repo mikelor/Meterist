@@ -122,7 +122,18 @@ bundled into one page:
    is stored. Any ChatGPT Enterprise week with missing days is left out as well
    (a separate rule, see the footnote rules below). Start a report on a
    Wednesday to include its first week. Fewer than one full week gives no
-   projection (shown as a dash).
+   projection (shown as a dash). **The seat part comes from the contract:** where a
+   `seat` rate is configured with a seat count and an annual or monthly cadence
+   (Claude Enterprise, ChatGPT Enterprise), the seat part of every scenario is
+   `SeatCount × Rate` of the rate in force on the report's last day (× 12 for a
+   monthly rate), because projecting past weekly seat fees lags every seat
+   change. It is therefore the same in all three scenarios; only the usage part
+   is projected from the weekly series. Without a usable rate (none configured,
+   no seat count, a one-time cadence, or Gemini Enterprise, whose seat fee comes
+   prorated from the billing export) the seat part is projected from the weekly
+   series as before. This also removes a small standing bias: weeks × 52 is 364
+   days, so a constant annual charge used to project at 364/365 of its price. The
+   footnote names the vendors it applied to.
 9. **Audit & reconciliation status** — per vendor, how the numbers were
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the

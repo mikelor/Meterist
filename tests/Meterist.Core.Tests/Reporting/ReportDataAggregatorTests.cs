@@ -259,6 +259,59 @@ public class ReportDataAggregatorTests
     }
 
     [Fact]
+    public async Task AggregateAsync_SeatRateAtPeriodEnd_IsTheSeatRowInForceOnTheLastDay()
+    {
+        // Period ends Jul 14. A renewal on Jul 8 replaced the 10-seat row; a non-seat row must be ignored.
+        var vendorId = VendorCatalog.ClaudeEnterprise.Id;
+        var rateConfigRepo = new FakeVendorRateConfigRepository(
+        [
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "per-seat", ModelOrSku = "seat", Rate = 300m, SeatCount = 10,
+                EffectiveFrom = new DateOnly(2026, 1, 1), EffectiveTo = new DateOnly(2026, 7, 7),
+            },
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "per-seat", ModelOrSku = "seat", Rate = 320m, SeatCount = 12,
+                EffectiveFrom = new DateOnly(2026, 7, 8),
+            },
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "credit", ModelOrSku = "credit-usd", Rate = 0.04m,
+                EffectiveFrom = new DateOnly(2026, 1, 1),
+            },
+        ]);
+        var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), rateConfigRepo);
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var claude = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == vendorId);
+        Assert.Equal(12, claude.SeatRateAtPeriodEnd?.SeatCount);
+        Assert.Equal(320m, claude.SeatRateAtPeriodEnd?.Rate);
+    }
+
+    [Fact]
+    public async Task AggregateAsync_SeatRateAtPeriodEnd_IsNullWhenTheSeatRateEndedBeforeTheLastDay()
+    {
+        var vendorId = VendorCatalog.ClaudeEnterprise.Id;
+        var rateConfigRepo = new FakeVendorRateConfigRepository(
+        [
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "per-seat", ModelOrSku = "seat", Rate = 300m, SeatCount = 10,
+                EffectiveFrom = new DateOnly(2026, 1, 1), EffectiveTo = new DateOnly(2026, 7, 7),
+            },
+        ]);
+        var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), rateConfigRepo);
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(data.Tenants[0].Vendors.Single(v => v.Vendor.Id == vendorId).SeatRateAtPeriodEnd);
+    }
+
+    [Fact]
     public async Task AggregateAsync_UsesTheSuppliedGeneratedAt_RatherThanTheWallClock()
     {
         var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), new FakeVendorRateConfigRepository());

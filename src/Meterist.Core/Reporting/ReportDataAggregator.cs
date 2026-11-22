@@ -1,4 +1,5 @@
 using Meterist.Core.Auditing;
+using Meterist.Core.Models;
 using Meterist.Core.Persistence;
 using Meterist.Core.Vendors;
 
@@ -118,6 +119,7 @@ public sealed class ReportDataAggregator
                     Vendor = vendor,
                     Weeks = weeks,
                     CurrentRates = currentRates,
+                    SeatRateAtPeriodEnd = rates.FindRateForDay(ProjectionCalculator.SeatModelOrSku, period.End),
                     SourceDayCounts = sourceDayCounts,
                     Breakdown = breakdown,
                     UserUsage = userUsage,

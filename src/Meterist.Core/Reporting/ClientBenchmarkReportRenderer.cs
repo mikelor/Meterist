@@ -321,7 +321,15 @@ public static class ClientBenchmarkReportRenderer
                     .OrderBy(w => w.WeekIndex)
                     .ToList();
 
+                // The seat part is a known contract amount, so it comes from the rate in force on the last day; only
+                // without a usable rate does it fall back to the weekly series (which lags every seat change).
                 var seatProjection = ProjectionCalculator.Compute(completeWeeks.Select(w => w.SeatFee).ToList());
+                if (completeWeeks.Count > 0
+                    && ProjectionCalculator.AnnualSeatCostFromContract(vendorData.SeatRateAtPeriodEnd) is decimal contractSeat)
+                {
+                    seatProjection = new ProjectionCalculator.Projection(contractSeat, contractSeat, contractSeat);
+                }
+
                 var usageProjection = ProjectionCalculator.Compute(completeWeeks.Select(w => w.UsageOrOverage).ToList());
                 var flat = seatProjection.Flat + usageProjection.Flat;
                 var trend = seatProjection.TrendAdjusted + usageProjection.TrendAdjusted;
@@ -471,6 +479,7 @@ public static class ClientBenchmarkReportRenderer
             """);
 
         AppendPartialWeekFootnote(html, data);
+        AppendSeatContractFootnote(html, data);
         AppendChatGptFootnotes(html, data);
 
         html.Append("""
@@ -480,6 +489,38 @@ public static class ClientBenchmarkReportRenderer
               </footer>
 
             """);
+    }
+
+    // Says which projections take their seat part from the contract in force on the report's last day, and why that is not
+    // the same as projecting past weekly seat fees. Omitted when no vendor used the contract method.
+    private static void AppendSeatContractFootnote(StringBuilder html, ReportData data)
+    {
+        var used = new List<string>();
+        foreach (var tenant in data.Tenants)
+        {
+            var vendors = tenant.Vendors
+                .Where(v => v.Weeks.Any(w => ProjectionEligibility.FeedsProjection(w, data.Period))
+                    && ProjectionCalculator.AnnualSeatCostFromContract(v.SeatRateAtPeriodEnd) is not null)
+                .Select(v => Encode(v.Vendor.DisplayName)).ToList();
+            if (vendors.Count > 0)
+            {
+                used.Add($"{Encode(tenant.TenantId)}: {string.Join(", ", vendors)}");
+            }
+        }
+
+        if (used.Count == 0)
+        {
+            return;
+        }
+
+        html.Append(
+            $"      <li><b>The seat part of the projections comes from the contract.</b> Seats are a known contract amount, so where a seat "
+            + $"rate is configured the seat part is the seat count × rate in force on {data.Period.End:MMM d, yyyy}, annualised "
+            + "(an annual rate as is, a monthly rate × 12), and is the same in Flat, Trend-adjusted and Latest week. Projecting past "
+            + "weekly seat fees would lag every seat change. The usage part is still projected from the weekly series. It also "
+            + "removes a small standing bias: weeks × 52 is 364 days, so a constant annual seat charge used to project at 364/365 "
+            + "of its price (about 0.3% low). Vendors with no usable seat rate keep the weekly method. Applies to — "
+            + $"{string.Join("; ", used)}.</li>\n");
     }
 
     // Which weeks the report left out of the projections because it starts or ends mid-week, per tenant and for every
