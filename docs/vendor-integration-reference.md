@@ -835,6 +835,11 @@ not adopted.
     manual-config backlog item doesn't have to re-derive this from the
     report or chat history; treat both figures as a starting point to
     refine once each account team confirms the real contract terms.
+  - **Decision 2026-11-22 (issue #84): the manual credit-grant config is not built.** The two figures above are still
+    unconfirmed observations that differ by tenant, no API exposes a pool, grant or expiry (rechecked when the Spend Controls
+    API was read for #29: it reports per-user usage and caps, not the pool), and nothing downstream needs the number now. It
+    is worth building only if the account team confirms real contract terms or credit-pool overage tracking is wanted; the
+    reasoning and the revisit triggers are in `product-design-document.md` section 7, under "Deferred by choice".
 - **Do not confuse with** the pre-existing `/v1/organization/costs`
   developer-platform Admin API — different product (api.openai.com token
   spend, project-scoped), confirmed to NOT cover ChatGPT/Codex workspace
