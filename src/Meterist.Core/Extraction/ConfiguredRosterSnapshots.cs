@@ -63,6 +63,14 @@ public sealed class ConfiguredRosterSnapshots
                     continue;
                 }
 
+                var skipReason = await _sources.First(s => s.VendorId == vendor.Id)
+                    .GetSkipReasonAsync(tenantId, cancellationToken).ConfigureAwait(false);
+                if (skipReason is not null)
+                {
+                    results.Add(new RosterRunResult(vendor.Id, vendor.DisplayName, RosterRunStatus.Skipped, skipReason));
+                    continue;
+                }
+
                 var outcome = await _service.TakeAsync(tenantId, vendor.Id, dryRun, cancellationToken).ConfigureAwait(false);
                 results.Add(new RosterRunResult(
                     vendor.Id, vendor.DisplayName, RosterRunStatus.Succeeded,

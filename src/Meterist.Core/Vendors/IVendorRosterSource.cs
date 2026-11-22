@@ -32,4 +32,12 @@ public interface IVendorRosterSource
     Guid VendorId { get; }
 
     Task<IReadOnlyList<VendorMember>> FetchMembersAsync(string tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Why a snapshot cannot be attempted for this tenant even though a credential is stored, or null when it can. A vendor
+    /// whose roster needs settings beyond the credential (Gemini's Discovery Engine project) says so here, so an unattended
+    /// run reports the tenant as not set up rather than as a failure every day. Default: always attemptable.
+    /// </summary>
+    Task<string?> GetSkipReasonAsync(string tenantId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
 }

@@ -127,6 +127,33 @@ public class ConfiguredRosterSnapshotsTests
     }
 
     [Fact]
+    public async Task Take_ASourceThatSaysItIsNotSetUp_IsSkippedWithItsReason_WithoutFetching_AndIsNotAFailure()
+    {
+        var notSetUp = new CountingSource(ChatGpt, Members(5), null) { SkipReason = "needs a project id" };
+        var run = Build(sources: [Source(Claude, Members(3)), notSetUp], credentialsFor: [Claude, ChatGpt]);
+
+        var results = await run.Snapshots.TakeAsync("t1", cancellationToken: TestContext.Current.CancellationToken);
+
+        var skipped = Assert.Single(results, r => r.Status == RosterRunStatus.Skipped);
+        Assert.Equal("needs a project id", skipped.Detail);
+        Assert.Equal(0, notSetUp.Calls);
+        Assert.Equal(3, run.Repository.Stored.Count);   // the other vendor still ran
+        Assert.Equal(0, RosterExitCode.For(results));
+    }
+
+    [Fact]
+    public async Task Take_AnUnreadableSkipCheck_IsThatVendorsFailure_NotTheRunsEnd()
+    {
+        var broken = new CountingSource(ChatGpt, Members(5), null) { SkipCheckFails = true };
+        var run = Build(sources: [broken, Source(Claude, Members(3))], credentialsFor: [Claude, ChatGpt]);
+
+        var results = await run.Snapshots.TakeAsync("t1", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains(results, r => r.Status == RosterRunStatus.Failed);
+        Assert.Contains(results, r => r.Status == RosterRunStatus.Succeeded);
+    }
+
+    [Fact]
     public void ExitCode_IsOneOnlyWhenSomethingFailed()
     {
         RosterRunResult R(RosterRunStatus s) => new(Claude, "x", s, "");
@@ -154,6 +181,13 @@ public class ConfiguredRosterSnapshotsTests
     private sealed class CountingSource(Guid vendorId, IReadOnlyList<VendorMember> members, Exception? failure) : IVendorRosterSource
     {
         public int Calls { get; private set; }
+
+        public string? SkipReason { get; init; }
+
+        public bool SkipCheckFails { get; init; }
+
+        public Task<string?> GetSkipReasonAsync(string tenantId, CancellationToken cancellationToken = default) =>
+            SkipCheckFails ? throw new InvalidOperationException("credential unreadable") : Task.FromResult(SkipReason);
 
         public Guid VendorId => vendorId;
 

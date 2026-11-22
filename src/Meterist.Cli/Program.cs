@@ -106,6 +106,8 @@ builder.Services.AddTransient<IClaudeAnalyticsCostReportRepository>(sp =>
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeEnterpriseUserUsageNormalizer>();
 builder.Services.AddClaudeRosterHttpClient();
+builder.Services.AddGeminiUserLicenseHttpClient();
+builder.Services.AddSingleton<IVendorRosterSource, GeminiEnterpriseRosterSource>();
 builder.Services.AddSingleton<IVendorRosterSource, ClaudeEnterpriseRosterSource>();
 builder.Services.AddHttpClient<IClaudeActivitySummaryRepository, HttpClaudeActivitySummaryRepository>(client =>
 {

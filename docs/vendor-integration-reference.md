@@ -906,7 +906,26 @@ not adopted.
     filterable by `licenseAssignmentState` (`ASSIGNED`, `NO_LICENSE`,
     `NO_LICENSE_ATTEMPTED_LOGIN`); joined to the activity table it yields
     licensed-but-inactive users and an unmet-demand signal. Whether the
-    object carries a last-login field is unverified.
+    object carries a last-login field: **yes, `lastLoginTime`** (see below).
+  - **Licence roster implemented (issue #37, 2026-11-22), from Google's reference, not yet run against a live tenant.**
+    `HttpGeminiUserLicenseRepository` reads `GET /v1/projects/{project}/locations/{location}/userStores/{userStore}/userLicenses`
+    with the tenant's service account (`cloud-platform` scope), `pageSize=1000` and `nextPageToken`; a blank or repeated token,
+    a record with no `userPrincipal` or a malformed body fails the snapshot instead of storing a partial roster. A record is
+    `userPrincipal` (the email, and the only identifier, so it becomes the member id), `userProfile` (full name),
+    `licenseAssignmentState` (`ASSIGNED`, `NO_LICENSE`, `NO_LICENSE_ATTEMPTED_LOGIN`, `BLOCKED`, deprecated `UNASSIGNED`,
+    and the unspecified zero value, which protobuf JSON leaves out), `licenseConfig`, `createTime`, `updateTime` and
+    **`lastLoginTime`** (empty until the first login). So the last-login field **does exist**; the roster stores no
+    last-login column yet, a follow-up if idle-seat dating wants it. There is no seat type or edition field: the licence
+    state is stored as the member's seat type. `NO_LICENSE_ATTEMPTED_LOGIN` applies only to a person's first refused sign-in
+    (someone who had a licence and lost it is `NO_LICENSE`), so it is an unmet-demand signal.
+    Settings beyond billing live in the stored credential: `DiscoveryEngineProjectId` (required; without it the roster is
+    *Skipped*, not failed), `DiscoveryEngineLocation` (default `global`), `UserStoreId` (default `default_user_store`).
+    **Unverified, to confirm on the first live dry run:** the default user store id (Google's reference does not name one),
+    whether the project id or number is accepted, the regional host for `us`/`eu` (assumed `https://us-discoveryengine.googleapis.com/`;
+    the reference shows only global and us), a predefined role containing `discoveryengine.userStores.listUserLicenses`
+    (the reference names the permission only), and whether `X-Goog-User-Project` is needed.
+    People with no licence are in the roster but are not seats: `RosterSeatTypes` keeps them out of the seat count and the idle
+    list, and `audit seats` notes how many tried to sign in without a licence.
   - Per-user Gemini *dollars* remain unavailable from any documented source:
     no billing export schema has a user column, and per-user quota counters
     are internal.
