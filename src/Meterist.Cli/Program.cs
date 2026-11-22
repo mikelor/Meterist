@@ -2015,11 +2015,28 @@ static Command BuildReportCommand(IHost host)
         DefaultValueFactory = _ => "artifacts/client-spend-benchmark-report.html",
     };
 
+    var compareToOption = new Option<string?>("--compare-to")
+    {
+        Description = "A manifest from an earlier report to compare against (default: the newest one beside the output file)",
+    };
+    var toleranceOption = new Option<decimal>("--diff-tolerance")
+    {
+        Description = "Dollars a weekly figure may move before it counts as changed",
+        DefaultValueFactory = _ => ReportDiffer.DefaultTolerance,
+    };
+    var failOnDecreaseOption = new Option<bool>("--fail-on-decrease")
+    {
+        Description = "Exit non-zero when any weekly figure fell since the previous report (the report is still written)",
+    };
+
     var generateCommand = new Command("generate", "Generate the Client Spend & Benchmark Report as HTML");
     generateCommand.Options.Add(tenantOption);
     generateCommand.Options.Add(fromOption);
     generateCommand.Options.Add(toOption);
     generateCommand.Options.Add(outOption);
+    generateCommand.Options.Add(compareToOption);
+    generateCommand.Options.Add(toleranceOption);
+    generateCommand.Options.Add(failOnDecreaseOption);
 
     generateCommand.SetAction(async (parseResult, cancellationToken) =>
     {
@@ -2027,6 +2044,23 @@ static Command BuildReportCommand(IHost host)
         var from = DateOnly.FromDateTime(parseResult.GetValue(fromOption));
         var to = DateOnly.FromDateTime(parseResult.GetValue(toOption));
         var outPath = parseResult.GetValue(outOption)!;
+        var compareTo = parseResult.GetValue(compareToOption);
+        var tolerance = parseResult.GetValue(toleranceOption);
+        var failOnDecrease = parseResult.GetValue(failOnDecreaseOption);
+
+        if (tolerance < 0m)
+        {
+            AnsiConsole.MarkupLine("[red]--diff-tolerance cannot be negative.[/]");
+            return 1;
+        }
+
+        // A baseline the user named must exist: silently comparing with nothing would look like a clean report.
+        if (compareTo is not null && !File.Exists(compareTo))
+        {
+            AnsiConsole.MarkupLine($"[red]The manifest named by --compare-to does not exist:[/] {Markup.Escape(compareTo)}");
+            return 1;
+        }
+
 
         AnsiConsole.MarkupLine(
             $"[bold]Meterist[/] — generating report for [yellow]{string.Join(", ", tenantIds)}[/], "
@@ -2036,7 +2070,31 @@ static Command BuildReportCommand(IHost host)
         var aggregator = scope.ServiceProvider.GetRequiredService<ReportDataAggregator>();
         var data = await aggregator.AggregateAsync(
             tenantIds, new DateRange(from, to), cancellationToken: cancellationToken);
-        var htmlContent = ClientBenchmarkReportRenderer.Render(data);
+
+        var manifest = ReportManifest.From(data);
+        // A named baseline is used as given; otherwise the newest manifest in the output folder for the same tenants.
+        ReportManifestStore.Baseline baseline;
+        if (compareTo is not null)
+        {
+            baseline = ReportManifestStore.TryLoad(compareTo, out var named, out var namedProblem)
+                ? new ReportManifestStore.Baseline(compareTo, named, null)
+                : new ReportManifestStore.Baseline(compareTo, null, namedProblem);
+        }
+        else
+        {
+            baseline = ReportManifestStore.ResolveBaseline(outPath, manifest);
+        }
+
+        var baselinePath = baseline.Path;
+        ReportDiff? diff = null;
+        if (baselinePath is not null)
+        {
+            diff = baseline.Manifest is not null
+                ? ReportDiffer.Compare(baseline.Manifest, manifest, tolerance)
+                : ReportDiff.NotCompared($"the previous manifest ({Path.GetFileName(baselinePath)}) cannot be used: {baseline.Problem}", tolerance);
+        }
+
+        var htmlContent = ClientBenchmarkReportRenderer.Render(data, diff);
 
         var outDirectory = Path.GetDirectoryName(Path.GetFullPath(outPath));
         if (!string.IsNullOrEmpty(outDirectory))
@@ -2045,7 +2103,51 @@ static Command BuildReportCommand(IHost host)
         }
         await File.WriteAllTextAsync(outPath, htmlContent, cancellationToken);
 
+        // Never overwrites an earlier manifest: the baseline that looked right has to outlive a run that shows it gone.
+        var manifestPath = await ReportManifestStore.WriteAsync(
+            manifest, ReportManifestStore.PathFor(outPath, data.GeneratedAt), cancellationToken);
+
         AnsiConsole.MarkupLine($"[green]Wrote[/] {outPath}");
+        AnsiConsole.MarkupLine($"[green]Wrote[/] {manifestPath} [dim](weekly figures, for comparing the next report; financial data, keep out of git)[/]");
+
+        if (diff is null)
+        {
+            AnsiConsole.MarkupLine("[dim]No previous report manifest to compare with.[/]");
+            return 0;
+        }
+
+        if (!diff.Compared)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Not compared with the previous report:[/] {Markup.Escape(diff.NotComparedReason ?? string.Empty)}.");
+            return 0;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[dim]Compared with {Markup.Escape(Path.GetFileName(baselinePath!))}: {diff.WeeksCompared} vendor week(s) compared; "
+            + $"{diff.WeeksOnlyInCurrent} new, {diff.WeeksOnlyInPrevious} only in the previous, {diff.WeeksCoveringDifferentDays} not comparable (different days).[/]");
+
+        if (diff.Changes.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[green]No weekly figure moved since the previous report.[/]");
+            return 0;
+        }
+
+        foreach (var change in diff.Changes)
+        {
+            var colour = change.Kind == WeekChangeKind.Decrease ? "red" : "yellow";
+            AnsiConsole.MarkupLine(
+                $"[{colour}]{change.Kind.ToString().ToUpperInvariant()}[/] {Markup.Escape(change.TenantId)} / {Markup.Escape(change.Vendor)} "
+                + $"week {change.WeekStart:yyyy-MM-dd}: {change.Previous.GrossSpend:N2} -> {change.Current.GrossSpend:N2} "
+                + $"(seat {change.Previous.SeatFee:N2} -> {change.Current.SeatFee:N2}, usage {change.Previous.UsageOrOverage:N2} -> {change.Current.UsageOrOverage:N2})");
+        }
+
+        if (diff.Decreases > 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]{diff.Decreases} week(s) went down since the previous report.[/] Stored usage should not fall: find out why before trusting this report.");
+            return failOnDecrease ? 1 : 0;
+        }
+
         return 0;
     });
 
