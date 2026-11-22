@@ -131,7 +131,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
      cross-check only (#5 to #10).
    - **Claude Enterprise:** ✅ cost moved to `/analytics/cost` with a legacy fallback setting (#21, #24). 🔵 Per-user activity by
      product (#23).
-   - **Claude API Platform:** 🔵 move to the new analytics API with per-actor attribution (#25); the legacy `cost_report` still
+   - **Claude API Platform:** ✅ cost moved to `/analytics/cost` with per-actor attribution and a legacy fallback setting (#25); the legacy `cost_report` still
      works.
    - **Gemini Enterprise:** the billing export has no newer replacement and stays the source of spend. 🔵 Newer surfaces
      are added alongside it for activity and seats (#33 to #39).

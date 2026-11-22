@@ -394,7 +394,33 @@ not adopted.
   `api_key_id`). So per-person attribution exists exactly where a tenant has
   adopted personal keys or Console-authenticated Claude Code; otherwise it
   would still need a 1:1 API-key-to-person convention. The adapter does not
-  read any of this yet (it uses `cost_report`, now designated legacy).
+  read any of this yet (it uses `cost_report`, now designated legacy). Superseded 2026-11-21 (#25): see below.
+- **Migrated to `/analytics/cost` (issue #25, 2026-11-21).** `HttpClaudeApiAnalyticsCostRepository` reads
+  `GET /v1/organizations/analytics/cost` with the **same Admin key** (`x-api-key`), `anthropic-version: 2023-06-01` and
+  `anthropic-beta: analytics-usage-cost-2026-08-24`, `time_bucket_width=1d`, an explicit exclusive `ending_at`, 31-day
+  windows, `limit=1000` and `group_by[]=actor, api_key_id, workspace_id, product` (four of the five allowed), with no
+  `actor_types[]` filter so the daily total counts everything. The legacy client stays behind
+  `Meterist:ClaudeApiPlatform:UseLegacyCostReport`; a 404 names it. Built from Anthropic's published reference; **not yet
+  compared live**, so the reconciliation the issue asks for (a closed month, new against stored legacy figures) is run with
+  `extract --dry-run` and recorded here when done.
+  - **Documented behaviour the adapter relies on:** the Admin key (or an `org:admin` OAuth token) authenticates both
+    analytics endpoints; `amount` is a six-decimal string in **cents** (post-discount, pre-credit); actors are `user_actor`
+    (`user_id`, `email_address`, `name`, `deleted`), `service_account_actor` (`service_account_id`), `api_actor`
+    (`api_key_id`) and `federated_actor` (`provider`, `subject`); a personal or service-account key reports its person or
+    service account as the actor and the key in `api_key_id`, while a legacy workspace key is linked to no identity so the
+    key appears as both `actor` and `api_key_id`; `actor` is null for usage that cannot be attributed; combinations with no
+    usage return no row; `starting_at` must be on or after 2026-01-01 and within 365 days; data refreshes within about 4
+    hours and can take up to 24, and a month can be revised until about 7 days after it ends; an expired cursor is HTTP 410.
+  - **Rows kept:** per actor, key, workspace and product per day, with `requests` (`cost.requests`, which is null whenever
+    `cost_type` or `token_type` is a grouping, so those are not requested). Model and token type are therefore **not**
+    kept, unlike `cost_report`'s `description` grouping, which no longer exists on this endpoint.
+  - **Per-actor storage:** `ClaudeApiPlatformUserUsageNormalizer` writes one `UserDailyUsageRecord` per actor per day:
+    `user_actor` is a `Person`; `service_account_actor` and `api_actor` (a workspace key, reported at key level) are
+    `ApiKey`; a federated actor or an unknown type is `Unrecognized`, named in a warning by type only. Cost with no actor
+    goes in a synthetic `unattributed` bucket so per-actor figures add up to the daily total. Legacy rows carry no actor and
+    produce no per-user rows.
+  - **Unverified:** which `product` values make up Console API usage (`messages_api`, `message_batches_api`,
+    `managed_agents_api`, `claude_console` are candidates; the reference does not say), so no product filter is applied.
 - **Legacy designation:** `/v1/organizations/cost_report` was reclassified
   "legacy but still supported" on 2026-10-29, no sunset date. It keeps roughly
   5-minute freshness; the new `/analytics/cost` is the migration target.

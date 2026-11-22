@@ -31,7 +31,7 @@ public class CapabilityMatrixTests
             new ClaudeApiPlatformSpendExtractor(
                 new FakeSecretStore(), new FakeClaudeCostReportRepository(),
                 NullLogger<ClaudeApiPlatformSpendExtractor>.Instance),
-            VendorCatalog.ClaudeApiPlatform, false, false,
+            VendorCatalog.ClaudeApiPlatform, false, true,
         ];
         yield return [
             new ChatGptEnterpriseSpendExtractor(
