@@ -898,6 +898,55 @@ not adopted.
     request counts. Its column schema is **unverified**, and setting it up
     creates a sink in the client's cloud project, which needs the client's
     agreement (issue #36).
+  - **Spike #36 preparation (2026-11-21, from Google's docs; nothing created yet).** Verified in the docs:
+    the log is `discoveryengine.googleapis.com/gemini_enterprise_user_activity` (log name
+    `projects/PROJECT_ID/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity`), turned on in the app's
+    **Observability** settings (REST: `observabilityConfig.observabilityEnabled`, needs `roles/discoveryengine.agentspaceAdmin`),
+    and a sibling family `gen_ai.*` exists that carries the content, so the sink filter must name only the activity log.
+    **Not documented by Google, to be read off a real sink:** the BigQuery table name (the generic rule is one table per
+    log name, date-sharded `..._YYYYMMDD` unless partitioned, with the slash sanitized to underscores, so probably
+    `discoveryengine_googleapis_com_gemini_enterprise_user_activity`), the column schema (set by the first entry, with
+    non-alphanumerics turned into underscores and typed payload fields prefixed), and which column holds the user.
+    Source fields named by method in the docs, not as columns: `agent_info.agent`, `agent_info.agent_kind`,
+    `model_info.model`, `session` and `user_pseudo_id` (answer queries), `starter_user_principal` (Co-Scientist), and
+    content fields `query.text`, `query.parts`, answer text and `agent_info.display_name`.
+    - **Privacy: check before creating the sink.** The setting `sensitiveLoggingEnabled` ("Enable logging of prompt inputs and
+      response outputs") controls whether prompts and answers are logged. With it off the docs say text values are replaced
+      with `<elided>` and others omitted, but the entries and their other fields still exist. A BigQuery sink copies exactly
+      what is logged, so **confirm it is off first**; if it is on, prompts would land in BigQuery. The sink filter cannot
+      strip content.
+    - **Roles (documented):** whoever creates the sink needs Logs Configuration Writer (`roles/logging.configWriter`) on the
+      project, and granting the destination permission needs an owner of the destination project. The sink's writer identity
+      (from `gcloud logging sinks describe`) needs BigQuery Data Editor (`roles/bigquery.dataEditor`) on the dataset, and Logs
+      Writer per Google's page. **Reader roles are not stated by Google**; the likely ones, to confirm in the spike, are BigQuery
+      Data Viewer on the dataset and BigQuery Job User on the project for the Meterist service account.
+    - **Not retroactive:** a sink routes only entries logged after it exists and never backfills, so activity before the sink
+      is not recoverable this way. Latency is typically under a minute, a few minutes for a new table. The same entries also
+      stay in the `_Default` log bucket, whatever the sink does. Retention of that bucket and any cost are not stated.
+    - **No per-user dollars from this source**, as expected (Google says logged usage is "not charges").
+    - **Runbook, to run only with the client's agreement** (replace the placeholders; one tenant first):
+
+      ```
+      # 0. Confirm prompt/response logging is OFF (expect sensitiveLoggingEnabled false or absent)
+      curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "X-Goog-User-Project: PROJECT_ID" \
+        "https://discoveryengine.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/collections/default_collection/engines/ENGINE_ID?readMask=observabilityConfig"
+      # 1. A dedicated dataset with a short default table expiry (name and location are your choice)
+      bq --project_id=PROJECT_ID mk --dataset --location=LOCATION --default_table_expiration 7776000 PROJECT_ID:gemini_activity
+      # 2. The sink, with a filter that names the activity log only
+      gcloud logging sinks create ge-user-activity bigquery.googleapis.com/projects/PROJECT_ID/datasets/gemini_activity \
+        --project=PROJECT_ID --use-partitioned-tables \
+        --log-filter='logName="projects/PROJECT_ID/logs/discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity"'
+      # 3. Give the sink's writer identity access to the dataset
+      gcloud logging sinks describe ge-user-activity --project=PROJECT_ID --format="value(writerIdentity)"
+      #    then grant that identity BigQuery Data Editor on the dataset (console: dataset > Sharing > Permissions)
+      # 4. Use Gemini Enterprise once, wait a few minutes, then read the schema (no row values needed)
+      bq --project_id=PROJECT_ID ls gemini_activity
+      bq --project_id=PROJECT_ID show --schema --format=prettyjson gemini_activity.TABLE_NAME
+      ```
+
+      What to bring back: the table name, the column names and types, and which column holds the user. Do not paste row values
+      (they hold emails and identifiers). To undo: `gcloud logging sinks delete ge-user-activity --project=PROJECT_ID`
+      and delete the dataset.
   - `analytics:exportMetrics` (v1alpha) writes the last 30 days of aggregate
     adoption and seat metrics to a BigQuery table; quota is 5 calls per day
     per project and each export covers a rolling 30 days, so it must be called
