@@ -175,13 +175,13 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 | Member rosters, as dated snapshots | ✅ #28, #30, #67 | Claude Enterprise and ChatGPT Enterprise; `roster snapshot`, `roster show`, taken in the scheduled run. |
 | Claude Enterprise active users and seat counts | ✅ #22 | Stored per day by `extract`; `activity show`. |
 | Per-member spend against limit | ✅ #26, #29 | Claude Spend Limits and ChatGPT Spend Controls; `limits snapshot`, `limits show`. Credits are shown as credits, not converted. |
-| Seat-count drift and idle-seat detection | ✅ #31 | `audit seats` compares the billed seat count in the rate configuration with the vendor's assigned seats and the roster size, flags drift without correcting it, and lists rostered members with no activity in a configurable window. Claude Enterprise and ChatGPT Enterprise; Gemini once its roster (#37) lands. Not in the scheduled run yet. Claude Enterprise idle seats also count vendor-reported per-person activity (#91). |
+| Seat-count drift and idle-seat detection | ✅ #31 | `audit seats` compares the billed seat count in the rate configuration with the vendor's assigned seats and the roster size, flags drift without correcting it, and lists rostered members with no activity in a configurable window. Claude Enterprise and ChatGPT Enterprise; Gemini Enterprise too once its credential carries the Discovery Engine settings (#37): people with no licence are listed but not counted as seats, and refused sign-ins are noted. Not in the scheduled run yet. Claude Enterprise idle seats also count vendor-reported per-person activity (#91). |
 | Claude Enterprise per-user activity by product | ✅ #23 | Stored per day by `extract` (headline counts and the full per-product detail); `users activity`. Using it to date each seat's last activity in `audit seats` is a follow-up. |
 | Budget alerts and threshold notifications | ⏸ | Natural next step now that the scheduled run and the limit snapshots exist; not yet a requirement. |
 
 ### Gemini Enterprise (epic #33)
 
-All 🔵 and in Sprint 4: a spike on the user-activity log sink to BigQuery (#36), the licence roster (#37), adoption metrics
+Sprint 4: 🔵 a spike on the user-activity log sink to BigQuery (#36, prepared, waiting on a client's agreement), ✅ the licence roster (#37, built from Google's reference, not yet run live), 🔵 adoption metrics
 (#38) and an estimated per-user cost from activity share (#39). Per-user Gemini dollars will always be labelled estimated.
 
 ### Deferred by choice

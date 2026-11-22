@@ -158,6 +158,44 @@ public class RosterSnapshotServiceTests
     // Stands in for a resilience-library exception (a rejected execution, an open circuit): not an HTTP or timeout type.
     private sealed class CustomResilienceException(string message) : Exception(message);
 
+    [Fact]
+    public async Task Take_AnEmptyListFromASourceWhereThatIsARealAnswer_IsReportedNotStored_AndIsNotAKeyProblem()
+    {
+        var repo = new FakeRepository();
+        var service = new RosterSnapshotService([new EmptyAllowedSource(Vendor)], repo, Now);
+
+        var live = await service.TakeAsync("t1", Vendor, dryRun: false, TestContext.Current.CancellationToken);
+        var dry = await service.TakeAsync("t1", Vendor, dryRun: true, TestContext.Current.CancellationToken);
+
+        Assert.True(live.EmptyNotStored);
+        Assert.True(dry.EmptyNotStored);
+        Assert.Equal(0, live.MemberCount);
+        Assert.Equal(new DateOnly(2026, 11, 20), live.SnapshotDate);
+        Assert.Empty(repo.Stored);          // never replaces a day's snapshot with nothing
+        Assert.Equal(0, repo.Planned);
+    }
+
+    [Fact]
+    public async Task Take_AnEmptyListFromAnOrdinarySource_IsStillRefused()
+    {
+        var service = Service(new FakeRepository(), []);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.TakeAsync("t1", Vendor, dryRun: false, TestContext.Current.CancellationToken));
+
+        Assert.Contains("check the key's scopes", ex.Message);
+    }
+
+    private sealed class EmptyAllowedSource(Guid vendorId) : IVendorRosterSource
+    {
+        public Guid VendorId => vendorId;
+
+        public bool CanBeEmpty => true;
+
+        public Task<IReadOnlyList<VendorMember>> FetchMembersAsync(string tenantId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<VendorMember>>([]);
+    }
+
     private static RosterSnapshotService Service(FakeRepository repo, IReadOnlyList<VendorMember> members) =>
         new([new FakeSource(Vendor, members)], repo, Now);
 

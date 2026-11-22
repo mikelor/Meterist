@@ -4,6 +4,7 @@ using Meterist.Core.Http;
 using Meterist.Core.Vendors;
 using Meterist.Vendors.ChatGptEnterprise;
 using Meterist.Vendors.ClaudeEnterprise;
+using Meterist.Vendors.GeminiEnterprise;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
@@ -21,7 +22,7 @@ public class RosterHttpClientsLoggingTests
 {
     private const string Cursor = "user_CURSOR_ID_SECRET";
     private static readonly string[] Secrets =
-        [Cursor, "user_FIRST", "user_SECOND", "first@example.test", "second@example.test", "First Person", "Second Person", "the-admin-key", "after="];
+        [Cursor, "user_FIRST", "user_SECOND", "first@example.test", "second@example.test", "First Person", "Second Person", "the-admin-key", "after=", "GEMINI_TOKEN_SECRET", "gem1@example.test", "gem2@example.test", "Gem One", "pageToken", "GEMINI_PAGE_TOKEN_x"];
 
     [Fact]
     public async Task TheChatGptRosterClient_WritesNoRequestLogAtAll_AndNothingPersonal()
@@ -88,6 +89,47 @@ public class RosterHttpClientsLoggingTests
         AssertNothingLeaked(logs);
         Assert.DoesNotContain(logs.Lines, l => l.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal));
     }
+    [Fact]
+    public async Task TheGeminiUserLicenseClient_WritesNoRequestLogAtAll_AndNothingPersonal()
+    {
+        // The page token for a list of people may encode one, and the principals are emails.
+        var logs = new CapturingProvider();
+        var handler = new PagedHandler(GeminiPage1, GeminiPage2);
+        using var provider = Build(
+            logs,
+            services =>
+            {
+                services.AddGeminiUserLicenseHttpClient();
+                services.AddSingleton<IGeminiAccessTokenProvider>(new FakeGeminiToken());   // replaces the real one: no Google
+            },
+            handler);
+
+        var members = await provider.GetRequiredService<IGeminiUserLicenseRepository>().ListUserLicensesAsync(
+            new GeminiCredential
+            {
+                ServiceAccountJson = "{}", BillingProjectId = "b", BillingDatasetId = "d", BillingTableId = "t",
+                DiscoveryEngineProjectId = "proj-1",
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal([true, true], handler.Marked);
+        Assert.Equal(2, members.Count);
+        AssertNothingLeaked(logs);
+        Assert.DoesNotContain(logs.Lines, l => l.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal));
+    }
+
+    private sealed class FakeGeminiToken : IGeminiAccessTokenProvider
+    {
+        public Task<string> GetAccessTokenAsync(GeminiCredential credential, CancellationToken cancellationToken = default) =>
+            Task.FromResult("GEMINI_TOKEN_SECRET");
+    }
+
+    private const string GeminiPage1 =
+        """{ "userLicenses": [ { "userPrincipal": "gem1@example.test", "userProfile": "Gem One", "licenseAssignmentState": "ASSIGNED" } ], "nextPageToken": "GEMINI_PAGE_TOKEN_x" }""";
+
+    private const string GeminiPage2 =
+        """{ "userLicenses": [ { "userPrincipal": "gem2@example.test", "licenseAssignmentState": "NO_LICENSE" } ] }""";
+
     [Fact]
     public async Task Control_AnOrdinaryClientInTheSameSetup_DoesLogItsRequests()
     {

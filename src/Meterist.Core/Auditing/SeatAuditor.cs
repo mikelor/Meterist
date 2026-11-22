@@ -226,15 +226,25 @@ public sealed class SeatAuditor
                 new DateRange(asOf.AddDays(1 - idleDays), asOf), false, "No roster snapshot is stored.", 0, 0, 0, [])
             : await AssessIdleAsync(tenantId, vendor, snapshot, asOf, idleDays, cancellationToken).ConfigureAwait(false);
 
-        if (snapshot is not null && assigned is not null && snapshot.Members.Count != assigned.AssignedSeatCount)
+        // Only people who hold a seat count toward the roster size: a licence list that also names people with no licence
+        // (Gemini) would otherwise read as seats in use.
+        var seatHolders = snapshot?.Members.Count(m => RosterSeatTypes.HoldsSeat(m.SeatType));
+
+        var refused = snapshot?.Members.Count(m => RosterSeatTypes.TriedToSignInWithoutLicense(m.SeatType)) ?? 0;
+        if (refused > 0)
+        {
+            notes.Add($"{refused} user(s) tried to sign in without a licence and were refused (not counted as seats): demand the licences do not cover.");
+        }
+
+        if (snapshot is not null && assigned is not null && seatHolders != assigned.AssignedSeatCount)
         {
             notes.Add(
-                $"The roster has {snapshot.Members.Count} member(s) but the vendor reports {assigned.AssignedSeatCount} assigned seat(s); "
+                $"The roster has {seatHolders} member(s) but the vendor reports {assigned.AssignedSeatCount} assigned seat(s); "
                 + "they are not the same measure (a member may hold no seat, or a seat may be unassigned), so only the billed count is compared with the vendor's own figure.");
         }
 
         return new VendorSeatAudit(
-            vendor, asOf, billed, snapshot?.Date, snapshot?.Members.Count, bySeatType,
+            vendor, asOf, billed, snapshot?.Date, seatHolders, bySeatType,
             assigned?.AssignedSeatCount, assigned?.Date, idle, notes);
     }
 
@@ -309,6 +319,13 @@ public sealed class SeatAuditor
                 continue;
             }
 
+            // On the roster but holding no seat (a Gemini user with no licence): their activity is neither a seat in use nor an
+            // active person to count against the seats, or one licensed user plus one former unlicensed one reads as 200%.
+            if (!RosterSeatTypes.HoldsSeat(member.SeatType))
+            {
+                continue;
+            }
+
             if (row.Date >= window.Start)
             {
                 activeIds.Add(member.MemberId);
@@ -321,7 +338,7 @@ public sealed class SeatAuditor
 
         var idle = new List<IdleSeat>();
         var newMembers = 0;
-        foreach (var member in snapshot.Members)
+        foreach (var member in snapshot.Members.Where(m => RosterSeatTypes.HoldsSeat(m.SeatType)))
         {
             if (activeIds.Contains(member.MemberId))
             {

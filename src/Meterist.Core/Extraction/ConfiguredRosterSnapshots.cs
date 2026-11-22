@@ -63,10 +63,19 @@ public sealed class ConfiguredRosterSnapshots
                     continue;
                 }
 
+                var skipReason = await _sources.First(s => s.VendorId == vendor.Id)
+                    .GetSkipReasonAsync(tenantId, cancellationToken).ConfigureAwait(false);
+                if (skipReason is not null)
+                {
+                    results.Add(new RosterRunResult(vendor.Id, vendor.DisplayName, RosterRunStatus.Skipped, skipReason));
+                    continue;
+                }
+
                 var outcome = await _service.TakeAsync(tenantId, vendor.Id, dryRun, cancellationToken).ConfigureAwait(false);
                 results.Add(new RosterRunResult(
                     vendor.Id, vendor.DisplayName, RosterRunStatus.Succeeded,
-                    $"{outcome.MemberCount} member(s)", outcome));
+                    outcome.EmptyNotStored ? "the list is empty, so nothing was stored" : $"{outcome.MemberCount} member(s)",
+                    outcome));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {

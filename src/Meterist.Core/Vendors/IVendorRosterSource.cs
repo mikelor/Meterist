@@ -32,4 +32,19 @@ public interface IVendorRosterSource
     Guid VendorId { get; }
 
     Task<IReadOnlyList<VendorMember>> FetchMembersAsync(string tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Why a snapshot cannot be attempted for this tenant even though a credential is stored, or null when it can. A vendor
+    /// whose roster needs settings beyond the credential (Gemini's Discovery Engine project) says so here, so an unattended
+    /// run reports the tenant as not set up rather than as a failure every day. Default: always attemptable.
+    /// </summary>
+    Task<string?> GetSkipReasonAsync(string tenantId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// True when an empty member list is a real answer rather than a problem. Most vendors always have at least an owner, so
+    /// an empty list means a rejected key or a wrong scope and is refused; a licence list (Gemini) can legitimately be empty
+    /// before anyone holds a licence or has tried to sign in. An empty list is reported but never stored.
+    /// </summary>
+    bool CanBeEmpty => false;
 }

@@ -60,6 +60,22 @@ public static class RosterHttpClients
         return services;
     }
 
+    /// <summary>
+    /// The Gemini Enterprise user licence list. A page token for a list of people may encode one, so the factory's request
+    /// logging is removed and requests are marked sensitive; auto-redirect is off because every request carries a bearer token.
+    /// No base address: the host depends on the tenant's Discovery Engine location, which the repository resolves.
+    /// </summary>
+    public static IServiceCollection AddGeminiUserLicenseHttpClient(this IServiceCollection services)
+    {
+        services.AddSingleton<GeminiEnterprise.IGeminiAccessTokenProvider, GeminiEnterprise.ServiceAccountAccessTokenProvider>();
+        services
+            .AddHttpClient<GeminiEnterprise.IGeminiUserLicenseRepository, GeminiEnterprise.HttpGeminiUserLicenseRepository>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+            .RemoveAllLoggers();
+
+        return services;
+    }
+
     public static IServiceCollection AddClaudeRosterHttpClient(this IServiceCollection services)
     {
         services

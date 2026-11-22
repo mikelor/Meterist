@@ -106,6 +106,8 @@ builder.Services.AddTransient<IClaudeAnalyticsCostReportRepository>(sp =>
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeEnterpriseUserUsageNormalizer>();
 builder.Services.AddClaudeRosterHttpClient();
+builder.Services.AddGeminiUserLicenseHttpClient();
+builder.Services.AddSingleton<IVendorRosterSource, GeminiEnterpriseRosterSource>();
 builder.Services.AddSingleton<IVendorRosterSource, ClaudeEnterpriseRosterSource>();
 builder.Services.AddHttpClient<IClaudeActivitySummaryRepository, HttpClaudeActivitySummaryRepository>(client =>
 {
@@ -677,6 +679,14 @@ static Command BuildRosterCommand(IHost host)
             AnsiConsole.MarkupLine(
                 $"[bold]Meterist[/] — roster snapshot for [yellow]{Markup.Escape(tenantId)}[/] / {Markup.Escape(vendor.DisplayName)}, "
                 + $"{outcome.SnapshotDate:yyyy-MM-dd}" + (dryRun ? " [grey](dry run: nothing written)[/]" : string.Empty));
+            if (outcome.EmptyNotStored)
+            {
+                AnsiConsole.MarkupLine(
+                    "  The list is empty (nobody holds a licence or has tried to sign in yet), so nothing was stored. "
+                    + "An earlier snapshot, if there is one, stays the latest.");
+                return 0;
+            }
+
             AnsiConsole.MarkupLine(
                 $"  {outcome.MemberCount} member(s): {string.Join(", ", outcome.RoleCounts.Select(kv => $"{Markup.Escape(kv.Key)} {kv.Value}"))}.");
 
@@ -739,8 +749,10 @@ static Command BuildRosterCommand(IHost host)
 
             foreach (var r in results)
             {
-                var detail = r.Status == RosterRunStatus.Succeeded && r.Outcome is { } o
-                    ? $"{o.MemberCount} member(s): {string.Join(", ", o.RoleCounts.Select(kv => $"{kv.Key} {kv.Value}"))}; "
+                var detail = r.Status == RosterRunStatus.Succeeded && r.Outcome is { EmptyNotStored: true }
+                    ? r.Detail
+                    : r.Status == RosterRunStatus.Succeeded && r.Outcome is { } o
+                    ? $"{o.MemberCount} member(s):{string.Join(", ", o.RoleCounts.Select(kv => $"{kv.Key} {kv.Value}"))}; "
                         + $"{(dryRun ? "would store" : "stored")} {o.Stored.Inserted} added, {o.Stored.Updated} changed, "
                         + $"{o.Stored.Removed} removed, {o.Stored.Unchanged} unchanged"
                     : r.Detail;

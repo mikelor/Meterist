@@ -102,6 +102,29 @@ $credential | ConvertTo-Json | Set-Content -Path "C:\path\to\gemini-credential.j
 dotnet run --project src/Meterist.Cli -- credentials set --tenant <your-tenant-id> --vendor gemini-enterprise --from-file "C:\path\to\gemini-credential.json"
 ```
 
+**Optional: the licence roster (who holds a Gemini licence).** The roster reads Google's Discovery Engine user licence list,
+which is a different API from the billing export and may be in a different project. To turn it on, add up to three more
+fields to the credential before storing it; a credential without `DiscoveryEngineProjectId` keeps working for billing and the
+roster is simply reported as *Skipped* ("not set up"):
+
+```powershell
+$credential = @{
+    ServiceAccountJson       = $serviceAccountJson
+    BillingProjectId         = "your-gcp-project-id"
+    BillingDatasetId         = "your_billing_export_dataset"
+    BillingTableId           = "gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX"
+    DiscoveryEngineProjectId = "project-that-owns-the-gemini-enterprise-app"
+    DiscoveryEngineLocation  = "global"             # or "us" / "eu"; omit for global
+    UserStoreId              = "default_user_store" # omit unless yours differs
+}
+```
+
+The service account needs a role that includes the `discoveryengine.userStores.listUserLicenses` permission on that project
+(for example a Discovery Engine viewer or admin role; Google's reference names the permission but not a role), and the Discovery
+Engine API must be enabled there. This reading is built from Google's reference and has **not** yet been run against a live
+tenant: the user store id (`default_user_store`) and the regional host are the assumptions to confirm on the first
+`roster snapshot --dry-run`. A `404` names the settings to check; a `403` names the permission.
+
 #### Which billing lines count, and the "not counted" warning
 
 A Google Cloud billing export is one big table of charges. Meterist decides what to
@@ -829,11 +852,22 @@ include it belong under `artifacts/`.
 
 A roster is a vendor's member list. Spend and usage say what people did; the roster says who *has* a seat, which is
 what you need to spot idle seats later. It works for **Claude Enterprise** and **ChatGPT Enterprise**, using the same key your spend
-extraction already stores (nothing new to set up), with one exception: a ChatGPT tenant's stored credential must include its
+extraction already stores (nothing new to set up), with two exceptions: a ChatGPT tenant's stored credential must include its
 `WorkspaceId` (the same one the Daily Usage API needs; without it the snapshot stops with a message saying so). Use
 `--vendor claude-enterprise` or `--vendor chatgpt-enterprise` in the commands below. `roster show` includes each member's seat
 type (ChatGPT: `chatgpt` or `codex`) and whether they are managed by your identity provider (SCIM). Neither vendor reports a
 last-active date, so who is idle is worked out later by comparing the roster with usage.
+
+**Gemini Enterprise** has a roster too (`--vendor gemini-enterprise`), but only once its credential carries the Discovery
+Engine settings described in the [Gemini section](#gemini-enterprise); until then `roster snapshot-all` shows it as
+*Skipped*. Its list is a **licence list**, not just seat holders: each person's seat type is their licence state
+(`ASSIGNED`, `NO_LICENSE`, `NO_LICENSE_ATTEMPTED_LOGIN`, `BLOCKED`). Only `ASSIGNED` people count as seats in `audit seats`
+and can be idle; people with no licence are listed in the roster and in the audit's seat-type breakdown but are not
+seats, and the audit notes how many **tried to sign in without a licence** (demand your licences do not cover). Google's
+list also carries a last-login time per person; Meterist does not store it yet. A licence list can legitimately be empty (nobody
+holds a licence or has tried to sign in yet): that is reported as a success with "the list is empty, so nothing was stored", not as a
+failure, and no snapshot is written, so an earlier snapshot stays the latest (other vendors always have an owner, so an empty list
+from them is still refused as a likely key-scope problem).
 
 ```powershell
 dotnet run --project src/Meterist.Cli -- roster snapshot --tenant <your-tenant-id> --vendor claude-enterprise --dry-run

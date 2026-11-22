@@ -603,6 +603,64 @@ public class SeatAuditorTests
                 rows.Where(r => r.VendorId == vendorId && r.Date >= range.Start && r.Date <= range.End).ToList());
     }
 
+    [Fact]
+    public async Task PeopleListedWithNoLicence_AreNotSeats_NotIdleSeats_AndRefusedSignInsAreNoted()
+    {
+        var w = new World();
+        w.Rates.Add(SeatRate(Claude, 2));
+        w.Rosters[Claude] = Roster(
+            Member(Claude, "holder-active", seat: "ASSIGNED"),
+            Member(Claude, "holder-idle", seat: "ASSIGNED"),
+            Member(Claude, "none", seat: "NO_LICENSE"),
+            Member(Claude, "refused-1", seat: "NO_LICENSE_ATTEMPTED_LOGIN"),
+            Member(Claude, "refused-2", seat: "NO_LICENSE_ATTEMPTED_LOGIN"));
+        w.Usage.Add(Use(Claude, "holder-active", 1, amount: 1m));
+
+        var v = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors);
+
+        Assert.Equal(2, v.RosterCount);                         // seat holders only, not the five listed
+        Assert.False(v.HasDrift);                               // 2 billed, 2 holding a seat
+        Assert.Equal(0, v.UnusedBilledSeats ?? 0);
+        Assert.Equal(1, v.RosterBySeatType["NO_LICENSE"]);            // the breakdown still shows everyone
+        Assert.Equal(2, v.RosterBySeatType["NO_LICENSE_ATTEMPTED_LOGIN"]);
+        Assert.Contains("2 user(s) tried to sign in without a licence", string.Join(" ", v.Notes));
+        Assert.Equal(["holder-idle"], v.Idle.IdleSeats.Select(s => s.MemberId));   // an unlicensed person is not an idle seat
+    }
+
+    [Fact]
+    public async Task AnUnlicensedPersonsActivity_IsNotAnActivePerson_SoUtilisationCannotExceedTheSeats()
+    {
+        var w = new World();
+        w.Rates.Add(SeatRate(Claude, 1));
+        w.Rosters[Claude] = Roster(
+            Member(Claude, "licensed", seat: "ASSIGNED"),
+            Member(Claude, "former", seat: "NO_LICENSE"));
+        w.Usage.Add(Use(Claude, "licensed", 1, amount: 1m));
+        w.Usage.Add(Use(Claude, "former", 2, amount: 1m));          // active in the window, but holds no seat
+        w.PersonActivity.Add(Act(Claude, "former", 3));
+
+        var v = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors);
+
+        Assert.Equal(1, v.RosterCount);
+        Assert.Equal(1, v.Idle.ActiveCount);                         // not 2 people against 1 seat
+        Assert.Equal(0, v.Idle.ActiveNotOnRoster);                   // they are on the roster, just not seat holders
+        Assert.Empty(v.Idle.IdleSeats);
+    }
+
+    [Fact]
+    public async Task AVendorWhoseRosterIsOnlySeatHolders_IsUnchanged_AndHasNoRefusedNote()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "a", seat: "standard"), Member(Claude, "b"));
+        w.Usage.Add(Use(Claude, "a", 1, amount: 1m));
+
+        var v = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors);
+
+        Assert.Equal(2, v.RosterCount);
+        Assert.DoesNotContain("tried to sign in", string.Join(" ", v.Notes));
+        Assert.Equal(["b"], v.Idle.IdleSeats.Select(s => s.MemberId));
+    }
+
     private static UserActivityRecord Act(Guid vendor, string userId, int daysAgo, string? email = null) => new()
     {
         TenantId = "t1", VendorId = vendor, Date = AsOf.AddDays(-daysAgo), UserId = userId, UserEmail = email, ChatMessages = 3,
