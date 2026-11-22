@@ -453,6 +453,35 @@ No rate configuration needed — the Cost Report API returns real dollar cost
 directly, and this product has no seat/subscription concept at all (the
 entire daily total lands in `UsageOrOverage`, with `SeatFee` always `0`).
 
+**Where the cost comes from.** The extraction reads Anthropic's newer
+`/analytics/cost` endpoint (beta) with the **same Admin API key**, grouped by who
+the usage belongs to: a **person** where personal keys or Console sign-in are in
+use, a **service account**, or a **workspace key** (which is linked to no
+identity, so it is reported as the key itself and labelled that way). The daily
+total counts all of it. Anthropic documents a lag of 4 to 24 hours for this
+endpoint against about 5 minutes for the older `cost_report`, and a month's
+figures can still be revised until about 7 days after it ends; the latest day is
+therefore always incomplete, which a daily tool tolerates. Per-actor rows are
+stored for `users usage` and the report's people sections; the stored daily record
+is unchanged.
+
+**Reconcile before you rely on it.** The new endpoint is beta. One month (October 2026) on one
+tenant matched the stored legacy figures day for day when tested. Before relying on it for another
+tenant, run `extract --dry-run` for a closed month: it reports every stored day that would change. A day
+that differs is worth understanding first (Priority Tier commitment fees are billed separately and appear
+in neither endpoint).
+
+If Anthropic changes or ends the beta, the extraction fails with a message naming
+the setting that goes back to the older `cost_report` (which has no per-actor
+data and stores no per-user rows):
+
+```json
+{ "Meterist": { "ClaudeApiPlatform": { "UseLegacyCostReport": true } } }
+```
+
+or set the environment variable `Meterist__ClaudeApiPlatform__UseLegacyCostReport=true`
+for one run. The setting applies to every tenant.
+
 ### Claude Enterprise
 
 **One-time Analytics API key setup:**

@@ -67,11 +67,24 @@ builder.Services.AddSingleton<IVendorUserUsageNormalizer, ChatGptEnterpriseUserU
 builder.Services.AddChatGptRosterHttpClient();
 builder.Services.AddSingleton<IVendorRosterSource, ChatGptEnterpriseRosterSource>();
 
-builder.Services.AddHttpClient<IClaudeCostReportRepository, HttpClaudeCostReportRepository>(client =>
+// Claude API Platform cost comes from the newer /analytics/cost endpoint by default (same Admin key, per-actor
+// attribution), with the legacy cost_report behind Meterist:ClaudeApiPlatform:UseLegacyCostReport.
+builder.Services.Configure<ClaudeApiPlatformOptions>(
+    builder.Configuration.GetSection(ClaudeApiPlatformOptions.ConfigurationSection));
+builder.Services.AddHttpClient<HttpClaudeCostReportRepository>(client =>
 {
     client.BaseAddress = new Uri("https://api.anthropic.com/");
 });
+builder.Services.AddHttpClient<HttpClaudeApiAnalyticsCostRepository>(client =>
+{
+    client.BaseAddress = new Uri("https://api.anthropic.com/");
+});
+builder.Services.AddTransient<IClaudeCostReportRepository>(sp =>
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ClaudeApiPlatformOptions>>().Value.UseLegacyCostReport
+        ? sp.GetRequiredService<HttpClaudeCostReportRepository>()
+        : sp.GetRequiredService<HttpClaudeApiAnalyticsCostRepository>());
 builder.Services.AddSingleton<IVendorSpendNormalizer, ClaudeApiPlatformSpendNormalizer>();
+builder.Services.AddSingleton<IVendorUserUsageNormalizer, ClaudeApiPlatformUserUsageNormalizer>();
 
 // Claude Enterprise cost comes from the newer /analytics/cost endpoint by default, with the legacy
 // user_cost_report behind Meterist:ClaudeEnterprise:UseLegacyCostReport. Both typed clients are

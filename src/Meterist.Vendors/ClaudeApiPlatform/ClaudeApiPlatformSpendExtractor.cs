@@ -30,9 +30,9 @@ public sealed class ClaudeApiPlatformSpendExtractor : IVendorSpendExtractor
     // usage-based pricing, so the entire cost_report figure is the spend.
     public bool SupportsOverage => false;
 
-    // Granularity is by workspace_id/api_key_id, a developer-API construct,
-    // not a named human user — there is no per-employee breakdown here.
-    public bool SupportsPerUserBreakdown => false;
+    // Per actor via /analytics/cost: a named person where personal keys or Console sign-in are used, otherwise a
+    // service account or a key. The legacy cost_report fallback has no actor, so it stores no per-user rows.
+    public bool SupportsPerUserBreakdown => true;
 
     // cost_report returns real dollar cost directly with no retention/eviction
     // quirk -- re-extraction should always overwrite with the latest pull.
