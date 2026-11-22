@@ -466,10 +466,10 @@ stored for `users usage` and the report's people sections; the stored daily reco
 is unchanged.
 
 **Reconcile before you rely on it.** The new endpoint is beta. One month (October 2026) on one
-Before relying on it for another tenant, run `extract --dry-run` for a closed month: it reports every stored
-day that would change. A day that differs is worth understanding first (Priority Tier commitment fees are
-billed separately and appear in neither endpoint).
-separately and appear in neither endpoint).
+tenant matched the stored legacy figures day for day when tested. Before relying on it for another
+tenant, run `extract --dry-run` for a closed month: it reports every stored day that would change. A day
+that differs is worth understanding first (Priority Tier commitment fees are billed separately and appear
+in neither endpoint).
 
 If Anthropic changes or ends the beta, the extraction fails with a message naming
 the setting that goes back to the older `cost_report` (which has no per-actor
