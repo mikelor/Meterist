@@ -322,7 +322,7 @@ not adopted.
     - **Key scopes, partly settled (2026-11-20, issue #30):** the Analytics key already stored for each tenant is
       **accepted by the member list** (`GET /v1/organizations/users`, which needs `read:members` or `read:org_audit`)
       on both tenants, so it carries more than `read:analytics` and no second credential is needed for the roster.
-      Whether it also carries `read:spend_limits` (issue #26) is still untested.
+      It also carries `read:spend_limits`: settled by the live test of `/spend_limits/effective` (issue #26, 2026-11-20, below).
   - **Member roster (issue #30, 2026-11-20).** `HttpClaudeMemberRosterRepository` reads `GET /v1/organizations/users`
     (`limit=1000`, cursor `after_id` taken from `last_id` while `has_more`) with the stored key and
     `anthropic-version: 2023-06-01`. A member is `id`, `type`, `email`, `name`, `role` and `added_at`; there is no
@@ -963,6 +963,46 @@ not adopted.
 
 ---
 
+## Assumptions that rest on data not yet seen (issue #72)
+
+Each of these rules was built on a best guess because the real data did not exist yet. Each is documented and fails safe
+(an unexpected value is stored as unrecognized or named in a warning, never silently counted as something it might not
+be), and each should be confirmed the first time real data appears. This is a triage list, not a build task: check, tick it
+off in issue #72, and fix the rule if the guess was wrong. The queries are read-only; run them yourself (they read
+the live database and name no one). Replace `$db` with `"$env:LOCALAPPDATA\Meterist\meterist.db"`.
+
+| Assumption | Status (2026-11-22) | How to check |
+|---|---|---|
+| Claude key also carries `read:spend_limits` | **Confirmed** by the live test of `/spend_limits/effective` (issue #26, 2026-11-20), both tenants | n/a |
+| Claude actor types: `user_actor` is a person; `service_account_actor` and `api_actor` are API keys; `federated_actor` and unknown types are unrecognized | Open: confirm each against a real row when it appears, especially `federated_actor` | Query A, and the warning "actor type other than user_actor, service_account_actor or api_actor" in `extract` |
+| ChatGPT actor types: only `ACCOUNT_USER` is a person; anything else is unrecognized | Open: only `ACCOUNT_USER` has been seen | Query A, and the warning that names unrecognized types |
+| Gemini pay-as-you-go SKU names (`%Pay as you go%` and `%Pay-as-you-go%` under Vertex AI Search) | Open: no such line seen in a live export | Query B, and the "not counted" warning in `extract` |
+| Gemini above-quota and enterprise-overage SKUs | Open: not seen for either tenant | Query B, and `audit gemini-breakdown` |
+
+**Query A: which actor types exist, per vendor** (an unfamiliar value, or a `null`, is what to classify):
+
+```
+sqlite3 $db "SELECT r.VendorId, json_extract(j.value,'$.ActorType') AS actor_type, COUNT(*) FROM RawDailyExtractionRecords r, json_each(r.RecordsJson) j WHERE json_type(j.value,'$.ActorType') IS NOT NULL GROUP BY 1,2 ORDER BY 1,2;"
+sqlite3 $db "SELECT VendorId, Attribution, COUNT(*) FROM UserDailyUsageRecords GROUP BY 1,2 ORDER BY 1,2;"
+```
+
+The vendor ids (the database prints them in upper case; a blank actor type is a `null`) are Claude Enterprise `8f14e45f-ceea-467e-adde-3f82edcd1a11`, Claude API Platform `c9e1a1a0-3b1e-4b8a-9d9e-2f6a1b0c9d22`
+and ChatGPT Enterprise `3d6f1c2e-8a4b-4e3a-8b2f-7c5e9a1d4f33`. The second query shows how many per-user rows landed as `Person`,
+`ApiKey` or `Unrecognized`: any `Unrecognized` row other than the `unattributed` bucket is a type to classify.
+
+**Query B: which Gemini lines are stored, by kind of charge** (Gemini Enterprise is `a27b6d3c-1f9e-4a7d-9c3b-6e2d8f0a5b44`):
+
+```
+sqlite3 $db "SELECT json_extract(j.value,'$.Category') AS category, json_extract(j.value,'$.ServiceDescription') AS service, json_extract(j.value,'$.SkuDescription') AS sku, COUNT(*) FROM RawDailyExtractionRecords r, json_each(r.RecordsJson) j WHERE lower(r.VendorId)='a27b6d3c-1f9e-4a7d-9c3b-6e2d8f0a5b44' GROUP BY 1,2,3 ORDER BY 1,2,3;"
+dotnet run --project src/Meterist.Cli -- audit gemini-breakdown --tenant <tenant> --from 2026-07-01 --to 2026-11-21
+```
+
+A `PayAsYouGo` category, or any SKU that reads like an above-quota or overage line, is the first sighting: confirm the
+service and SKU pattern against Google's own wording and correct the rule in `Meterist:Gemini:BillingFilter`. Lines the
+rules do not match at all are not in this table: they are named in the "not counted" warning each extraction prints.
+
+---
+
 ## Cross-Vendor Overage & Per-User Matrix
 
 | Vendor | Overage extractable? | Per-user usage? | Per-user $ cost? |
@@ -984,7 +1024,7 @@ none of it is stored per user yet (Sprint 2).
 
 | Vendor | Credential type | Who provisions it | Notes |
 |---|---|---|---|
-| Claude Enterprise | Analytics API key | Org primary owner only | `read:analytics` scope, and (live-tested 2026-11-20) the member list works with the same key; spend-limit reads would need `read:spend_limits` (untested) |
+| Claude Enterprise | Analytics API key | Org primary owner only | `read:analytics` scope, and (live-tested 2026-11-20) the member list and the spend-limit read (`read:spend_limits`) work with the same key |
 | Claude API Platform | Admin API key | Org admin | Separate key from Analytics API |
 | ChatGPT Enterprise | Workspace Admin key plus the organization ID and, for the Daily Usage API, the workspace ID | Workspace owner/admin | Global Admin Console → Credentials. Scopes: Compliance logging platform → Costs (Read), and Enterprise analytics API (Read) for Daily Usage |
 | Gemini Enterprise | GCP service account (JSON key or workload identity) | GCP project owner/IAM admin | Needs BigQuery IAM roles; billing export enabled once per billing account |
