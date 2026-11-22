@@ -462,9 +462,15 @@ not adopted.
     2,433 billing-line rows, the same four days where Daily Usage and `COSTS` disagree on credits, the same 15 days that
     kept their higher stored usage, the same new day and the same per-user rows. No 429 or retry was logged, so four at a
     time looks acceptable to the endpoint on this tenant, though only one run at this level has been made.
-  - **After, `RecentDays=7`:** not yet measured. The files are about 31 a day, so a week is roughly 220 files, which is about
-    35 s at four at a time. That figure is an estimate; the run will confirm it, and whether the older days' comparison
-    simply drops out of the output (it should: no disagreement warning for a day before the window).
+  - **After, `RecentDays=7` with 4 at a time (measured 2026-11-22, same tenant and window):** the cross-check read
+    **274 files in 42 s** (905 deduplicated events, 764 billing-line rows, for 2026-11-15 to 2026-11-21), about 39 files a day
+    against 31 across the whole window (the recent days are busier than my estimate of 220 files and 35 s assumed). The
+    daily records and the "days that would change" table were **identical** to the whole-window run: the same 15 days kept their
+    higher stored usage with their `costs-export` source untouched, the same new day, the same per-user rows. Only the
+    comparison warning changed, as intended: one disagreement day (Nov 16) instead of four, the other three being before the
+    window and so not compared. That is the never-lower rule and the `Source` labels holding with a narrow window.
+  - **Summary per tenant for a 29-day extraction:** 615 s sequential, 143 s at four at a time, 42 s with the last 7 days
+    as well. The scheduled run uses the last 7 days.
   - Concurrency is a guess at what the endpoint tolerates (no rate limit is documented for the file download), so 4 is a
     conservative start, and the shared resilience handler still retries a 429 or 5xx.
 - **Daily Usage API — the source of record, IMPLEMENTED (2026-11).** `GET
