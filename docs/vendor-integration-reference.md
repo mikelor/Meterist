@@ -446,6 +446,33 @@ not adopted.
 
 ### ChatGPT Enterprise
 
+- **COSTS cross-check cost, and the settings that bound it (issue #70, 2026-11-22).** Observed before the change: over a
+  30-day window the export is hundreds of file downloads made one after another, and one dry run took about **12 minutes per
+  tenant** (no timeouts or retries, so the cost is the number of sequential requests). Now: files are downloaded with a bounded
+  degree of parallelism (default 4, `Meterist:ChatGpt:CostsCrossCheck:MaxParallelDownloads`), read back in listing order so the
+  rows and the first-listed duplicate are exactly what the sequential loop gave; `RecentDays` limits the window to the last N
+  days; `Enabled` turns it off. The scheduled run uses the last 7 days. Every run reports `COSTS cross-check: N file(s) in
+  Ns (up to P at a time)`.
+  - **Before (measured 2026-11-22, one tenant, `extract --dry-run` over 2026-10-24 to 2026-11-21, 29 days):** listing the
+    files took 10 pages of up to 100; **912 files were downloaded one at a time in 615 s (about 0.67 s per file)**,
+    giving 3,479 deduplicated events and 2,433 billing-line rows. That is the 12 minutes the issue reported; the
+    cost is the number of requests.
+  - **After, default of 4 at a time (measured 2026-11-22, same tenant and window as above):** the same **912 files in 143 s**
+    (142.6 s), **4.3 times faster** than the 615 s sequential run, with an identical result: the same 3,479 deduplicated events and
+    2,433 billing-line rows, the same four days where Daily Usage and `COSTS` disagree on credits, the same 15 days that
+    kept their higher stored usage, the same new day and the same per-user rows. No 429 or retry was logged, so four at a
+    time looks acceptable to the endpoint on this tenant, though only one run at this level has been made.
+  - **After, `RecentDays=7` with 4 at a time (measured 2026-11-22, same tenant and window):** the cross-check read
+    **274 files in 42 s** (905 deduplicated events, 764 billing-line rows, for 2026-11-15 to 2026-11-21), about 39 files a day
+    against 31 across the whole window (the recent days are busier than my estimate of 220 files and 35 s assumed). The
+    daily records and the "days that would change" table were **identical** to the whole-window run: the same 15 days kept their
+    higher stored usage with their `costs-export` source untouched, the same new day, the same per-user rows. Only the
+    comparison warning changed, as intended: one disagreement day (Nov 16) instead of four, the other three being before the
+    window and so not compared. That is the never-lower rule and the `Source` labels holding with a narrow window.
+  - **Summary per tenant for a 29-day extraction:** 615 s sequential, 143 s at four at a time, 42 s with the last 7 days
+    as well. The scheduled run uses the last 7 days.
+  - Concurrency is a guess at what the endpoint tolerates (no rate limit is documented for the file download), so 4 is a
+    conservative start, and the shared resilience handler still retries a 429 or 5xx.
 - **Daily Usage API — the source of record, IMPLEMENTED (2026-11).** `GET
   https://api.chatgpt.com/v1/analytics/workspaces/{workspace_id}/usage`,
   the Unified Daily Usage API (GA 2026-09-17), queried with

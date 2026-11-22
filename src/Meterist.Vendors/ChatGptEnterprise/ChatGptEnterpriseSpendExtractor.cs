@@ -2,6 +2,7 @@ using Meterist.Core.Models;
 using Meterist.Core.Secrets;
 using Meterist.Core.Vendors;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Meterist.Vendors.ChatGptEnterprise;
 
@@ -21,17 +22,20 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
     private readonly IChatGptCostLogRepository _costLogRepository;
     private readonly IChatGptDailyUsageRepository _dailyUsageRepository;
     private readonly ILogger<ChatGptEnterpriseSpendExtractor> _logger;
+    private readonly ChatGptCostsCrossCheckOptions _crossCheck;
 
     public ChatGptEnterpriseSpendExtractor(
         ISecretStore secretStore,
         IChatGptCostLogRepository costLogRepository,
         IChatGptDailyUsageRepository dailyUsageRepository,
-        ILogger<ChatGptEnterpriseSpendExtractor> logger)
+        ILogger<ChatGptEnterpriseSpendExtractor> logger,
+        IOptions<ChatGptCostsCrossCheckOptions>? crossCheckOptions = null)
     {
         _secretStore = secretStore;
         _costLogRepository = costLogRepository;
         _dailyUsageRepository = dailyUsageRepository;
         _logger = logger;
+        _crossCheck = crossCheckOptions?.Value ?? new ChatGptCostsCrossCheckOptions();
     }
 
     public Guid VendorId => VendorCatalog.ChatGptEnterprise.Id;
@@ -63,6 +67,12 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
         _logger.LogDebug(
             "Starting ChatGPT Enterprise extraction for tenant '{TenantId}', {PeriodStart} to {PeriodEnd}.",
             tenantId, period.Start, period.End);
+
+        // A bad setting is a configuration error to fix, not something to quietly adjust: fail before any call is made.
+        if (_crossCheck.Problem is { } problem)
+        {
+            throw new InvalidOperationException(problem);
+        }
 
         var credential = await LoadCredentialAsync(tenantId, cancellationToken).ConfigureAwait(false);
 
@@ -122,7 +132,8 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             .GroupBy(row => row.Day)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        var costsResult = await TryQueryCostsAsync(tenantId, credential, period, cancellationToken)
+        var notes = new List<string>();
+        var costsResult = await TryQueryCostsAsync(tenantId, credential, period, notes, cancellationToken)
             .ConfigureAwait(false);
 
         // Only days from the export's effective start onward. The export is listed
@@ -189,6 +200,7 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
             Period = period,
             RecordsByDate = recordsByDate,
             PrimarySource = DailySpendSources.DailyUsageApi,
+            Notes = notes,
         };
     }
 
@@ -197,13 +209,33 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
     // away from, so its failure must not fail an extraction the Daily Usage API
     // already answered.
     private async Task<ChatGptCostQueryResult?> TryQueryCostsAsync(
-        string tenantId, ChatGptCredential credential, DateRange period, CancellationToken cancellationToken)
+        string tenantId, ChatGptCredential credential, DateRange period, List<string> notes, CancellationToken cancellationToken)
     {
+        if (!_crossCheck.Enabled)
+        {
+            notes.Add(
+                $"COSTS cross-check skipped ({ChatGptCostsCrossCheckOptions.ConfigurationSection}:Enabled is false), "
+                + "so these days are not compared with the export");
+            return null;
+        }
+
+        var window = _crossCheck.WindowFor(period);
+        if (window != period)
+        {
+            notes.Add($"COSTS cross-check limited to {window.Start:yyyy-MM-dd} to {window.End:yyyy-MM-dd}");
+        }
+
         try
         {
-            return await _costLogRepository
-                .QueryCostRowsAsync(credential, period, cancellationToken)
+            var result = await _costLogRepository
+                .QueryCostRowsAsync(credential, window, cancellationToken)
                 .ConfigureAwait(false);
+
+            // The timing is what to look at when judging whether the cross-check is worth its cost.
+            notes.Add(
+                $"COSTS cross-check: {result.FileCount} file(s) in {result.Elapsed.TotalSeconds:F0}s "
+                + $"(up to {_crossCheck.EffectiveParallelism} at a time)");
+            return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -216,6 +248,7 @@ public sealed class ChatGptEnterpriseSpendExtractor : IVendorSpendExtractor
                 "The ChatGPT Enterprise COSTS cross-check for tenant '{TenantId}' failed ({Message}); continuing "
                 + "with the Daily Usage figures alone.",
                 tenantId, ex.Message);
+            notes.Add("COSTS cross-check failed (see the log); the Daily Usage figures stand");
             return null;
         }
     }

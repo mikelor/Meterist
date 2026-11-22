@@ -423,6 +423,31 @@ and `UsageOrOverage` will be `0` for any credit-denominated usage.
   tolerance is logged, and **`COSTS` never overrides a Daily Usage figure**. If
   fetching it fails, the extraction still succeeds on Daily Usage alone.
 
+  **Keeping the cross-check affordable.** The export is hundreds of separate file downloads over a full window; before
+  this was tuned a single dry run over 30 days took about 12 minutes per tenant. Three settings control it (in
+  [`appsettings.json`](../src/Meterist.Cli/appsettings.json) under `Meterist:ChatGpt:CostsCrossCheck`, or as environment
+  variables such as `Meterist__ChatGpt__CostsCrossCheck__RecentDays`), and **none of them can change a stored daily
+  figure, the never-lower rule or a day's `Source` label**, because `COSTS` never overrides Daily Usage:
+
+  ```json
+  { "Meterist": { "ChatGpt": { "CostsCrossCheck": { "Enabled": true, "RecentDays": 7, "MaxParallelDownloads": 4 } } } }
+  ```
+
+  - `MaxParallelDownloads` (default **4**, 1 to 16): files are downloaded this many at a time instead of one by one. 1 is the
+    old behaviour. The rows are identical either way.
+  - `RecentDays` (default unset, 1 to 29): cross-check only the last N days of the extraction period. Days outside it keep their
+    Daily Usage figures but get no fresh `COSTS` rows in raw storage and are not compared. A day the Daily Usage API has no
+    row for is stored as no usage rather than falling back to the export, and never lowers what is already stored.
+  - `Enabled` (default true): false does not read the export at all.
+  - The [daily scheduled run](#running-extraction-on-a-schedule) passes `RecentDays = 7` by default
+    (`RunScheduledExtraction.ps1 -CostsCrossCheckDays`, 0 for the whole window; an environment setting wins). A manual
+    `extract` keeps the whole window unless you set it.
+  - **The run output says what happened**: the `extract` Detail column ends with `COSTS cross-check: N file(s) in Ns (up to 4
+    at a time)`, or `limited to <dates>`, `skipped (... Enabled is false)` or `failed (see the log)`. That timing is how to
+    judge the cost on your own tenants.
+  - A value outside its range stops the extraction with a message naming the setting, rather than being adjusted. These settings
+    do not apply to a tenant with no `WorkspaceId`, where the export is the only source.
+
 Usage is never lowered by a re-extraction, so a day that either source once
 reported higher keeps the higher figure (each day's `Source` says which one).
 When this overrides a figure just pulled, a warning logs the dates and both

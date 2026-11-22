@@ -15,11 +15,13 @@ namespace Meterist.Vendors.ChatGptEnterprise;
 /// than the requested period's Start if the vendor's 29-day retention
 /// window clamped it. Callers must treat any day before EffectiveStart as
 /// unknown, never as confirmed zero, since the vendor can no longer tell us
-/// either way.
+/// either way. FileCount and Elapsed say how many export files were read and how long the query took, for the run output.
 /// </summary>
 public sealed record ChatGptCostQueryResult(
     DateOnly EffectiveStart,
-    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows);
+    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
+    int FileCount = 0,
+    TimeSpan Elapsed = default);
 
 public interface IChatGptCostLogRepository
 {

@@ -38,6 +38,31 @@ public class SpendExtractionServiceTests
     }
 
     [Fact]
+    public async Task ExtractAsync_NotesFromTheExtractor_AreAppendedToTheDetail_SoARunSaysWhatItSkipped()
+    {
+        var vendorId = Guid.NewGuid();
+        var records = new List<DailySpendRecord> { new() { TenantId = "ecosync", VendorId = vendorId, Date = Period.Start } };
+        var raw = new RawVendorSpendData
+        {
+            VendorId = vendorId,
+            TenantId = "ecosync",
+            Period = Period,
+            RecordsByDate = new Dictionary<DateOnly, IReadOnlyList<IReadOnlyDictionary<string, object?>>>(),
+            Notes = ["cross-check skipped (turned off)", "second note"],
+        };
+        var service = new SpendExtractionService(
+            [new FakeExtractor(vendorId, raw)], [new FakeNormalizer(vendorId, records)],
+            new FakeRawExtractionRepository(), new FakeDailySpendRepository(list =>
+                [new DailySpendChange(list[0].Date, DailySpendChangeKind.Inserted, null, list[0], list[0])]),
+            new FakeVendorRateConfigRepository(), NullLogger<SpendExtractionService>.Instance);
+
+        var result = Assert.Single(await service.ExtractAsync(
+            "ecosync", Period, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("1 inserted; cross-check skipped (turned off); second note", result.Detail);
+    }
+
+    [Fact]
     public async Task ExtractAsync_SucceedingVendor_DetailSummarizesWhatActuallyChanged()
     {
         var vendorId = Guid.NewGuid();

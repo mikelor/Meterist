@@ -203,6 +203,11 @@ public sealed class SpendExtractionService
                 detail += $"; user activity: {userActivity.Summarize()}";
             }
 
+            foreach (var note in rawData.Notes)
+            {
+                detail += $"; {note}";
+            }
+
             return new VendorExtractionResult(
                 extractor.VendorId, displayName, VendorExtractionStatus.Succeeded, records.Count,
                 detail, changes, userUsage, breakdown, activity, userActivity);
