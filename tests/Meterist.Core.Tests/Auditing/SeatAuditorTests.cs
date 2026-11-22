@@ -628,6 +628,26 @@ public class SeatAuditorTests
     }
 
     [Fact]
+    public async Task AnUnlicensedPersonsActivity_IsNotAnActivePerson_SoUtilisationCannotExceedTheSeats()
+    {
+        var w = new World();
+        w.Rates.Add(SeatRate(Claude, 1));
+        w.Rosters[Claude] = Roster(
+            Member(Claude, "licensed", seat: "ASSIGNED"),
+            Member(Claude, "former", seat: "NO_LICENSE"));
+        w.Usage.Add(Use(Claude, "licensed", 1, amount: 1m));
+        w.Usage.Add(Use(Claude, "former", 2, amount: 1m));          // active in the window, but holds no seat
+        w.PersonActivity.Add(Act(Claude, "former", 3));
+
+        var v = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors);
+
+        Assert.Equal(1, v.RosterCount);
+        Assert.Equal(1, v.Idle.ActiveCount);                         // not 2 people against 1 seat
+        Assert.Equal(0, v.Idle.ActiveNotOnRoster);                   // they are on the roster, just not seat holders
+        Assert.Empty(v.Idle.IdleSeats);
+    }
+
+    [Fact]
     public async Task AVendorWhoseRosterIsOnlySeatHolders_IsUnchanged_AndHasNoRefusedNote()
     {
         var w = new World();

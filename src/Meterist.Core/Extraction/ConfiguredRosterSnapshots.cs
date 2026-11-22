@@ -74,7 +74,8 @@ public sealed class ConfiguredRosterSnapshots
                 var outcome = await _service.TakeAsync(tenantId, vendor.Id, dryRun, cancellationToken).ConfigureAwait(false);
                 results.Add(new RosterRunResult(
                     vendor.Id, vendor.DisplayName, RosterRunStatus.Succeeded,
-                    $"{outcome.MemberCount} member(s)", outcome));
+                    outcome.EmptyNotStored ? "the list is empty, so nothing was stored" : $"{outcome.MemberCount} member(s)",
+                    outcome));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {

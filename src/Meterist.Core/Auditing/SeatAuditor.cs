@@ -319,6 +319,13 @@ public sealed class SeatAuditor
                 continue;
             }
 
+            // On the roster but holding no seat (a Gemini user with no licence): their activity is neither a seat in use nor an
+            // active person to count against the seats, or one licensed user plus one former unlicensed one reads as 200%.
+            if (!RosterSeatTypes.HoldsSeat(member.SeatType))
+            {
+                continue;
+            }
+
             if (row.Date >= window.Start)
             {
                 activeIds.Add(member.MemberId);

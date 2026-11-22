@@ -25,6 +25,9 @@ public sealed class GeminiEnterpriseRosterSource : IVendorRosterSource
 
     public Guid VendorId => VendorCatalog.GeminiEnterprise.Id;
 
+    // A licence list can be empty before anyone holds a licence or has tried to sign in; that is an answer, not a key problem.
+    public bool CanBeEmpty => true;
+
     public async Task<string?> GetSkipReasonAsync(string tenantId, CancellationToken cancellationToken = default)
     {
         var credential = await GeminiCredentialLoader.LoadAsync(_secretStore, tenantId, cancellationToken).ConfigureAwait(false);

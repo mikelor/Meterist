@@ -154,6 +154,22 @@ public class ConfiguredRosterSnapshotsTests
     }
 
     [Fact]
+    public async Task Take_AnEmptyLicenceList_IsASuccessWithAPlainDetail_NotAFailure()
+    {
+        var empty = new CountingSource(ChatGpt, [], null) { AllowEmpty = true };
+        var run = Build(sources: [empty], credentialsFor: [ChatGpt]);
+
+        var results = await run.Snapshots.TakeAsync("t1", cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = Assert.Single(results);
+        Assert.Equal(RosterRunStatus.Succeeded, result.Status);
+        Assert.Contains("empty", result.Detail);
+        Assert.True(result.Outcome!.EmptyNotStored);
+        Assert.Empty(run.Repository.Stored);
+        Assert.Equal(0, RosterExitCode.For(results));
+    }
+
+    [Fact]
     public void ExitCode_IsOneOnlyWhenSomethingFailed()
     {
         RosterRunResult R(RosterRunStatus s) => new(Claude, "x", s, "");
@@ -185,6 +201,10 @@ public class ConfiguredRosterSnapshotsTests
         public string? SkipReason { get; init; }
 
         public bool SkipCheckFails { get; init; }
+
+        public bool AllowEmpty { get; init; }
+
+        public bool CanBeEmpty => AllowEmpty;
 
         public Task<string?> GetSkipReasonAsync(string tenantId, CancellationToken cancellationToken = default) =>
             SkipCheckFails ? throw new InvalidOperationException("credential unreadable") : Task.FromResult(SkipReason);

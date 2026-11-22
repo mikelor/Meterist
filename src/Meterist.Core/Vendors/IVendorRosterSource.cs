@@ -40,4 +40,11 @@ public interface IVendorRosterSource
     /// </summary>
     Task<string?> GetSkipReasonAsync(string tenantId, CancellationToken cancellationToken = default) =>
         Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// True when an empty member list is a real answer rather than a problem. Most vendors always have at least an owner, so
+    /// an empty list means a rejected key or a wrong scope and is refused; a licence list (Gemini) can legitimately be empty
+    /// before anyone holds a licence or has tried to sign in. An empty list is reported but never stored.
+    /// </summary>
+    bool CanBeEmpty => false;
 }

@@ -864,7 +864,10 @@ Engine settings described in the [Gemini section](#gemini-enterprise); until the
 (`ASSIGNED`, `NO_LICENSE`, `NO_LICENSE_ATTEMPTED_LOGIN`, `BLOCKED`). Only `ASSIGNED` people count as seats in `audit seats`
 and can be idle; people with no licence are listed in the roster and in the audit's seat-type breakdown but are not
 seats, and the audit notes how many **tried to sign in without a licence** (demand your licences do not cover). Google's
-list also carries a last-login time per person; Meterist does not store it yet.
+list also carries a last-login time per person; Meterist does not store it yet. A licence list can legitimately be empty (nobody
+holds a licence or has tried to sign in yet): that is reported as a success with "the list is empty, so nothing was stored", not as a
+failure, and no snapshot is written, so an earlier snapshot stays the latest (other vendors always have an owner, so an empty list
+from them is still refused as a likely key-scope problem).
 
 ```powershell
 dotnet run --project src/Meterist.Cli -- roster snapshot --tenant <your-tenant-id> --vendor claude-enterprise --dry-run

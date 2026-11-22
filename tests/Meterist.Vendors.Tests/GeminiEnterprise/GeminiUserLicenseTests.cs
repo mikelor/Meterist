@@ -226,6 +226,10 @@ public class GeminiUserLicenseTests
     }
 
     [Fact]
+    public void TheSource_SaysAnEmptyLicenceListIsARealAnswer() =>
+        Assert.True(new GeminiEnterpriseRosterSource(new FakeSecretStore(), new FakeLicenses()).CanBeEmpty);
+
+    [Fact]
     public async Task TheSource_AMissingCredential_FailsWithoutEchoingAnything()
     {
         var source = new GeminiEnterpriseRosterSource(new FakeSecretStore(), new FakeLicenses());

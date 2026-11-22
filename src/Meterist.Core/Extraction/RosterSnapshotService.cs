@@ -5,8 +5,13 @@ using Meterist.Core.Vendors;
 namespace Meterist.Core.Extraction;
 
 /// <summary>What taking a roster snapshot found, and what it stored (or, for a dry run, would store).</summary>
+/// <param name="EmptyNotStored">
+/// The vendor's list was legitimately empty (a licence list nobody is on yet), so nothing was stored: an empty snapshot would
+/// read as everyone having left, and the latest earlier snapshot, if any, stays the latest.
+/// </param>
 public sealed record RosterSnapshotOutcome(
-    DateOnly SnapshotDate, int MemberCount, IReadOnlyDictionary<string, int> RoleCounts, RosterSnapshotResult Stored);
+    DateOnly SnapshotDate, int MemberCount, IReadOnlyDictionary<string, int> RoleCounts, RosterSnapshotResult Stored,
+    bool EmptyNotStored = false);
 
 /// <summary>
 /// Takes a dated snapshot of a vendor's member list and stores it. The roster is current state, not a date range,
@@ -61,6 +66,14 @@ public sealed class RosterSnapshotService
         // An organisation always has at least an owner, so an empty list is a vendor or scope problem, not a
         // roster. Storing it would replace a good snapshot taken earlier the same day with nothing, and read
         // as every member having left.
+        if (members.Count == 0 && source.CanBeEmpty)
+        {
+            // A real answer for this vendor, not a failure and not a key problem. Reported, never stored.
+            return new RosterSnapshotOutcome(
+                DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime), 0, new Dictionary<string, int>(),
+                new RosterSnapshotResult(0, 0, 0, 0), EmptyNotStored: true);
+        }
+
         if (members.Count == 0)
         {
             throw new InvalidOperationException(
