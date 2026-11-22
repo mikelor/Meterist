@@ -2137,7 +2137,7 @@ static Command BuildReportCommand(IHost host)
             var colour = change.Kind == WeekChangeKind.Decrease ? "red" : "yellow";
             AnsiConsole.MarkupLine(
                 $"[{colour}]{change.Kind.ToString().ToUpperInvariant()}[/] {Markup.Escape(change.TenantId)} / {Markup.Escape(change.Vendor)} "
-                + $"week {change.WeekStart:yyyy-MM-dd}: {change.Previous.GrossSpend:N2} -> {change.Current.GrossSpend:N2} "
+                + $"week {change.WeekStart:yyyy-MM-dd}{(change.WeekMissing ? " (MISSING from this report)" : string.Empty)}: {change.Previous.GrossSpend:N2} -> {change.Current.GrossSpend:N2} "
                 + $"(seat {change.Previous.SeatFee:N2} -> {change.Current.SeatFee:N2}, usage {change.Previous.UsageOrOverage:N2} -> {change.Current.UsageOrOverage:N2})");
         }
 

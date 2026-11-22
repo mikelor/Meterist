@@ -45,7 +45,7 @@ public static class ReportDiffRenderer
                 + "            <th class=\"figure\">Previous</th><th class=\"figure\">Now</th>\n          </tr>\n        </thead>\n        <tbody>\n");
             foreach (var change in diff.Changes)
             {
-                var label = change.Kind == WeekChangeKind.Decrease ? "<b>Decrease</b>" : "Increase";
+                var label = change.WeekMissing ? "<b>Decrease</b> (week missing)" : change.Kind == WeekChangeKind.Decrease ? "<b>Decrease</b>" : "Increase";
                 var vendor = VendorCatalog.FindByShortName(change.Vendor)?.DisplayName ?? change.Vendor;
                 html.Append(
                     $"          <tr>\n            <td>{label}</td><td>{Encode(change.TenantId)}</td><td>{Encode(vendor)}</td>"

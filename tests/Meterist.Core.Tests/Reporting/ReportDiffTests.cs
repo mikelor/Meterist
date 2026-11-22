@@ -103,9 +103,10 @@ public class ReportDiffTests
     [Fact]
     public void AWeekInOnlyOneReport_IsNotAChange_ButIsCounted()
     {
+        // The new report starts a week later, so the week of the 4th aged out of it; the week of the 18th is new.
         var diff = ReportDiffer.Compare(
             Closed(Week(W1, 100m, 50m), Week(W2, 100m, 60m)),
-            Closed(Week(W2, 100m, 60m), Week(W3, 100m, 70m)));
+            Manifest("2026-11-11", "2026-11-24", ("t1", Claude, [Week(W2, 100m, 60m), Week(W3, 100m, 70m)])));
 
         Assert.Empty(diff.Changes);
         Assert.Equal(1, diff.WeeksCompared);
@@ -206,6 +207,68 @@ public class ReportDiffTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             ReportDiffer.Compare(Closed(Week(W1, 1m, 1m)), Closed(Week(W1, 1m, 1m)), tolerance: -1m));
 
+    [Fact]
+    public void AWholeWeekThatDisappears_FromAPeriodThatStillCoversIt_IsADecrease()
+    {
+        var previous = Closed(Week(W1, 100m, 50m), Week(W2, 100m, 60m));
+        var current = Closed(Week(W1, 100m, 50m));   // same dates; the second week's $160 is gone
+
+        var diff = ReportDiffer.Compare(previous, current);
+
+        var lost = Assert.Single(diff.Changes);
+        Assert.Equal(WeekChangeKind.Decrease, lost.Kind);
+        Assert.True(lost.WeekMissing);
+        Assert.Equal(W2, lost.WeekStart);
+        Assert.Equal(160m, lost.Previous.GrossSpend);
+        Assert.Equal(0m, lost.Current.GrossSpend);
+        Assert.Equal(1, diff.Decreases);
+        Assert.Equal(0, diff.WeeksOnlyInPrevious);   // counted as lost, not as aged out
+    }
+
+    [Fact]
+    public void AWholeVendorThatDisappears_IsADecreaseForEachOfItsWeeks()
+    {
+        var previous = Manifest("2026-11-04", "2026-11-24", ("t1", Claude, [Week(W1, 1m, 1m)]), ("t1", ChatGpt, [Week(W1, 100m, 40m), Week(W2, 100m, 40m)]));
+        var current = Manifest("2026-11-04", "2026-11-24", ("t1", Claude, [Week(W1, 1m, 1m)]));
+
+        var diff = ReportDiffer.Compare(previous, current);
+
+        Assert.Equal(2, diff.Decreases);
+        Assert.All(diff.Changes, c => Assert.Equal(ChatGpt, c.Vendor));
+    }
+
+    [Fact]
+    public void AWeekThatSticksOutOfTheNewPeriod_IsAgedOut_NotLost()
+    {
+        // The new report starts on the 11th, so the week of the 4th is outside it and may legitimately be absent.
+        var previous = Closed(Week(W1, 100m, 50m), Week(W2, 100m, 60m));
+        var current = Manifest("2026-11-11", "2026-11-24", ("t1", Claude, [Week(W2, 100m, 60m)]));
+
+        var diff = ReportDiffer.Compare(previous, current);
+
+        Assert.Empty(diff.Changes);
+        Assert.Equal(1, diff.WeeksOnlyInPrevious);
+    }
+
+    [Fact]
+    public void AMissingWeekThatHadNoMoney_IsNotALoss()
+    {
+        var diff = ReportDiffer.Compare(Closed(Week(W1, 100m, 50m), Week(W2, 0m, 0.10m)), Closed(Week(W1, 100m, 50m)));
+
+        Assert.Empty(diff.Changes);
+    }
+
+    [Fact]
+    public void AMissingWeekIsShownAsMissing_InTheReportSection()
+    {
+        var html = new StringBuilder();
+
+        ReportDiffRenderer.Render(html, ReportDiffer.Compare(Closed(Week(W1, 100m, 50m), Week(W2, 100m, 60m)), Closed(Week(W1, 100m, 50m))));
+
+        Assert.Contains("week missing", html.ToString());
+        Assert.Contains("$0.00", html.ToString());
+    }
+
     // ---- the manifest itself ----
 
     [Fact]
@@ -236,6 +299,38 @@ public class ReportDiffTests
         Assert.Null(manifest);
         Assert.False(string.IsNullOrWhiteSpace(problem));
         Assert.DoesNotContain("t1", problem);
+    }
+
+    private const string Head = """{ "version": 1, "generatedAt": "2026-11-22T00:00:00Z", "periodStart": "2026-11-04", "periodEnd": "2026-11-24", """;
+
+    [Theory]
+    [InlineData("""{Head} "tenants": [ null ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ null ] } ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "v", "weeks": [ null ] } ] } ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "v", "weeks": null } ] } ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": " ", "vendors": [] } ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "", "weeks": [] } ] } ] }""")]
+    // a week with no grossSpend would read as $0 and look like a collapse
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "v", "weeks": [ { "weekStart": "2026-11-04", "weekEnd": "2026-11-10", "seatFee": 1, "usageOrOverage": 1, "daysPresent": 7 } ] } ] } ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "v", "weeks": [ { "weekStart": "2026-11-10", "weekEnd": "2026-11-04", "seatFee": 1, "usageOrOverage": 1, "grossSpend": 2, "daysPresent": 7 } ] } ] } ] }""")]
+    [InlineData("""{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "v", "weeks": [ { "weekStart": "2026-11-04", "weekEnd": "2026-11-10", "seatFee": 1, "usageOrOverage": 1, "grossSpend": 2, "daysPresent": -1 } ] } ] } ] }""")]
+    public void AManifestWithAnEntryThatIsNotWellFormed_IsRefused_NotAccepted_AndNeverCrashesAComparison(string template)
+    {
+        var json = template.Replace("{Head}", Head, StringComparison.Ordinal);
+
+        Assert.False(ReportManifest.TryParse(json, out var manifest, out var problem));
+
+        Assert.Null(manifest);
+        Assert.False(string.IsNullOrWhiteSpace(problem));
+    }
+
+    [Fact]
+    public void AWellFormedManifestWrittenByThisBuild_IsAccepted()
+    {
+        var json = """{Head} "tenants": [ { "tenantId": "t1", "vendors": [ { "vendor": "v", "weeks": [ { "weekStart": "2026-11-04", "weekEnd": "2026-11-10", "seatFee": 1, "usageOrOverage": 1, "grossSpend": 2, "daysPresent": 7 } ] } ] } ] }"""
+            .Replace("{Head}", Head, StringComparison.Ordinal);
+
+        Assert.True(ReportManifest.TryParse(json, out _, out var problem), problem);
     }
 
     [Fact]
@@ -297,6 +392,50 @@ public class ReportDiffTests
         Assert.Equal(secondPath, baseline.Path);
         Assert.Contains("20261122T080000Z", secondPath);
         Assert.Equal(2m, baseline.Manifest!.Tenants[0].Vendors[0].Weeks[0].UsageOrOverage);
+    }
+
+    [Fact]
+    public async Task TheStore_TwoWritesToTheSameName_NeitherReplacesTheOther_AndTheLaterOneIsTheNewest()
+    {
+        using var dir = new TempDir();
+        var ct = TestContext.Current.CancellationToken;
+        var report = Path.Combine(dir.Path, "r.html");
+        var at = new DateTime(2026, 11, 22, 8, 0, 0, DateTimeKind.Utc);
+        var wanted = ReportManifestStore.PathFor(report, at);   // the same second, so the same name
+        var a = Closed(Week(W1, 1m, 1m)) with { GeneratedAt = at };
+        var b = Closed(Week(W1, 1m, 2m)) with { GeneratedAt = at };
+        var c = Closed(Week(W1, 1m, 3m)) with { GeneratedAt = at };
+
+        var pathA = await ReportManifestStore.WriteAsync(a, wanted, ct);
+        var pathB = await ReportManifestStore.WriteAsync(b, wanted, ct);
+        var pathC = await ReportManifestStore.WriteAsync(c, wanted, ct);
+
+        Assert.Equal(3, new[] { pathA, pathB, pathC }.Distinct().Count());
+        Assert.Equal(wanted, pathA);
+        Assert.Equal(1m, Load(pathA));   // the first is intact
+        Assert.Equal(2m, Load(pathB));
+        Assert.Equal(3m, Load(pathC));
+        Assert.Equal(pathC, ReportManifestStore.ResolveBaseline(report, c).Path);   // numbered suffixes sort in order
+
+        static decimal Load(string path)
+        {
+            Assert.True(ReportManifestStore.TryLoad(path, out var m, out _));
+            return m!.Tenants[0].Vendors[0].Weeks[0].UsageOrOverage;
+        }
+    }
+
+    [Fact]
+    public async Task TheStore_ConcurrentWritesToTheSameName_AllSurvive()
+    {
+        using var dir = new TempDir();
+        var wanted = ReportManifestStore.PathFor(Path.Combine(dir.Path, "r.html"), new DateTime(2026, 11, 22, 8, 0, 0, DateTimeKind.Utc));
+        var ct = TestContext.Current.CancellationToken;
+
+        var paths = await Task.WhenAll(Enumerable.Range(1, 8).Select(i =>
+            ReportManifestStore.WriteAsync(Closed(Week(W1, 1m, i)), wanted, ct)));
+
+        Assert.Equal(8, paths.Distinct().Count());
+        Assert.Equal(8, Directory.GetFiles(dir.Path, "*.json").Length);
     }
 
     [Fact]

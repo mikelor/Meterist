@@ -31,7 +31,8 @@ dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --
 Each run also writes a **manifest** beside the report: `<report name>.manifest.<UTC timestamp>.json`,
 holding the report's period and, per tenant, vendor and week, the seat fee, usage or overage, gross total and
 days stored. It is client financial data like the report, so it lives under the git-ignored `artifacts/` and
-is never committed. A manifest is never overwritten by a later run, so the figures that last looked right
+is never committed. A manifest is never overwritten by a later run, even one in the same second (it is created
+exclusively and takes a `-002`, `-003` suffix if the name is taken), so the figures that last looked right
 survive a run that shows them gone.
 
 On the next run Meterist finds the newest manifest **in the output folder for the same set of tenants**
@@ -43,12 +44,17 @@ report as "What changed since the last report" and in the command output.
 - A **decrease** is marked most strongly and listed first. Stored usage is not supposed to fall (the
   never-lower rule and the post-write read-back guard two causes), so a fall in any vendor week needs an
   explanation. This is the independent check that caught the ChatGPT retention overwrite.
-- **Not changes:** a week in only one report (new, or aged out); and a week the two reports count over different
+- **A whole week that disappears is a decrease.** If the previous report showed a week with money in it, the new
+  report's own period covers that week in full, and it is no longer there, that is data that went away and is marked
+  "week missing" (its figure now $0). Only a week that sticks out of the new period (a later `--from`) can
+  legitimately be absent.
+- **Not changes:** a week that is new in this report, or aged out of its period; and a week the two reports count over different
   days. If the new report covers every day the old one did and more (a trailing partial week that has since
   completed), a rise is expected and only a fall is reported; if it covers fewer or different days (a later
   `--from`) the week is counted as not comparable, not flagged.
 - **Not compared at all**, with the reason shown in the report: the previous report covered a different set
-  of tenants, the manifest is a version this build does not read, or it is corrupt or unreadable.
+  of tenants, the manifest is a version this build does not read, or it is corrupt, incomplete or unreadable (every
+  tenant, vendor and week entry must be present and well formed).
 - `--compare-to <manifest>` names the baseline (it must exist). Use it to pin a known-good report after a run
   that moved something, since the default baseline is the newest one, which may by then include the change.
 - `--fail-on-decrease` makes the command exit non-zero when any figure fell. Without it a decrease only warns

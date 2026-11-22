@@ -9,7 +9,10 @@ public enum WeekChangeKind
     Decrease,
 }
 
-/// <summary>One vendor week whose figures moved between two reports.</summary>
+/// <summary>
+/// One vendor week whose figures moved between two reports. <paramref name="WeekMissing"/> is a week the previous report
+/// showed and the new one should show but does not: its <paramref name="Current"/> figures are zero.
+/// </summary>
 public sealed record WeekChange(
     string TenantId,
     string Vendor,
@@ -17,7 +20,8 @@ public sealed record WeekChange(
     DateOnly WeekEnd,
     ManifestWeek Previous,
     ManifestWeek Current,
-    WeekChangeKind Kind);
+    WeekChangeKind Kind,
+    bool WeekMissing = false);
 
 /// <summary>What comparing a report with the one before it found.</summary>
 public sealed record ReportDiff(
@@ -51,7 +55,8 @@ public sealed record ReportDiff(
 /// cover different days of the same week (a different start or end date): when the new one covers every day the old one did
 /// and more, a rise is expected (a trailing partial week that has since completed) and only a fall is reported; when it
 /// covers fewer or different days the two figures are not comparable and the week is counted, not flagged. A figure counts
-/// as moved only past the tolerance, so cent-level noise does not alarm. Reports for a different set of tenants, or a
+/// as moved only past the tolerance, so cent-level noise does not alarm. A week the new report should show but does not is a
+/// decrease (data that went away), not an aged-out week. Reports for a different set of tenants, or a
 /// manifest of another version, are not compared at all, and the result says so.
 /// </para>
 /// </summary>
@@ -133,7 +138,32 @@ public static class ReportDiffer
             }
         }
 
-        var onlyInPrevious = previousWeeks.Keys.Count(k => !currentWeeks.ContainsKey(k));
+        // A week the previous report showed, that the new report's own period covers in full but no longer shows, is data that
+        // went away, not a week that aged out: stored usage is not supposed to vanish. Only a week that sticks out of the new
+        // period (a later start date) can legitimately be absent.
+        var weeksLost = 0;
+        foreach (var (key, beforeEntry) in previousWeeks)
+        {
+            if (currentWeeks.ContainsKey(key))
+            {
+                continue;
+            }
+
+            var before = beforeEntry.Week;
+            var coverage = Coverage(before, previous);
+            var insideNewPeriod = coverage.Start >= current.PeriodStart && coverage.End <= current.PeriodEnd;
+            var hadFigures = before.SeatFee > tolerance || before.UsageOrOverage > tolerance || before.GrossSpend > tolerance;
+            if (insideNewPeriod && hadFigures)
+            {
+                weeksLost++;
+                changes.Add(new WeekChange(
+                    beforeEntry.TenantId, key.Vendor, key.WeekStart, before.WeekEnd, before,
+                    before with { SeatFee = 0m, UsageOrOverage = 0m, GrossSpend = 0m, DaysPresent = 0 },
+                    WeekChangeKind.Decrease, WeekMissing: true));
+            }
+        }
+
+        var onlyInPrevious = previousWeeks.Keys.Count(k => !currentWeeks.ContainsKey(k)) - weeksLost;
         var onlyInCurrent = currentWeeks.Keys.Count(k => !previousWeeks.ContainsKey(k));
 
         var ordered = changes

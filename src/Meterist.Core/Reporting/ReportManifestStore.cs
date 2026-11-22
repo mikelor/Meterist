@@ -10,6 +10,7 @@ namespace Meterist.Core.Reporting;
 public static class ReportManifestStore
 {
     private const string Infix = ".manifest.";
+    private const int MaxNameAttempts = 999;
 
     /// <summary>The manifest path for a report written at <paramref name="reportPath"/> and generated at <paramref name="generatedAt"/>.</summary>
     public static string PathFor(string reportPath, DateTime generatedAt)
@@ -85,7 +86,12 @@ public static class ReportManifestStore
         return ReportManifest.TryParse(json, out manifest, out problem);
     }
 
-    /// <summary>Writes the manifest for a report to <paramref name="path"/>, creating the folder. Returns the path.</summary>
+    /// <summary>
+    /// Writes the manifest for a report, creating the folder, and returns the path actually used. The file is created
+    /// exclusively and never replaces an existing one: if <paramref name="path"/> is taken (two runs in the same second), a
+    /// numbered suffix is added (<c>-002</c>, <c>-003</c>, which sorts after the unsuffixed name and in order), so the earlier
+    /// baseline always survives. Created with an exclusive open rather than checked for first, so two processes cannot both win.
+    /// </summary>
     public static async Task<string> WriteAsync(ReportManifest manifest, string path, CancellationToken cancellationToken = default)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -94,9 +100,35 @@ public static class ReportManifestStore
             Directory.CreateDirectory(directory);
         }
 
-        await File.WriteAllTextAsync(path, manifest.ToJson(), cancellationToken).ConfigureAwait(false);
-        return path;
+        var json = manifest.ToJson();
+        var stem = Path.Combine(directory ?? string.Empty, Path.GetFileNameWithoutExtension(path));
+        var extension = Path.GetExtension(path);
+
+        for (var attempt = 1; attempt <= MaxNameAttempts; attempt++)
+        {
+            var candidate = attempt == 1
+                ? path
+                : string.Create(CultureInfo.InvariantCulture, $"{stem}-{attempt:D3}{extension}");
+            try
+            {
+                var stream = new FileStream(candidate, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await using (stream.ConfigureAwait(false))
+                {
+                    var bytes = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(json);
+                    await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                }
+
+                return candidate;
+            }
+            catch (IOException) when (File.Exists(candidate))
+            {
+                // Taken by an earlier run: try the next name rather than replace it.
+            }
+        }
+
+        throw new IOException($"Could not find a free manifest file name after {MaxNameAttempts} attempts beside '{Path.GetFileName(path)}'.");
     }
+
 
     private static string StemOf(string reportPath) => Path.GetFileNameWithoutExtension(reportPath);
 

@@ -43,6 +43,10 @@ public sealed record ReportManifest(
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
+
+        // A missing constructor parameter is an error, not a default: a week with no "grossSpend" would read as $0 and look like
+        // a collapse in the figures instead of a damaged file.
+        RespectRequiredConstructorParameters = true,
     };
 
     /// <summary>Builds the manifest for a report: its period and, per tenant and vendor, every week it shows.</summary>
@@ -65,6 +69,19 @@ public sealed record ReportManifest(
                     .ToList()))
             .OrderBy(t => t.TenantId, StringComparer.OrdinalIgnoreCase)
             .ToList());
+
+    // Every level present and usable, so a damaged file is refused here and shown as "not compared" instead of failing later.
+    private static bool IsWellFormed(ReportManifest manifest) =>
+        manifest.Tenants is not null
+        && manifest.Tenants.All(t =>
+            t is not null
+            && !string.IsNullOrWhiteSpace(t.TenantId)
+            && t.Vendors is not null
+            && t.Vendors.All(v =>
+                v is not null
+                && !string.IsNullOrWhiteSpace(v.Vendor)
+                && v.Weeks is not null
+                && v.Weeks.All(w => w is not null && w.WeekEnd >= w.WeekStart && w.DaysPresent >= 0)));
 
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
 
@@ -98,9 +115,9 @@ public sealed record ReportManifest(
             }
 
             var read = document.RootElement.Deserialize<ReportManifest>(JsonOptions);
-            if (read is null || read.Tenants is null || read.Tenants.Any(t => t is null || t.Vendors is null || t.Vendors.Any(v => v is null || v.Weeks is null)))
+            if (read is null || !IsWellFormed(read))
             {
-                problem = "it is missing required fields";
+                problem = "it is missing required fields or has an entry that is not well formed";
                 return false;
             }
 
