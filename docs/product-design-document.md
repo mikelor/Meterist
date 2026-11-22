@@ -196,7 +196,7 @@ Sprint 4: 🔵 a spike on the user-activity log sink to BigQuery (#36, prepared,
 
 ### Follow-ups already filed for Sprint 5
 
-Make the ChatGPT `COSTS` cross-check fast enough for a daily run (#70), close the early-month gap between the Daily Usage
+Make the ChatGPT `COSTS` cross-check fast enough for a daily run (#70, ✅ built: bounded parallel downloads, a last-N-days window and an off switch; after-timings still to measure), close the early-month gap between the Daily Usage
 API and a console export (#71), and revisit assumptions that rest on data not yet seen (#72).
 
 ## 8. Success Criteria

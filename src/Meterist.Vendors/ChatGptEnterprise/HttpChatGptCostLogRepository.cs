@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Meterist.Core.Vendors;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Meterist.Vendors.ChatGptEnterprise;
 
@@ -37,15 +39,18 @@ public sealed class HttpChatGptCostLogRepository : IChatGptCostLogRepository
     private readonly HttpClient _authenticatedClient;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HttpChatGptCostLogRepository> _logger;
+    private readonly int _parallelism;
 
     public HttpChatGptCostLogRepository(
         HttpClient authenticatedClient,
         IHttpClientFactory httpClientFactory,
-        ILogger<HttpChatGptCostLogRepository> logger)
+        ILogger<HttpChatGptCostLogRepository> logger,
+        IOptions<ChatGptCostsCrossCheckOptions>? options = null)
     {
         _authenticatedClient = authenticatedClient;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _parallelism = (options?.Value ?? new ChatGptCostsCrossCheckOptions()).EffectiveParallelism;
     }
 
     public async Task<ChatGptCostQueryResult> QueryCostRowsAsync(
@@ -66,15 +71,26 @@ public sealed class HttpChatGptCostLogRepository : IChatGptCostLogRepository
         var files = await ListFilesAsync(credential, effectiveStart, period.End, cancellationToken)
             .ConfigureAwait(false);
 
+        // Hundreds of small files, so the cost is the number of requests made one after another, not their size. They are
+        // fetched a few at a time (bounded, so a rate limit is not provoked) and then read in listing order, so the rows,
+        // and which of two duplicate events is kept, are exactly what the sequential loop produced. The first failure
+        // cancels the rest and propagates, as before; the extractor treats the whole cross-check as best effort.
+        var stopwatch = Stopwatch.StartNew();
+        var downloaded = new List<ChatGptCostsEventDto>?[files.Count];
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, files.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = _parallelism, CancellationToken = cancellationToken },
+            async (index, token) =>
+                downloaded[index] = await DownloadAndParseFileAsync(credential, files[index].Id, token).ConfigureAwait(false))
+            .ConfigureAwait(false);
+        stopwatch.Stop();
+
         var seenEventIds = new HashSet<string>();
         var rows = new List<IReadOnlyDictionary<string, object?>>();
 
-        foreach (var file in files)
+        foreach (var events in downloaded)
         {
-            var events = await DownloadAndParseFileAsync(credential, file.Id, cancellationToken)
-                .ConfigureAwait(false);
-
-            foreach (var costsEvent in events)
+            foreach (var costsEvent in events!)
             {
                 // "At least once" delivery — duplicates across files are expected.
                 if (costsEvent.EventId is null || !seenEventIds.Add(costsEvent.EventId))
@@ -114,11 +130,11 @@ public sealed class HttpChatGptCostLogRepository : IChatGptCostLogRepository
         }
 
         _logger.LogDebug(
-            "ChatGPT Enterprise COSTS export returned {FileCount} file(s), {EventCount} deduped event(s), "
+            "ChatGPT Enterprise COSTS export returned {FileCount} file(s) in {Seconds:F1}s at parallelism {Parallelism}, {EventCount} deduped event(s), "
             + "{RowCount} billing-line row(s) for {PeriodStart} to {PeriodEnd}.",
-            files.Count, seenEventIds.Count, rows.Count, period.Start, period.End);
+            files.Count, stopwatch.Elapsed.TotalSeconds, _parallelism, seenEventIds.Count, rows.Count, period.Start, period.End);
 
-        return new ChatGptCostQueryResult(effectiveStart, rows);
+        return new ChatGptCostQueryResult(effectiveStart, rows, files.Count, stopwatch.Elapsed);
     }
 
     private async Task<List<ComplianceLogFileMetadataDto>> ListFilesAsync(

@@ -60,6 +60,8 @@ builder.Services.AddHttpClient<IChatGptDailyUsageRepository, HttpChatGptDailyUsa
         client.BaseAddress = new Uri("https://api.chatgpt.com/");
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.Configure<ChatGptCostsCrossCheckOptions>(
+    builder.Configuration.GetSection(ChatGptCostsCrossCheckOptions.ConfigurationSection));
 builder.Services.AddSingleton<IVendorSpendNormalizer, ChatGptEnterpriseSpendNormalizer>();
 builder.Services.AddSingleton<IVendorUserUsageNormalizer, ChatGptEnterpriseUserUsageNormalizer>();
 // The member list uses the same admin key and workspace ID as the Daily Usage API. Its HTTP client is registered through

@@ -27,4 +27,10 @@ public sealed class RawVendorSpendData
     /// nothing to say where "no usage" was learned from. Null for single-source vendors.
     /// </summary>
     public string? PrimarySource { get; init; }
+
+    /// <summary>
+    /// Plain-language notes the run output should carry about how this pull was made, such as an optional cross-check that
+    /// was skipped, narrowed or failed. They name no person. Empty for most pulls.
+    /// </summary>
+    public IReadOnlyList<string> Notes { get; init; } = [];
 }
