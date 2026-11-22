@@ -465,10 +465,10 @@ therefore always incomplete, which a daily tool tolerates. Per-actor rows are
 stored for `users usage` and the report's people sections; the stored daily record
 is unchanged.
 
-**Reconcile before you rely on it.** The new endpoint is beta and has not yet been
-compared against your stored figures. Run `extract --dry-run` for a closed month
-before a real extraction: it reports every stored day that would change. A day
-that differs is worth understanding first (Priority Tier commitment fees are billed
+**Reconcile before you rely on it.** The new endpoint is beta. One month (October 2026) on one
+Before relying on it for another tenant, run `extract --dry-run` for a closed month: it reports every stored
+day that would change. A day that differs is worth understanding first (Priority Tier commitment fees are
+billed separately and appear in neither endpoint).
 separately and appear in neither endpoint).
 
 If Anthropic changes or ends the beta, the extraction fails with a message naming

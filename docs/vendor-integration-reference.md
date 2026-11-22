@@ -400,9 +400,13 @@ not adopted.
   `anthropic-beta: analytics-usage-cost-2026-08-24`, `time_bucket_width=1d`, an explicit exclusive `ending_at`, 31-day
   windows, `limit=1000` and `group_by[]=actor, api_key_id, workspace_id, product` (four of the five allowed), with no
   `actor_types[]` filter so the daily total counts everything. The legacy client stays behind
-  `Meterist:ClaudeApiPlatform:UseLegacyCostReport`; a 404 names it. Built from Anthropic's published reference; **not yet
-  compared live**, so the reconciliation the issue asks for (a closed month, new against stored legacy figures) is run with
-  `extract --dry-run` and recorded here when done.
+  `Meterist:ClaudeApiPlatform:UseLegacyCostReport`; a 404 names it. Built from Anthropic's published reference.
+  - **Reconciled live 2026-11-21 (October 2026, `extract --dry-run`, against figures first stored from the legacy
+    `cost_report`).** One tenant: 14 stored days totalling $10,090.52; the new endpoint returned 14 day-rows and the dry run
+    reported all 14 unchanged, with one per-actor row per day to be inserted. The other tenant had no stored October days
+    and the new endpoint returned none, consistent with no API usage that month. Only one tenant had data, so this is one
+    month and one account, not a broad test; a month with several actors, personal keys or a workspace key would exercise
+    more of the attribution.
   - **Documented behaviour the adapter relies on:** the Admin key (or an `org:admin` OAuth token) authenticates both
     analytics endpoints; `amount` is a six-decimal string in **cents** (post-discount, pre-credit); actors are `user_actor`
     (`user_id`, `email_address`, `name`, `deleted`), `service_account_actor` (`service_account_id`), `api_actor`
