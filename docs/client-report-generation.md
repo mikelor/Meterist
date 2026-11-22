@@ -121,7 +121,7 @@ bundled into one page:
      usage the vendor did not tie to anyone.
    - **Idle seats** — per tenant and vendor, the rostered people with no activity in the 30 days, longest idle first, with
      role, seat type and last active day before the window (`none stored` means no earlier activity is on file, not that
-     there was none). Up to 40 are listed.
+     there was none; for Claude Enterprise it is the later of the last spend row and the last activity row). Up to 40 are listed.
 10. **Footnote** — methodology and caveats: what "Gross Spend" means, that tax
    and support fees are not included (so a figure can differ from an invoice;
    see `docs/architecture.md` §5.2), why

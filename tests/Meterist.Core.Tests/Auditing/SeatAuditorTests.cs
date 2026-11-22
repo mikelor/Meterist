@@ -21,9 +21,11 @@ public class SeatAuditorTests
 
         public List<UserDailyUsageRecord> Usage { get; } = [];
 
+        public List<UserActivityRecord> PersonActivity { get; } = [];
+
         public SeatAuditor Auditor(params Guid[] withRosterSource) => new(
             withRosterSource.Select(id => (IVendorRosterSource)new Source(id)).ToList(),
-            new Rates(Rates), new Rosters_(Rosters), new Activity_(Activity), new Usage_(Usage));
+            new Rates(Rates), new Rosters_(Rosters), new Activity_(Activity), new Usage_(Usage), new PersonActivity_(PersonActivity));
     }
 
     private static MemberRosterRecord Member(
@@ -583,5 +585,121 @@ public class SeatAuditorTests
             string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<UserDailyUsageRecord>>(
                 rows.Where(r => r.VendorId == vendorId && r.Date >= range.Start && r.Date <= range.End).ToList());
+    }
+
+    private sealed class PersonActivity_(List<UserActivityRecord> rows) : IUserActivityRepository
+    {
+        public Task<UserActivityReplaceResult> ReplaceDaysAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> fetchedDays, IEnumerable<UserActivityRecord> records,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<UserActivityReplaceResult> PlanReplaceDaysAsync(
+            string tenantId, Guid vendorId, IReadOnlyCollection<DateOnly> fetchedDays, IEnumerable<UserActivityRecord> records,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<UserActivityRecord>> GetAsync(
+            string tenantId, Guid vendorId, DateRange range, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<UserActivityRecord>>(
+                rows.Where(r => r.VendorId == vendorId && r.Date >= range.Start && r.Date <= range.End).ToList());
+    }
+
+    private static UserActivityRecord Act(Guid vendor, string userId, int daysAgo, string? email = null) => new()
+    {
+        TenantId = "t1", VendorId = vendor, Date = AsOf.AddDays(-daysAgo), UserId = userId, UserEmail = email, ChatMessages = 3,
+    };
+
+    [Fact]
+    public async Task AMemberActiveOnlyInVendorActivity_IsNotIdle()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "m1"), Member(Claude, "m2"));
+        w.Usage.Add(Use(Claude, "m2", 1, amount: 1m));
+        w.PersonActivity.Add(Act(Claude, "m1", 2));
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Empty(idle.IdleSeats);
+    }
+
+    [Fact]
+    public async Task AMemberActiveOnlyInSpend_IsNotIdle_AndNeitherSourceMeansIdle_AndBothIsNotIdle()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "spend"), Member(Claude, "both"), Member(Claude, "none"), Member(Claude, "act"));
+        w.Usage.Add(Use(Claude, "spend", 1, amount: 1m));
+        w.Usage.Add(Use(Claude, "both", 1, amount: 1m));
+        w.PersonActivity.Add(Act(Claude, "both", 1));
+        w.PersonActivity.Add(Act(Claude, "act", 1));
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Equal("none", Assert.Single(idle.IdleSeats).MemberId);
+    }
+
+    [Fact]
+    public async Task LastActiveBeforeTheWindow_ComesFromActivityRows_AndTheLatestOfEitherSourceWins()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "m1"), Member(Claude, "m2"), Member(Claude, "live"));
+        w.Usage.Add(Use(Claude, "live", 1, amount: 1m));
+        w.PersonActivity.Add(Act(Claude, "m1", 60));
+        w.Usage.Add(Use(Claude, "m2", 90, amount: 1m));
+        w.PersonActivity.Add(Act(Claude, "m2", 45));
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Equal(AsOf.AddDays(-60), idle.IdleSeats.Single(s => s.MemberId == "m1").LastActiveBeforeWindow);
+        Assert.Equal(AsOf.AddDays(-45), idle.IdleSeats.Single(s => s.MemberId == "m2").LastActiveBeforeWindow);
+    }
+
+    [Fact]
+    public async Task ActivityRowsMatchByEmail_WhenTheIdIsNotOnTheRoster()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "m1", email: "a@x.test"), Member(Claude, "m2"));
+        w.Usage.Add(Use(Claude, "m2", 1, amount: 1m));
+        w.PersonActivity.Add(Act(Claude, "other-id", 3, email: "A@X.test"));
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Empty(idle.IdleSeats);
+    }
+
+    [Fact]
+    public async Task ActivityRowsAloneMakeTheWindowAssessable()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "m1"), Member(Claude, "m2"));
+        w.PersonActivity.Add(Act(Claude, "m2", 1));
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.True(idle.Assessable);
+        Assert.Equal("m1", Assert.Single(idle.IdleSeats).MemberId);
+    }
+
+    [Fact]
+    public async Task ActivityStoredOnlyPartwayThroughTheWindow_CarriesTheCoverageCaveat()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "m1"), Member(Claude, "m2"));
+        w.PersonActivity.Add(Act(Claude, "m2", 5));   // nothing stored before 5 days ago, window is 30
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Contains("starts on", idle.Reason);
+    }
+
+    [Fact]
+    public async Task ActivityThatEndsEarly_CarriesTheLagCaveat()
+    {
+        var w = new World();
+        w.Rosters[Claude] = Roster(Member(Claude, "m1"), Member(Claude, "m2"));
+        w.PersonActivity.Add(Act(Claude, "m2", 29));
+        w.PersonActivity.Add(Act(Claude, "m2", 10));
+
+        var idle = Assert.Single((await w.Auditor(Claude).AuditAsync("t1", AsOf, 30, cancellationToken: TestContext.Current.CancellationToken)).Vendors).Idle;
+
+        Assert.Contains("ends on", idle.Reason);
     }
 }

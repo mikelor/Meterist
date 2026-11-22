@@ -123,14 +123,17 @@ public sealed class SeatAuditor
     private readonly IMemberRosterRepository _rosters;
     private readonly IActivitySummaryRepository _activity;
     private readonly IUserDailyUsageRepository _usage;
+    private readonly IUserActivityRepository? _userActivity;
 
     public SeatAuditor(
         IEnumerable<IVendorRosterSource> rosterSources,
         IVendorRateConfigRepository rates,
         IMemberRosterRepository rosters,
         IActivitySummaryRepository activity,
-        IUserDailyUsageRepository usage)
+        IUserDailyUsageRepository usage,
+        IUserActivityRepository? userActivity = null)
     {
+        _userActivity = userActivity;
         _rosterSources = rosterSources;
         _rates = rates;
         _rosters = rosters;
@@ -242,7 +245,18 @@ public sealed class SeatAuditor
 
         var history = await _usage.GetAsync(
             tenantId, vendor.Id, new DateRange(window.Start.AddDays(-HistoryBeforeWindowDays), asOf), cancellationToken).ConfigureAwait(false);
-        var people = history.Where(r => r.Attribution == UsageAttribution.Person && IsActive(r)).ToList();
+        var people = history
+            .Where(r => r.Attribution == UsageAttribution.Person && IsActive(r))
+            .Select(r => new Evidence(r.Date, r.UserId, r.UserEmail))
+            .ToList();
+
+        // Vendor-reported activity (Claude Enterprise): a row exists only for a person who did something that day, so any row
+        // counts, including a person who was busy and cost nothing on a seat plan.
+        IReadOnlyList<UserActivityRecord> activityRows = _userActivity is null
+            ? []
+            : await _userActivity.GetAsync(
+                tenantId, vendor.Id, new DateRange(window.Start.AddDays(-HistoryBeforeWindowDays), asOf), cancellationToken).ConfigureAwait(false);
+        people.AddRange(activityRows.Select(r => new Evidence(r.Date, r.UserId, r.UserEmail)));
 
         var inWindow = people.Where(r => r.Date >= window.Start && r.Date <= window.End).ToList();
 
@@ -266,7 +280,7 @@ public sealed class SeatAuditor
             .Where(g => g.Count() == 1)
             .ToDictionary(g => g.Key, g => g.Single());
 
-        MemberRosterRecord? Resolve(UserDailyUsageRecord row)
+        MemberRosterRecord? Resolve(Evidence row)
         {
             if (byId.TryGetValue(row.UserId, out var member))
             {
@@ -347,7 +361,7 @@ public sealed class SeatAuditor
 
         // And the other end: usage that stops well before the audit date says nothing about the days since, so anyone active
         // only in that stretch looks idle. Any stored row counts (a day with rows was pulled), not only active ones.
-        var lastStored = history.Max(r => r.Date);
+        var lastStored = history.Select(r => r.Date).Concat(activityRows.Select(r => r.Date)).Max();
         if (asOf.DayNumber - lastStored.DayNumber > AllowedUsageLagDays)
         {
             caveats.Add(
@@ -359,6 +373,9 @@ public sealed class SeatAuditor
             window, true, caveats.Count == 0 ? null : string.Join(" ", caveats),
             activeIds.Count, newMembers, notOnRoster.Count, ordered);
     }
+
+    // One dated sign of life for one person, from either spend rows or vendor-reported activity rows.
+    private sealed record Evidence(DateOnly Date, string UserId, string? UserEmail);
 
     // Spend, credits or requests above zero. Requests count because cost is zero by design on a seat-based plan.
     private static bool IsActive(UserDailyUsageRecord r) =>
