@@ -457,11 +457,14 @@ not adopted.
     files took 10 pages of up to 100; **912 files were downloaded one at a time in 615 s (about 0.67 s per file)**,
     giving 3,479 deduplicated events and 2,433 billing-line rows. That is the 12 minutes the issue reported; the
     cost is the number of requests.
-  - **After:** not yet measured. By the sequential rate, the default of 4 at a time should take roughly 150 s if the endpoint
-    scales (a guess), and `RecentDays=7` should read roughly a quarter of the files (the files are about 31 a day, so about
-    220), so about 150 s sequential or a minute or less in parallel. Paste the `COSTS cross-check: N file(s) in Ns` line from
-    a run with the defaults and one with `RecentDays=7`, and they go here, along with whether the rows and the
-    day-by-day comparison match the sequential run (the row counts above are what they must reproduce).
+  - **After, default of 4 at a time (measured 2026-11-22, same tenant and window as above):** the same **912 files in 143 s**
+    (142.6 s), **4.3 times faster** than the 615 s sequential run, with an identical result: the same 3,479 deduplicated events and
+    2,433 billing-line rows, the same four days where Daily Usage and `COSTS` disagree on credits, the same 15 days that
+    kept their higher stored usage, the same new day and the same per-user rows. No 429 or retry was logged, so four at a
+    time looks acceptable to the endpoint on this tenant, though only one run at this level has been made.
+  - **After, `RecentDays=7`:** not yet measured. The files are about 31 a day, so a week is roughly 220 files, which is about
+    35 s at four at a time. That figure is an estimate; the run will confirm it, and whether the older days' comparison
+    simply drops out of the output (it should: no disagreement warning for a day before the window).
   - Concurrency is a guess at what the endpoint tolerates (no rate limit is documented for the file download), so 4 is a
     conservative start, and the shared resilience handler still retries a 429 or 5xx.
 - **Daily Usage API — the source of record, IMPLEMENTED (2026-11).** `GET
