@@ -1,6 +1,7 @@
 # vNext design note: contract term, seat changes and seat projection
 
-Design note for issue #89 (vNext Design Sprint, low priority). **Nothing here changes today's behaviour and nothing is built.**
+Design note for issue #89 (vNext Design Sprint, low priority). The note itself changes nothing. **Status:** gap 3 (project the seat
+fee from the contract in force) is built as #101; everything else in this note is not built.
 It records what a review of the seat and contract model found, sizes each gap against the real code, and recommends which are worth
 building and in what order, so the design sprint can decide. Written 2026-11-22.
 
