@@ -117,6 +117,44 @@ public class ClaudeApiAnalyticsTests
             CreateRepository(blank).QueryCostRowsAsync(Key, OneDay, TestContext.Current.CancellationToken));
     }
 
+
+    [Theory]
+    [InlineData("""{ "starting_at": "2026-11-03T00:00:00Z", "group": {} }""")]                                // no cost object
+    [InlineData("""{ "starting_at": "2026-11-03T00:00:00Z", "group": {}, "cost": { "requests": 3 } }""")]      // no amount
+    [InlineData("""{ "starting_at": "2026-11-03T00:00:00Z", "group": {}, "cost": { "amount": "abc" } }""")]    // unreadable amount
+    [InlineData("""{ "starting_at": "2026-11-03T00:00:00Z", "group": {}, "cost": { "amount": "1,5" } }""")]    // thousands separator
+    [InlineData("""{ "starting_at": "not a date", "group": {}, "cost": { "amount": "100" } }""")]               // unreadable date
+    [InlineData("""{ "group": {}, "cost": { "amount": "100" } }""")]                                            // no date
+    public async Task Query_AMalformedRow_FailsTheWholePull_InsteadOfStoringALowerTotal(string badRow)
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, $$"""
+            { "data": [
+                { "starting_at": "2026-11-03T00:00:00Z", "group": {}, "cost": { "amount": "100" } },
+                {{badRow}}
+              ], "has_more": false, "next_page": null }
+            """);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateRepository(server).QueryCostRowsAsync(Key, OneDay, TestContext.Current.CancellationToken));
+
+        Assert.Contains("partial", ex.Message);
+        Assert.DoesNotContain(Key, ex.Message);
+    }
+
+    [Fact]
+    public async Task Query_AZeroAmountIsFine_ItIsDataNotAMissingField()
+    {
+        using var server = WireMockServer.Start();
+        Respond(server, """
+            { "data": [ { "starting_at": "2026-11-03T00:00:00Z", "group": {}, "cost": { "amount": "0.000000", "requests": 4 } } ],
+              "has_more": false, "next_page": null }
+            """);
+
+        var row = Assert.Single(await CreateRepository(server).QueryCostRowsAsync(Key, OneDay, TestContext.Current.CancellationToken));
+
+        Assert.Equal(0m, row[ClaudeApiCostRowFields.AmountUsd]);
+    }
     [Fact]
     public async Task Query_A404NamesTheFallbackSetting_AndNeverTheKey()
     {

@@ -142,12 +142,21 @@ public sealed class HttpClaudeApiAnalyticsCostRepository : IClaudeCostReportRepo
 
             foreach (var row in report.Data)
             {
+                // A row that cannot be read is an error, not a day to skip or a zero: the extractor would store the lower
+                // total over a correct one and report success. The message names no identifier from the row.
                 // DateOnly.TryParse rejects a full ISO datetime, so parse as a DateTime first and take the date.
                 if (row.StartingAt is null || !DateTime.TryParse(
                         row.StartingAt, CultureInfo.InvariantCulture,
                         DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var startingAtUtc))
                 {
-                    continue;
+                    throw new InvalidOperationException(
+                        "A Claude API Platform analytics cost row has a missing or unreadable starting_at; refusing to return a partial result.");
+                }
+
+                if (!TryParseAmountCentsToDollars(row.Cost?.Amount, out var amountUsd))
+                {
+                    throw new InvalidOperationException(
+                        "A Claude API Platform analytics cost row has a missing or unreadable cost amount; refusing to return a partial result.");
                 }
 
                 var actor = row.Group?.Actor;
@@ -155,7 +164,7 @@ public sealed class HttpClaudeApiAnalyticsCostRepository : IClaudeCostReportRepo
                 {
                     [ClaudeApiCostRowFields.RecordDate] = DateOnly.FromDateTime(startingAtUtc),
                     // "amount" is a decimal string in cents, so dividing by 100 is load-bearing.
-                    [ClaudeApiCostRowFields.AmountUsd] = ParseAmountCentsToDollars(row.Cost?.Amount),
+                    [ClaudeApiCostRowFields.AmountUsd] = amountUsd,
                     [ClaudeApiCostRowFields.WorkspaceId] = row.Group?.WorkspaceId,
                     [ClaudeApiCostRowFields.ApiKeyId] = row.Group?.ApiKeyId,
                     [ClaudeApiCostRowFields.Product] = row.Group?.Product,
@@ -231,8 +240,19 @@ public sealed class HttpClaudeApiAnalyticsCostRepository : IClaudeCostReportRepo
         response.EnsureSuccessStatusCode();
     }
 
-    private static decimal ParseAmountCentsToDollars(string? amount) =>
-        amount is null ? 0m : decimal.Parse(amount, NumberStyles.Number, CultureInfo.InvariantCulture) / 100m;
+    private static bool TryParseAmountCentsToDollars(string? amount, out decimal dollars)
+    {
+        // Sign and decimal point only: a thousands separator would read "1,5" as 15.
+        if (amount is not null
+            && decimal.TryParse(amount, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var cents))
+        {
+            dollars = cents / 100m;
+            return true;
+        }
+
+        dollars = 0m;
+        return false;
+    }
 
     private static string FormatTimestamp(DateTime utc) => utc.ToString("yyyy-MM-ddTHH:mm:ssZ");
 
