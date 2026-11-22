@@ -902,6 +902,54 @@ not adopted.
     adoption and seat metrics to a BigQuery table; quota is 5 calls per day
     per project and each export covers a rolling 30 days, so it must be called
     daily and accumulated, the same hazard as `COSTS`.
+    - **Spike #38 preparation (2026-11-22, from Google's docs; nothing run yet).** What the docs establish:
+      the call is `POST https://discoveryengine.googleapis.com/v1alpha/projects/{project}/locations/{location}/collections/{collection}/engines/{engine}/analytics:exportMetrics`
+      (host `us-discoveryengine.googleapis.com` for the US location), on an **engine**, not a project. The body is
+      `outputConfig.bigqueryDestination.{datasetId, tableId}` (both required) and an optional `startDate` (a `google.type.Date`,
+      UTC, inclusive; default 30 days before today; **not in the future and not older than 180 days**). There is no end date
+      and no metric selection. It returns a long-running operation (`.../engines/{engine}/operations/{id}`, polled with
+      `operations.get`; `done` then `error` or `response`). Scopes: `cloud-platform` or the Discovery Engine scopes. The caller
+      needs Discovery Engine Viewer. Quota is **5 calls a day per project and 25 per organisation**. Metrics refresh about every
+      6 hours. The dataset location follows the app location (global and US map to the US multi-region, EU to EU) and cannot be
+      changed after creation.
+    - **The issue's premise needs correcting.** The guide says an export covers "the past 30 days", but the reference lets
+      `startDate` reach back **180 days**, so a missed month of runs is not necessarily lost the way it is for the ChatGPT `COSTS`
+      export. Whether a 180-day export really returns 180 days is part of the spike.
+    - **Not documented, so not guessed:** the exported table's **columns and types** (the console's "Seats purchased",
+      "Seats claimed", daily/weekly/monthly active users are dashboard labels, and Google does not say the export uses them),
+      the date grain, whether a repeated export to the same table **overwrites, appends or fails** (the guide only says to use
+      a new table to keep earlier data), which identity writes the table and what role it needs, and the error on exceeding
+      the quota. The guide has the user create the dataset **and an empty table** first.
+    - **Runbook, to run with the tenant's agreement** (the export writes a table into the tenant's own BigQuery; one tenant first;
+      replace the placeholders):
+
+      ```
+      # 1. A throwaway dataset in the location that matches the app (global and us -> US)
+      bq --project_id=PROJECT_ID mk --dataset --location=US PROJECT_ID:meterist_adoption_probe
+      # 2. The empty table the guide says to create first (no schema)
+      bq --project_id=PROJECT_ID mk --table PROJECT_ID:meterist_adoption_probe.export_probe
+      # 3. Start an export of the default 30 days
+      curl -s -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" \
+        -H "X-Goog-User-Project: PROJECT_ID" \
+        -d '{"outputConfig":{"bigqueryDestination":{"datasetId":"meterist_adoption_probe","tableId":"export_probe"}}}' \
+        "https://discoveryengine.googleapis.com/v1alpha/projects/PROJECT_ID/locations/global/collections/default_collection/engines/ENGINE_ID/analytics:exportMetrics"
+      # 4. Poll the operation name it returns until "done": true (note error or response)
+      curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "X-Goog-User-Project: PROJECT_ID" \
+        "https://discoveryengine.googleapis.com/v1alpha/OPERATION_NAME"
+      # 5. Read the schema and shape (no person-level values needed)
+      bq --project_id=PROJECT_ID show --schema --format=prettyjson meterist_adoption_probe.export_probe
+      bq --project_id=PROJECT_ID query --use_legacy_sql=false "SELECT COUNT(*) AS n FROM `PROJECT_ID.meterist_adoption_probe.export_probe`"
+      # 6. Export the SAME table again and recount: does the count double (append), stay (overwrite) or the call fail?
+      # 7. Export with a startDate 90 days back (add "startDate":{"year":Y,"month":M,"day":D} to the body) into a NEW table
+      #    (create it empty first) and count its distinct days, to see whether more than 30 days come back
+      # 8. Clean up: bq rm -r -f PROJECT_ID:meterist_adoption_probe
+      ```
+
+      Find the ENGINE_ID in the Gemini Enterprise console (the app's id) or with
+      `gcloud alpha discovery-engine engines list` where available. Bring back: the **column names and types**, which column holds
+      the date and what its grain is, whether a figure for seats claimed and purchased and for active users is there and under
+      what names, the row count for 30 days, the **append or overwrite** answer, how many days a 90-day export returned, and
+      whether any column holds a person (an email or id). Please do not paste row values from a person-level column.
   - `userStores.userLicenses.list` (GA v1) enumerates per-user licence records
     filterable by `licenseAssignmentState` (`ASSIGNED`, `NO_LICENSE`,
     `NO_LICENSE_ATTEMPTED_LOGIN`); joined to the activity table it yields

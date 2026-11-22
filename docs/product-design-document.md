@@ -181,7 +181,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 
 ### Gemini Enterprise (epic #33)
 
-Sprint 4: 🔵 a spike on the user-activity log sink to BigQuery (#36, prepared, waiting on a client's agreement), ✅ the licence roster (#37, built from Google's reference, not yet run live), 🔵 adoption metrics
+Sprint 4: 🔵 a spike on the user-activity log sink to BigQuery (#36, prepared, waiting on a client's agreement), ✅ the licence roster (#37, built from Google's reference, not yet run live), 🔵 adoption metrics (#38, spike runbook prepared: the export's columns are undocumented, so typed storage waits for a real export)
 (#38) and an estimated per-user cost from activity share (#39). Per-user Gemini dollars will always be labelled estimated.
 
 ### Deferred by choice
