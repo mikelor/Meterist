@@ -9,7 +9,7 @@ building and in what order, so the design sprint can decide. Written 2026-11-22.
 | # | Gap | Size of the effect today | Recommendation |
 |---|---|---|---|
 | 3 | Projections lag a seat step | **Large and visible**: with a recent seat increase the seat part of every projection understates by 14 to 22% (worked example below) | **Build first.** Small, no schema change |
-| 1 | Contract term not stored | Tiny in dollars (0.02% over a term that spans a Feb 29); the real gap is no renewal reminder | Build only together with a renewal reminder, as part of 2 |
+| 1 | Contract term not stored | Tiny in dollars (about 0.02% over or under for a term that mixes leap and non-leap years); the real gap is no renewal reminder | Build only together with a renewal reminder, as part of 2 |
 | 2 | A seat change is a whole copied row | None in the numbers; `rates set` already makes it one command | Fold into 1 as a "contract" entity if and when 1 is wanted; not on its own |
 | 4 | Invoices are lumps, the model is an accrual | None in the numbers; it is a reconciliation convenience | Defer; build only if a client asks to tick invoices off |
 
@@ -53,7 +53,7 @@ start in July) drags the average down further. The cause is the method, not a bu
 - **A (recommended).** Project the seat fee from the rate in force on the report's last day: `SeatCount x Rate`, annualised by cadence
   (annual rate: as is; monthly rate: x 12), and trend only the usage part. The seat figure is then identical in Flat, Trend and Latest,
   which is honest: seats are a known contract amount, not a random series. A rate row with no `SeatCount`, no rate row (Gemini), or a
-  one-time cadence falls back to today's weekly projection, so nothing regresses.
+  one-time cadence falls back to today's weekly projection, so those cases are unchanged. Where the contract method applies, the figure does change by a small, explained amount (below).
 - B. Keep the weekly method and add a "current seats" row beside it. Cheaper but leaves a misleading headline number.
 - C. Do nothing and tell readers to use Latest week after a full week has passed. This is the status quo and is what the footnote could say.
 
@@ -61,20 +61,40 @@ start in July) drags the average down further. The cause is the method, not a bu
 seat part only). A renewal inside the projection horizon changes the picture, but without a stored term (gap 1) the projection simply
 assumes the current rate continues, which is what it does today.
 
+**An intentional change in the numbers, even when seats never change.** The weekly method annualises with 52 weeks, which is 364
+days, so a constant seat charge is projected as 364/365 of the annual price (364/366 in a leap year): a constant $1,200 a year projects
+to **$1,196.71** today (**$1,193.44** in a leap year), and the contract-based method would return **$1,200.00**, about 0.27% (0.55% in a
+leap year) higher. That is a correction of a small standing bias in the seat part, not a regression, and it should be said in the
+report footnote and the release notes. The usage part keeps the 52-week convention, so seat and usage are annualised on different bases
+afterwards; whether to move usage to 365 days as well is a separate, tiny decision.
+
 **To decide when building:** whether the report should say "seat fee projected from the contract in force on <date>" next to the figure,
-and whether a seat count that changed in the last N days is called out. Tests: a seat step mid-window, a renewal row, a monthly cadence,
-no `SeatCount`, a vendor with no rate rows, and equality with today's output when seats never change.
+and whether a seat count that changed in the last N days is called out.
+
+**Tests, with explicit expected values** (not "equal to today's output", which is false by the 364/365 factor above): a constant
+$1,200 annual rate projects to $1,200.00 in Flat, Trend and Latest alike (today: $1,196.71); the same in a leap year ($1,200.00, today
+$1,193.44); a seat step mid-window projects `new SeatCount x Rate` (the worked example above: 14 seats, not the 76.5 to 84 seat-day
+averages); a renewal row projects the renewed terms; a monthly cadence projects `SeatCount x Rate x 12`; a rate with no `SeatCount`, a
+one-time cadence, or a vendor with no rate rows (Gemini) falls back to the weekly method and matches today's output exactly.
 
 ## Gap 1: the contract term is not stored
 
-**Finding, confirmed.** The divisor is days in the calendar year of the accrual day, not the length of the term. It is exact for a term
-with no Feb 29, and off for one that spans it: a term from 2027-12-01 to 2028-11-30 accrues 31/365 + 335/366 = 1.000232 of the annual
-price, 0.023% over. A term that does not cross a leap day (for example 2025-12-01 to 2026-11-30) is exact. In dollars this is cents per
-thousands, so it is not worth a fix on its own.
+**Finding, confirmed.** The divisor is days in the calendar year of the accrual day, not the length of the term, so a term that mixes
+leap and non-leap calendar years does not accrue to exactly one annual price, whether or not it crosses a Feb 29. Both directions occur:
+
+| Term | Accrual factor | Error |
+|---|---|---|
+| 2025-12-01 to 2026-11-30 (no leap year) | 31/365 + 334/365 = 1.000000 | none |
+| 2028-01-01 to 2028-12-31 (one whole leap year) | 366/366 = 1.000000 | none |
+| 2027-12-01 to 2028-11-30 (spans Feb 29: 366 days, December at /365) | 31/365 + 335/366 = 1.000232 | +0.023% |
+| 2028-12-01 to 2029-11-30 (December falls in leap 2028, no Feb 29: 365 days, December at /366) | 31/366 + 334/365 = 0.999768 | -0.023% |
+
+It is exact only when every day of the term uses the same divisor as the term's length. In dollars the error is cents per thousand, so it
+is not worth a fix on its own.
 
 The real gap is that the model **does not know when the term ends.** Nothing warns that a renewal is coming or that the rate and seat count
 are about to change, and an open-ended row keeps accruing at the old rate past the term end until someone enters the renewal. That is
-operationally more important than the leap-day error, and it is where a contract entity pays off.
+operationally more important than the divisor error, and it is where a contract entity pays off.
 
 **Options.** (a) Add `TermStart` and `TermEnd` to the rate row (optional) and divide by the term's length; (b) a separate `Contract`
 entity that owns the term, with rate rows referencing it. (a) is a small migration; (b) is gap 2.
@@ -125,7 +145,7 @@ add date rather than a daily accrual).
 ## Proposed build issues (not filed; for the design sprint to approve)
 
 1. **Project the seat fee from the contract in force** (gap 3, option A). Seat part from `SeatCount x Rate` at the report's last day,
-   annualised by cadence; trend only usage; fall back to the weekly method where there is no usable rate. Tests as listed above.
+   annualised by cadence; trend only usage; fall back to the weekly method where there is no usable rate. Tests with the explicit expected values above (a constant $1,200 a year projects to $1,200.00, not today's $1,196.71), and the intentional change called out in the footnote.
    Small. Recommended next.
 2. **Renewal reminder with a stored contract term** (gaps 1 and 2 together, if wanted). Term start and end on the contract, a reminder in
    `audit` and the scheduled run, accrual divided by the term length. Medium; a migration.
