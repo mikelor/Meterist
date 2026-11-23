@@ -6,16 +6,11 @@ implementation not yet started.
 
 ## 1. Overview
 
-Meterist is a .NET 11 C# application that replaces a manual Excel workbook
-(`AI_Vendor_Weekly_Spend_Model.xlsx`) currently used to track weekly AI
-vendor spend by hand. It pulls spend data programmatically from each
-vendor's API instead of requiring a weekly manual login + CSV export per
-vendor, and is built multi-tenant from day one to support a consulting
-practice spanning multiple client organizations, not just the operator's own
-org (Ecosync Universal).
-
-This is a **full replacement**, not a companion tool — the spreadsheet
-workflow is expected to go away once this is live.
+Meterist is a .NET 11 C# application that tracks AI vendor spend. It pulls
+spend data programmatically from each vendor's API instead of requiring a
+weekly manual login + CSV export per vendor, and is built multi-tenant from
+day one to support a consulting practice spanning multiple client
+organizations, not just the operator's own org (Ecosync Universal).
 
 ## 2. Problem Statement
 
@@ -43,8 +38,8 @@ programmatic audit trail or historical query capability.
 - Model vendor pricing/rate data as versioned, updatable configuration,
   since billing structures have already changed mid-project for two of the
   four vendors.
-- Preserve the analytical value of the existing spreadsheet (weekly
-  tracking, annual projection scenarios) without inheriting its structure.
+- Provide weekly tracking and annual projection scenarios on top of a
+  daily-grain data model.
 - Start with a CLI, but build the core logic so a dashboard can be layered
   on top later without a rewrite.
 - **Prefer each vendor's current API over a legacy one** wherever the
@@ -63,9 +58,6 @@ programmatic audit trail or historical query capability.
   consultant/operator is the only user of the tool itself; clients receive
   reports/output, they don't log in (revisit if this assumption breaks —
   see Open Questions).
-- Not replicating every spreadsheet tab pixel-for-pixel — replicating the
-  *analytical value* (weekly trend, annual projection, vendor breakdown),
-  not the exact worksheet layout.
 
 ## 5. Users / Personas
 
@@ -105,12 +97,12 @@ programmatic audit trail or historical query capability.
    weekly/monthly/annual views are query-time aggregations over it.
 5. **CLI interface** to trigger extraction and view aggregated
    reports/exports.
-6. **Historical data continuity.** Ecosync's spreadsheet-tracked weeks
-   (beginning Jun 24, 2026) should be importable/reconcilable so trend data
-   isn't lost in the cutover.
-7. **Annual projection scenarios**, carrying over the spreadsheet's three
-   budgeting approaches (flat, trend-adjusted, latest-week-annualized) as
-   logic against the new normalized data model.
+6. **Historical backfill.** Extraction takes a date range, so any history a
+   vendor still retains can be loaded in one run; history a vendor no longer
+   retains cannot be recovered (retention per vendor is in
+   `vendor-integration-reference.md`).
+7. **Annual projection scenarios** (flat, trend-adjusted,
+   latest-week-annualized) computed over the normalized data model.
 
 ## 7. Backlog: what is delivered, what is open, what is deferred
 
@@ -163,7 +155,7 @@ Status key: ✅ delivered · 🟡 partly delivered · 🔵 open (issue number wh
 | Automated report generation | ✅ | `report generate` builds the Client Spend & Benchmark Report from stored data: weekly buckets, the three projections and the vendor ledger are computed in code (see [`client-report-generation.md`](client-report-generation.md)). ✅ Leading partial week for every vendor (#69). ✅ A diff of each vendor week against the previous report's manifest, with decreases marked and a non-zero exit on request (#85). |
 | Cross-tenant benchmarking | 🟡 | The report compares tenants side by side. A deeper per-seat comparison across tenants needs more tenants with data. |
 | Per-employee spend comparison | ✅ #15 to #19, #32 | Storage, the `users usage` query, and the report's people sections: active users and seat utilization, top consumers, usage by person (reconciled to each vendor's aggregate) and idle seats. |
-| `meterist audit` reconciliation command | 🟡 | `audit coverage` and `audit gemini-breakdown` exist. 🔵 Not built, no issue: an optional diff against an exported CSV or spreadsheet baseline. |
+| `meterist audit` reconciliation command | 🟡 | `audit coverage` and `audit gemini-breakdown` exist. 🔵 Not built, no issue: an optional diff against an exported CSV baseline. |
 | ChatGPT first-week and source footnotes in the report | ✅ | Part of Sprint 1. |
 
 ### Seats, rosters, active users and spend caps (epic #27)
@@ -193,7 +185,7 @@ Sprint 4: 🔵 a spike on the user-activity log sink to BigQuery (#36, prepared,
 | **Client-facing login** | v1 is operator-only; clients receive output. Direction if needed: Entra ID via Microsoft.Identity.Web, not Duende (see [`architecture.md`](architecture.md) §12). | A web dashboard, and a per-tenant access-control design |
 | **GitHub Copilot integration** | Deferred 2026-07-21: a GA dollar API exists and the adapter would be like the others, but no tenant has confirmed spend on it. | A confirmed tenant need |
 | **Microsoft 365 Copilot integration** | Deferred 2026-07-21: needs an Azure Cost Management connector type, and the flat seat fee has no API. | A confirmed tenant need, and that connector |
-| **xlsx export bridge** | An optional escape hatch for the familiar spreadsheet view, generated *from* the data model rather than being its source. | Stable data model |
+| **xlsx export bridge** | An optional export of the data to a spreadsheet file for anyone who wants one, generated *from* the data model rather than being its source. | Stable data model |
 
 ### Follow-ups already filed for Sprint 5
 
@@ -208,9 +200,9 @@ API and a console export (#71), and revisit assumptions that rest on data not ye
   code changes.
 - A vendor pricing change (e.g. the confirmed Sonnet 5 rate step-up on Sep 1,
   2026) requires a config update, not a code deploy.
-- Weekly aggregation output matches the spreadsheet's historical numbers
-  within an agreed tolerance, for the overlapping weeks, to validate the
-  cutover before the spreadsheet is retired.
+- Weekly aggregation output reconciles to each vendor's own console or
+  invoice figures within an agreed tolerance, for at least one billing cycle
+  per vendor.
 
 ## 9. Open Questions
 

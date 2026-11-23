@@ -2,22 +2,23 @@
 
 ## Project Goal
 
-Build a .NET 10 C# application that programmatically extracts weekly spend data
-from four AI vendor platforms (Claude, Claude API Platform, ChatGPT Enterprise,
-Gemini Enterprise), **replacing** the manual CSV-export workflow and companion
-Excel workbook (`AI_Vendor_Weekly_Spend_Model.xlsx`) currently used to track this.
+Build and maintain a .NET 11 C# application (Meterist) that programmatically
+extracts spend data from four AI vendor platforms (Claude, Claude API Platform,
+ChatGPT Enterprise, Gemini Enterprise), so spend tracking never depends on
+manual console exports.
 
-This session is a fresh start — there is no existing code yet, and this
-application is **not currently connected** to any Claude Code session. Treat
-this file as onboarding context, not a description of working code.
+The application is built and in use: all four vendor adapters, the database,
+reporting and scheduled extraction exist (see the Sprint 1 status item near the
+end of this file, `README.md` and `docs/`). Treat this file as onboarding
+context; the docs carry the detail and are more current for anything
+vendor-technical.
 
 ## Background
 
 The user is an IT/systems administrator who manages multiple AI vendor
 platforms, and also administers AI vendor spend tracking for **multiple client
 organizations** as part of a consulting practice. See `README.md` in this repo
-for the full breakdown of the spreadsheet's current structure, data sources,
-and known limitations — read that first.
+for an overview of the tool and a map of the docs — read that first.
 
 ## Project Docs
 
@@ -44,9 +45,9 @@ detail than this file for anything vendor-technical:
 
 ## Confirmed Requirements
 
-1. **Full spreadsheet replacement.** This is not a companion tool to the xlsx —
-   it replaces it. Design accordingly (don't assume the spreadsheet stays in
-   the loop long-term).
+1. **Self-contained.** Extraction, storage, aggregation, projections and
+   reporting all live in Meterist. Design accordingly: don't assume any
+   external file or manual step stays in the loop.
 2. **Multi-tenant.** The application must support multiple customer
    organizations, each with their own vendor accounts, credentials, and spend
    data. The user administers this across multiple clients as a consultant and
@@ -227,24 +228,21 @@ expected behavior, not a data gap to investigate.
 8. Revisit CLI vs. dashboard sequencing once the core library/service layer
    is in place — the interface should be a thin layer on top, not something
    the core logic depends on.
-9. ~~Reconcile against the real spreadsheet it replaces~~ — **done
+9. ~~Reconcile the reporting against an independent reference~~ — **done
    2026-08-05**: built weekly-spend and annual-projection reporting sections,
-   then compared them line-by-line against a live copy of
-   `AI_Vendor_Weekly_Spend_Model.xlsx`. Validated the core premise both ways —
-   caught two real bugs in the spreadsheet (an off-by-one-row `SUM` formula
-   in its Summary tab; a `TREND(...,26.5)` formula that silently extrapolates
-   a full year of unmoderated growth instead of projecting one week ahead) —
-   but also exposed gaps in Meterist itself: every reconciliation-report
-   number was hand-computed from ad-hoc SQL scripts and manually edited into
-   HTML, the same category of risk (manual arithmetic, human transcription)
-   this project exists to remove from the vendor side. Reprioritized
+   then compared them line-by-line against an independent reference
+   calculation. That exposed gaps in Meterist itself: every
+   reconciliation-report number was hand-computed from ad-hoc SQL scripts and
+   manually edited into HTML, the same category of risk (manual arithmetic,
+   human transcription) this project exists to remove from the vendor side.
+   Reprioritized
    `docs/product-design-document.md` §7 accordingly — leading items now:
    anomalous-period flagging (a stored reason code for "don't trend this
    week," e.g. retention-clamped or credit-grant-affected), a ChatGPT
    credit-grant manual config (unconfirmed day/amount estimates recorded in
    `docs/vendor-integration-reference.md`'s ChatGPT Enterprise section),
    automated report generation, the already-planned `meterist audit`
-   command (now scoped to optionally diff against a spreadsheet baseline
+   command (now scoped to optionally diff against an exported CSV baseline
    too), seat-count drift detection, and CLI support for backdating rates.
 10. ~~CLI support for backdating rates~~ — **done 2026-08-06**. The backlog
     item's premise didn't hold up on inspection: `rates set` already had an
