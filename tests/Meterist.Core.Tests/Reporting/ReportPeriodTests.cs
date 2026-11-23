@@ -178,6 +178,29 @@ public class ReportPeriodTests
         Assert.DoesNotContain("Wednesday", table);
     }
 
+    [Theory]
+    [InlineData(AggregationPeriod.Month, "a month with fewer days")]
+    [InlineData(AggregationPeriod.Quarter, "a quarter with fewer days")]
+    [InlineData(AggregationPeriod.Year, "a year with fewer days")]
+    public void ByAMonthQuarterOrYear_ANoteExplainsWhyAShorterPeriodShowsALowerSeatFigure(AggregationPeriod aggregation, string phrase)
+    {
+        var html = Render(aggregation, Claude());
+
+        var table = SpendTable(html);
+        Assert.Contains("Seat charges are accrued daily", table);
+        Assert.Contains("divided by the days in the year", table);
+        Assert.Contains(phrase, table);
+        Assert.Contains("each full month shows the same figure", table);
+    }
+
+    [Fact]
+    public void ByWeek_ThereIsNoSeatAccrualNote()
+    {
+        var html = Render(AggregationPeriod.Week, Claude());
+
+        Assert.DoesNotContain("Seat charges are accrued daily", SpendTable(html));
+    }
+
     [Fact]
     public void ByMonth_AMonthWithNoRecord_IsADash_NotZero()
     {

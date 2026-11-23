@@ -44,6 +44,9 @@ dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --
   most points to average and trend over (a trend over five monthly points means little, and a year has none), and so the
   projection figures are identical across `--period` values. The manifest and the report-to-report comparison also stay
   weekly, so a monthly report can be compared with a weekly one. A footnote says so.
+- Seat charges are accrued daily, and a note under the table says so. An annual seat charge is its annual price divided by
+  the days in the year, so a shorter period shows a slightly lower seat figure (a 30-day month against a 31-day month); a
+  monthly seat charge is its monthly price divided by the days in that month, so every full month shows the same figure.
 - A year column is a single partial column until a full calendar year is covered.
 - An unknown value is rejected with a message naming the four choices.
 

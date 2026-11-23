@@ -292,7 +292,8 @@ public static class ClientBenchmarkReportRenderer
             html.Append("        </tbody>\n      </table>\n    </div>\n");
             html.Append(aggregation == AggregationPeriod.Week
                 ? "    <p class=\"small-note\">*Partial week — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals, but left out of the projections.</p>\n\n"
-                : $"    <p class=\"small-note\">*Partial {noun} — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals.</p>\n\n");
+                : $"    <p class=\"small-note\">*Partial {noun} — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals.</p>\n"
+                  + $"    <p class=\"small-note\">Seat charges are accrued daily. An annual seat charge is its annual price divided by the days in the year, so a {noun} with fewer days shows a slightly lower seat figure (for example, a 30-day month against a 31-day month). A monthly seat charge is its monthly price divided by the days in that month, so each full month shows the same figure.</p>\n\n");
         }
 
         html.Append("  </section>\n\n");
