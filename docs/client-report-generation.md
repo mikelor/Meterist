@@ -78,7 +78,7 @@ APIs. Treat it exactly like `env/`:
 
 The current version is the "Client Spend & Benchmark Report" — insights #1
 (TCO rollup), #2 (cross-tenant benchmarking), #3 (concentration risk), and #9
-(audit/reconciliation status) from `docs/project-status-summary.md` §3,
+(audit/reconciliation status) from `docs/project-status-summary.md` §2,
 bundled into one page:
 
 1. **Masthead** — title, tracked date range, tenants/vendors covered, a

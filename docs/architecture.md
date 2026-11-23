@@ -122,8 +122,8 @@ than this section's conceptual view, see
 
 Stakeholders confirmed a need for timespan-based extraction (e.g. "backfill
 the last 4 months") rather than one-week-at-a-time, so **daily is the
-canonical stored grain**. Weekly, monthly, and annual views (Annual
-Projection, the spreadsheet's existing convention) are query-time
+canonical stored grain**. Weekly, monthly, and annual views (including the annual
+projection) are query-time
 aggregations over daily records, not a separately stored table. Overlapping
 extraction timespans need no special handling: the natural key
 `(TenantId, VendorId, Date)` means re-extracting an already-stored day is
@@ -403,10 +403,8 @@ option that doesn't need bolting-on later.
   Requires discipline now: avoid SQLite-specific type-affinity behavior
   (particularly around decimals and dates) so that later migration is a
   provider swap, not a rewrite.
-- **CSV/xlsx stays a future export view** generated from this database (the
-  "xlsx export bridge" backlog item in the PRD), not the primary store —
-  satisfies anyone still wanting a familiar spreadsheet without
-  compromising the "full replacement" goal.
+- **CSV/xlsx stays a possible future export view** generated from this database
+  (the "xlsx export bridge" backlog item in the PRD), not the primary store.
 
 Regardless of backend, the aggregation engine (§2) depends on a repository
 abstraction, not a concrete store, so this decision doesn't leak into

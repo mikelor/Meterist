@@ -8,7 +8,7 @@ for what's in scope for v1 vs. deferred, see
 ## Overview
 
 Meterist extracts AI vendor spend data programmatically and stores it
-locally, replacing the manual weekly CSV-export/spreadsheet workflow. It's
+locally, so spend no longer depends on manual weekly console exports. It's
 multi-tenant — each client organization ("tenant") has its own credentials
 and data — and runs as a CLI you operate from a terminal.
 
