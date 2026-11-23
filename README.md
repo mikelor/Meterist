@@ -101,6 +101,6 @@ See [`docs/client-report-generation.md`](docs/client-report-generation.md).
 - [`docs/product-design-document.md`](docs/product-design-document.md): scope, backlog and open questions
 - [`docs/vnext-contract-model.md`](docs/vnext-contract-model.md): design note on contract terms and seat changes (partly built)
 - [`docs/migration.md`](docs/migration.md): moving Meterist to another machine
-- [`docs/project-status-summary.md`](docs/project-status-summary.md): status recap and insight roadmap
+- [`docs/project-status-summary.md`](docs/project-status-summary.md): status recap, open questions and next steps
 
 Work is tracked in GitHub issues and milestones.
