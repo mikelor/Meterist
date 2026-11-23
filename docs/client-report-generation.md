@@ -133,7 +133,17 @@ bundled into one page:
    prorated from the billing export) the seat part is projected from the weekly
    series as before. This also removes a small standing bias: weeks × 52 is 364
    days, so a constant annual charge used to project at 364/365 of its price. The
-   footnote names the vendors it applied to.
+   footnote names the vendors it applied to. **Quiet weeks count as zero for a
+   usage-priced vendor:** Claude API Platform stores nothing on a day without
+   usage, so a week with no record at all is a week of no usage. Each such week
+   that lies fully inside the report period is included at $0 in the three
+   scenarios (`ProjectionEligibility.ProjectionWeeks`), so a vendor whose usage
+   has stopped does not keep projecting its earlier busy weeks. A leading or
+   trailing partial week is still left out, empty or not; a vendor with no record
+   in the whole period still shows dashes; seat-priced vendors are unchanged (a
+   missing day is a gap that `audit coverage` flags). The weekly table and the
+   manifest still show only weeks with a record. The Trend-adjusted figure is
+   floored at $0, since a falling series can otherwise fit a negative projection.
 9. **Audit & reconciliation status** — per vendor, how the numbers were
    verified (currently: manual comparison against the vendor's own console
    at build time, not yet automated) and a forward-looking note on the

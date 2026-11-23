@@ -52,7 +52,9 @@ public static class ProjectionCalculator
 
         var flat = completeWeekValues.Average() * WeeksPerYear;
         var latestWeek = completeWeekValues[^1] * WeeksPerYear;
-        var trendAdjusted = ProjectNextViaOlsRegression(completeWeekValues) * WeeksPerYear;
+        // A falling series (usage that has stopped) can fit a line that crosses zero; spend cannot be negative, so the
+        // trend is floored at $0 rather than reported as a negative projection.
+        var trendAdjusted = Math.Max(0m, ProjectNextViaOlsRegression(completeWeekValues) * WeeksPerYear);
 
         return new Projection(flat, trendAdjusted, latestWeek);
     }

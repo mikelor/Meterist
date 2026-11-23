@@ -29,6 +29,56 @@ public static class ProjectionEligibility
     public static bool IsPartial(WeeklyTotal week, DateRange period) =>
         IsLeadingPartial(week, period) || IsTrailingPartial(week, period);
 
+    /// <summary>
+    /// The weeks that feed a vendor's projections, in order. A vendor that expects a record every day (the seat-priced
+    /// ones) just contributes its eligible weeks: a missing day is a gap that <c>audit coverage</c> flags. A usage-priced
+    /// vendor stores nothing on a day without usage, so a week with no record at all is real: zero usage. Each such week
+    /// that lies fully inside the period is added as a $0 week, so Flat, Trend-adjusted and Latest week see the quiet
+    /// stretch instead of averaging over only the active weeks. A vendor with no record in the period gets no weeks at
+    /// all, so it keeps showing no projection rather than a $0 one. The weekly table and the manifest are not touched.
+    /// </summary>
+    public static IReadOnlyList<WeeklyTotal> ProjectionWeeks(
+        IReadOnlyList<WeeklyTotal> weeks, VendorIdentity vendor, DateOnly anchor, DateRange period)
+    {
+        var eligible = weeks.Where(w => FeedsProjection(w, period)).OrderBy(w => w.WeekIndex).ToList();
+        if (vendor.ExpectsRecordEveryDay || weeks.Count == 0)
+        {
+            return eligible;
+        }
+
+        var byIndex = eligible.ToDictionary(w => w.WeekIndex);
+        var recorded = weeks.Select(w => w.WeekIndex).ToHashSet();
+        var result = new List<WeeklyTotal>();
+        for (var index = 0; ; index++)
+        {
+            var start = anchor.AddDays(index * 7);
+            var end = start.AddDays(6);
+            if (end > period.End)
+            {
+                break;
+            }
+
+            if (start < period.Start)
+            {
+                continue;   // a leading partial week is left out, empty or not
+            }
+
+            if (byIndex.TryGetValue(index, out var week))
+            {
+                result.Add(week);
+            }
+            else if (!recorded.Contains(index))
+            {
+                result.Add(new WeeklyTotal(index, start, end, 0m, 0m, 0m, 0, false));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>True for a week that <see cref="ProjectionWeeks"/> added because the vendor stored nothing in it.</summary>
+    public static bool IsFilledEmptyWeek(WeeklyTotal week) => week.DaysPresent == 0;
+
     /// <summary>True when the week may feed a projection: not flagged for missing data, and not cut short by the report's edges.</summary>
     public static bool FeedsProjection(WeeklyTotal week, DateRange period) =>
         !week.ExcludeFromProjection && !IsPartial(week, period);

@@ -316,9 +316,8 @@ public static class ClientBenchmarkReportRenderer
             foreach (var vendor in VendorCatalog.All)
             {
                 var vendorData = tenant.Vendors.Single(v => v.Vendor.Id == vendor.Id);
-                var completeWeeks = vendorData.Weeks
-                    .Where(w => ProjectionEligibility.FeedsProjection(w, data.Period))
-                    .OrderBy(w => w.WeekIndex)
+                var completeWeeks = ProjectionEligibility
+                    .ProjectionWeeks(vendorData.Weeks, vendorData.Vendor, data.WeekAnchor, data.Period)
                     .ToList();
 
                 // The seat part is a known contract amount, so it comes from the rate in force on the last day; only
@@ -480,6 +479,7 @@ public static class ClientBenchmarkReportRenderer
 
         AppendPartialWeekFootnote(html, data);
         AppendSeatContractFootnote(html, data);
+        AppendEmptyWeekFootnote(html, data);
         AppendChatGptFootnotes(html, data);
 
         html.Append("""
@@ -489,6 +489,38 @@ public static class ClientBenchmarkReportRenderer
               </footer>
 
             """);
+    }
+
+    // A usage-priced vendor stores nothing on a day without usage, so its quiet weeks have no record. The projections count
+    // each such week inside the report period as zero; say so, with how many, so a lower figure is not a surprise.
+    private static void AppendEmptyWeekFootnote(StringBuilder html, ReportData data)
+    {
+        var parts = new List<string>();
+        foreach (var tenant in data.Tenants)
+        {
+            foreach (var vendor in tenant.Vendors)
+            {
+                var filled = ProjectionEligibility
+                    .ProjectionWeeks(vendor.Weeks, vendor.Vendor, data.WeekAnchor, data.Period)
+                    .Count(ProjectionEligibility.IsFilledEmptyWeek);
+                if (filled > 0)
+                {
+                    parts.Add($"{Encode(tenant.TenantId)}: {Encode(vendor.Vendor.DisplayName)} ({filled} {(filled == 1 ? "week" : "weeks")})");
+                }
+            }
+        }
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        html.Append(
+            "      <li><b>Weeks with no usage count as zero in the projections.</b> A usage-priced vendor stores nothing on a day "
+            + "without usage, so a week with no record at all is a week of no usage. Each such week that lies fully inside the "
+            + "report period is included at $0 in the Flat, Trend-adjusted and Latest-week figures, so a vendor whose usage has "
+            + "stopped does not keep projecting its earlier busy weeks. The weekly table above shows only weeks with a record. "
+            + $"Applies to — {string.Join("; ", parts)}.</li>\n");
     }
 
     // Says which projections take their seat part from the contract in force on the report's last day, and why that is not
