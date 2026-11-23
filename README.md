@@ -50,7 +50,7 @@ dotnet run --project src/Meterist.Cli -- rates set ...            # seat rate, a
 dotnet run --project src/Meterist.Cli -- extract --tenant <id> --from 2026-07-01 --to 2026-07-31 --dry-run
 dotnet run --project src/Meterist.Cli -- extract --tenant <id> --from 2026-07-01 --to 2026-07-31
 dotnet run --project src/Meterist.Cli -- audit coverage --tenant <id> --from 2026-07-01 --to 2026-07-31
-dotnet run --project src/Meterist.Cli -- report generate --tenant <id> --from 2026-07-01 --to 2026-07-31 --out artifacts/<name>.html
+dotnet run --project src/Meterist.Cli -- report generate --tenant <id> --from 2026-07-01 --to 2026-07-31 --out artifacts/<name>.html   # add --period month|quarter|year to group the spend table
 ```
 
 `--dry-run` queries the vendors and shows what would change without writing anything. `--tenant` is any string

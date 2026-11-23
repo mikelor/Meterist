@@ -16,6 +16,8 @@ dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --
 - `--from` / `--to` are inclusive. `--out` defaults to
   `artifacts/client-spend-benchmark-report.html`, and the folder is created if
   needed. Use a dated file name so earlier reports are kept for comparison.
+- `--period week|month|quarter|year` (default `week`) chooses what the spend table is grouped by; see
+  [Grouping the spend table](#grouping-the-spend-table).
 - **`report generate` only reads the database; it never calls a vendor.** Run
   `extract` first (see the [user guide](user-guide.md)) or the report reflects
   whatever was last stored. Before trusting a report, run
@@ -25,6 +27,25 @@ dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --
   and the HTML is rendered by `ClientBenchmarkReportRenderer`. All figures,
   including the weekly buckets and projections, are computed in code, not by
   hand.
+
+### Grouping the spend table
+
+With months of data the weekly table gets wide, so `--period` groups the **spend table** (section 7 below) by calendar
+**month**, **quarter** (Jan–Mar, Apr–Jun, Jul–Sep, Oct–Dec) or **year** instead of by week:
+
+```powershell
+dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --from 2026-07-01 --to 2026-11-21 --period month --out artifacts/<name>.html
+```
+
+- Each column is the sum of the stored days in that calendar period, and the section heading and total row take the period's
+  name ("Monthly spend by vendor", "Total monthly spend"). A column cut short by where the report starts or ends is marked
+  with an asterisk. A column with no stored record for a vendor shows a dash, not $0, as an empty week does.
+- **Only the spend table changes.** The annualized projections stay weekly whatever the period is, because a week gives the
+  most points to average and trend over (a trend over five monthly points means little, and a year has none), and so the
+  projection figures are identical across `--period` values. The manifest and the report-to-report comparison also stay
+  weekly, so a monthly report can be compared with a weekly one. A footnote says so.
+- A year column is a single partial column until a full calendar year is covered.
+- An unknown value is rejected with a message naming the four choices.
 
 ### Comparing with the previous report
 
@@ -112,6 +133,8 @@ bundled into one page:
 7. **Weekly spend by vendor** — per tenant, Wednesday-to-Tuesday weekly
    buckets with the seat-fee and usage split. A week cut short by where the report starts or ends (a short first
    week, or a trailing week that hasn't fully elapsed) is marked with an asterisk and explained beneath the table.
+   With `--period month`, `quarter` or `year` the table is grouped by that calendar period instead (see
+   [Grouping the spend table](#grouping-the-spend-table)).
 8. **Annualized cost projection** — per tenant and vendor, three scenarios
    (flat, trend-adjusted, latest-week annualized) computed only from weeks
    that lie **fully inside the report period**, the same rule for every vendor

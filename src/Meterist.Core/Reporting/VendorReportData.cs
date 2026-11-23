@@ -15,6 +15,12 @@ public sealed class VendorReportData
     public required IReadOnlyList<VendorRateConfig> CurrentRates { get; init; }
 
     /// <summary>
+    /// The vendor's spend grouped by the report's <see cref="ReportData.Aggregation"/> when that is not the week (for the
+    /// week the table is built from <see cref="Weeks"/>). Only periods with at least one stored record are listed.
+    /// </summary>
+    public IReadOnlyList<PeriodTotal> DisplayPeriods { get; init; } = [];
+
+    /// <summary>
     /// The seat rate in force on the report's last day (the "seat" rate row), or null when none is configured. The
     /// projection takes the seat part from this contract rather than from past weekly seat fees. Null for a vendor
     /// with no rate rows (Gemini Enterprise, whose seat fee arrives prorated from the billing export).

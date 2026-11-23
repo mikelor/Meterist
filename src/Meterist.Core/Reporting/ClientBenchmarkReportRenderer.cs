@@ -39,7 +39,7 @@ public static class ClientBenchmarkReportRenderer
         RenderVendorLedger(html, data);
         RenderConcentrationRisk(html, data);
         RenderRateCard(html, data);
-        RenderWeeklySpend(html, data, totalWeekCount);
+        RenderWeeklySpend(html, data);
         RenderSpendByKind(html, data);
         UserSectionsRenderer.Render(html, data);
         RenderProjections(html, data, totalWeekCount);
@@ -196,28 +196,45 @@ public static class ClientBenchmarkReportRenderer
         html.Append("        </tbody>\n      </table>\n    </div>\n  </section>\n\n");
     }
 
-    private static void RenderWeeklySpend(StringBuilder html, ReportData data, int totalWeekCount)
+    // One vendor's spend in the table's periods. For the week it is the weekly buckets the projections also use; for a month,
+    // quarter or year it is the grouping the aggregator made from the daily records.
+    private static IReadOnlyList<PeriodTotal> TablePeriods(VendorReportData vendor, ReportData data) =>
+        data.Aggregation == AggregationPeriod.Week
+            ? vendor.Weeks.Select(w => new PeriodTotal(w.WeekIndex, w.WeekStart, w.WeekEnd, w.SeatFee, w.UsageOrOverage, w.GrossSpend, w.DaysPresent)).ToList()
+            : vendor.DisplayPeriods;
+
+    private static void RenderWeeklySpend(StringBuilder html, ReportData data)
     {
-        html.Append("""
+        var aggregation = data.Aggregation;
+        var columns = PeriodBuckets.Columns(aggregation, data.Period, data.WeekAnchor);
+        var columnCount = columns.Count;
+        var adjective = PeriodBuckets.Adjective(aggregation);
+        var noun = PeriodBuckets.Noun(aggregation);
+
+        var intro = aggregation == AggregationPeriod.Week
+            ? "Weeks run Wednesday–Tuesday. A week cut short by where the report starts or ends is marked * and, like a ChatGPT Enterprise week with missing days, is left out of the projections below (\"A ChatGPT Enterprise week with missing days is excluded from the trend projections below\"); the footnote says which weeks, if any."
+            : $"Each column is a calendar {noun}. A {noun} cut short by where the report starts or ends is marked *. The projections below are weekly whatever period this table uses, so they do not change with it; the footnote says which weeks they leave out, if any.";
+
+        html.Append($"""
               <section>
                 <div class="eyebrow">Trend &amp; cadence</div>
-                <h2>Weekly spend by vendor</h2>
-                <p class="audit-intro">Weeks run Wednesday–Tuesday. A week cut short by where the report starts or ends is marked * and, like a ChatGPT Enterprise week with missing days, is left out of the projections below ("A ChatGPT Enterprise week with missing days is excluded from the trend projections below"); the footnote says which weeks, if any.</p>
+                <h2>{adjective} spend by vendor</h2>
+                <p class="audit-intro">{intro}</p>
 
             """);
 
         foreach (var tenant in data.Tenants)
         {
-            // Column widths always sum to exactly 100% regardless of totalWeekCount --
+            // Column widths always sum to exactly 100% regardless of columnCount --
             // table-layout:fixed columns summing over 100% render inconsistently across
             // browsers (some silently rescale every column down, which can visually
             // collapse narrow, non-wrapping dollar-figure cells into their neighbors).
             const double vendorColumnWidth = 12.0;
             const double totalColumnWidth = 16.0;
-            var weekColumnWidth = (100.0 - vendorColumnWidth - totalColumnWidth) / totalWeekCount;
+            var weekColumnWidth = (100.0 - vendorColumnWidth - totalColumnWidth) / columnCount;
 
             // Percentages alone aren't enough: table-layout:fixed respects them
-            // literally, so with many week columns each one's real pixel width can
+            // literally, so with many columns each one's real pixel width can
             // shrink below what a dollar figure needs (white-space:nowrap on
             // .figure means it won't wrap, so it visually spills into the next
             // cell instead). Scale min-width with the column count so every
@@ -226,31 +243,30 @@ public static class ClientBenchmarkReportRenderer
             const int vendorColumnMinPx = 110;
             const int weekColumnMinPx = 92;
             const int totalColumnMinPx = 130;
-            var tableMinWidthPx = vendorColumnMinPx + (weekColumnMinPx * totalWeekCount) + totalColumnMinPx;
+            var tableMinWidthPx = vendorColumnMinPx + (weekColumnMinPx * columnCount) + totalColumnMinPx;
 
             html.Append($"    <h3 class=\"subsection-tenant\">{Encode(tenant.TenantId)}</h3>\n    <div class=\"table-scroll\">\n      <table class=\"weekly-table\" style=\"min-width:{tableMinWidthPx}px;\">\n        <thead>\n          <tr>\n            <th style=\"width:{vendorColumnWidth.ToString("0.0", Culture)}%;\">Vendor</th>\n");
 
-            for (var i = 0; i < totalWeekCount; i++)
+            foreach (var column in columns)
             {
-                var (start, end) = WeekBounds(data.WeekAnchor, i);
-                var partial = end > data.Period.End || start < data.Period.Start ? "*" : "";
-                html.Append($"            <th class=\"figure\" style=\"width:{weekColumnWidth.ToString("0.0", Culture)}%;\">{FormatWeekLabel(start, end)}{partial}</th>\n");
+                var partial = column.End > data.Period.End || column.Start < data.Period.Start ? "*" : "";
+                html.Append($"            <th class=\"figure\" style=\"width:{weekColumnWidth.ToString("0.0", Culture)}%;\">{PeriodBuckets.Label(aggregation, column.Start, column.End)}{partial}</th>\n");
             }
             html.Append($"            <th class=\"figure\" style=\"width:{totalColumnWidth.ToString("0.0", Culture)}%;\">Total</th>\n          </tr>\n        </thead>\n        <tbody>\n");
 
-            var totalsByWeek = new decimal[totalWeekCount];
+            var totalsByColumn = new decimal[columnCount];
             foreach (var vendor in VendorCatalog.All)
             {
                 var vendorData = tenant.Vendors.Single(v => v.Vendor.Id == vendor.Id);
-                var byIndex = vendorData.Weeks.ToDictionary(w => w.WeekIndex);
+                var byIndex = TablePeriods(vendorData, data).ToDictionary(p => p.Index);
 
                 html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.DisplayName)}</th>\n");
-                for (var i = 0; i < totalWeekCount; i++)
+                for (var i = 0; i < columnCount; i++)
                 {
-                    if (byIndex.TryGetValue(i, out var week) && week.DaysPresent > 0)
+                    if (byIndex.TryGetValue(i, out var period) && period.DaysPresent > 0)
                     {
-                        totalsByWeek[i] += week.GrossSpend;
-                        html.Append($"            <td class=\"figure tabular\">{Money(week.GrossSpend)}\n              <span class=\"breakdown\">seat {Money(week.SeatFee)} + usage {Money(week.UsageOrOverage)}</span>\n            </td>\n");
+                        totalsByColumn[i] += period.GrossSpend;
+                        html.Append($"            <td class=\"figure tabular\">{Money(period.GrossSpend)}\n              <span class=\"breakdown\">seat {Money(period.SeatFee)} + usage {Money(period.UsageOrOverage)}</span>\n            </td>\n");
                     }
                     else
                     {
@@ -260,13 +276,13 @@ public static class ClientBenchmarkReportRenderer
                 html.Append($"            <td class=\"figure tabular\">{Money(vendorData.TotalGrossSpend)}\n              <span class=\"breakdown\">seat {Money(vendorData.TotalSeatFee)} + usage {Money(vendorData.TotalUsageOrOverage)}</span>\n            </td>\n          </tr>\n");
             }
 
-            html.Append("          <tr class=\"total-row\">\n            <th scope=\"row\">Total weekly spend</th>\n");
+            html.Append($"          <tr class=\"total-row\">\n            <th scope=\"row\">Total {adjective.ToLowerInvariant()} spend</th>\n");
             decimal cumulative = 0m;
             var cumulativeRow = new StringBuilder("          <tr class=\"cumulative-row\">\n            <th scope=\"row\">Cumulative spend</th>\n");
-            for (var i = 0; i < totalWeekCount; i++)
+            for (var i = 0; i < columnCount; i++)
             {
-                html.Append($"            <td class=\"figure tabular\">{Money(totalsByWeek[i])}</td>\n");
-                cumulative += totalsByWeek[i];
+                html.Append($"            <td class=\"figure tabular\">{Money(totalsByColumn[i])}</td>\n");
+                cumulative += totalsByColumn[i];
                 cumulativeRow.Append($"            <td class=\"figure tabular\">{Money(cumulative)}</td>\n");
             }
             html.Append($"            <td class=\"figure tabular\">{Money(cumulative)}</td>\n          </tr>\n");
@@ -274,7 +290,9 @@ public static class ClientBenchmarkReportRenderer
             html.Append(cumulativeRow);
 
             html.Append("        </tbody>\n      </table>\n    </div>\n");
-            html.Append("    <p class=\"small-note\">*Partial week — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals, but left out of the projections.</p>\n\n");
+            html.Append(aggregation == AggregationPeriod.Week
+                ? "    <p class=\"small-note\">*Partial week — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals, but left out of the projections.</p>\n\n"
+                : $"    <p class=\"small-note\">*Partial {noun} — only part of it is inside the report period (it starts before the first day or ends after the last). Shown and counted in the totals.</p>\n\n");
         }
 
         html.Append("  </section>\n\n");
@@ -286,7 +304,7 @@ public static class ClientBenchmarkReportRenderer
               <section>
                 <div class="eyebrow">Looking ahead</div>
                 <h2>Annualized cost projection</h2>
-                <p class="audit-intro"><b>Flat</b> averages the complete weeks above and multiplies by 52; <b>Trend-adjusted</b> fits a linear trend across those same weeks and projects the next week's rate forward × 52; <b>Latest week annualized</b> takes only the most recent complete week × 52. A partial week, one cut short by where the report starts or ends, is excluded from all three for every vendor, as is any ChatGPT Enterprise week with missing days (see the footnote).</p>
+                <p class="audit-intro"><b>Flat</b> averages {(data.Aggregation == AggregationPeriod.Week ? "the complete weeks above" : "the complete weeks of the report period")} and multiplies by 52; <b>Trend-adjusted</b> fits a linear trend across those same weeks and projects the next week's rate forward × 52; <b>Latest week annualized</b> takes only the most recent complete week × 52. A partial week, one cut short by where the report starts or ends, is excluded from all three for every vendor, as is any ChatGPT Enterprise week with missing days (see the footnote).</p>
 
             """);
 
@@ -477,6 +495,7 @@ public static class ClientBenchmarkReportRenderer
 
             """);
 
+        AppendPeriodFootnote(html, data);
         AppendPartialWeekFootnote(html, data);
         AppendSeatContractFootnote(html, data);
         AppendEmptyWeekFootnote(html, data);
@@ -489,6 +508,22 @@ public static class ClientBenchmarkReportRenderer
               </footer>
 
             """);
+    }
+
+    // When the spend table is grouped by month, quarter or year, say that the projections still use weeks. Omitted for the week.
+    private static void AppendPeriodFootnote(StringBuilder html, ReportData data)
+    {
+        if (data.Aggregation == AggregationPeriod.Week)
+        {
+            return;
+        }
+
+        var noun = PeriodBuckets.Noun(data.Aggregation);
+        html.Append(
+            $"      <li><b>The spend table is grouped by {noun}; the projections stay weekly.</b> Each {noun} column is the sum of the "
+            + "stored days in that calendar period, and a column cut short by where the report starts or ends is marked *. The "
+            + "annualized projections and the report-to-report comparison still use Wednesday-to-Tuesday weeks, so they are the same "
+            + "whichever period the table uses.</li>\n");
     }
 
     // A usage-priced vendor stores nothing on a day without usage, so its quiet weeks have no record. The projections count
@@ -590,8 +625,10 @@ public static class ClientBenchmarkReportRenderer
             "      <li><b>Partial weeks are left out of the projections, for every vendor.</b> Weeks run Wednesday to Tuesday, so a "
             + "report that starts or ends mid-week has a short first or last week. A week is used in the Flat, Trend-adjusted and "
             + "Latest-week projections only if it lies fully inside the report period; a short week would drag the average and "
-            + "the trend down even when every requested day is stored. Partial weeks stay in the weekly table (marked *) and in "
-            + "the actual totals.");
+            + "the trend down even when every requested day is stored. "
+            + (data.Aggregation == AggregationPeriod.Week
+                ? "Partial weeks stay in the weekly table (marked *) and in the actual totals."
+                : "Partial weeks stay in the actual totals."));
 
         if (leading.Count == 0)
         {
