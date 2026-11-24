@@ -30,6 +30,10 @@ accrual for a mid-term change.
   `ClientBenchmarkReportRenderer`). Which weeks feed them is `ProjectionEligibility` (#69).
 - Gemini Enterprise has no rate row for seats: its seat fee arrives already prorated from the billing export. Everything below about
   seat rows therefore applies to Claude Enterprise and ChatGPT Enterprise, not Gemini.
+- Since issue #111 the report separates committed (seat licence) from variable (usage and overage) spend, and its "Committed charges and
+  contract terms" section shows a Gemini seat charge as observed from the export, not as a contract rate. Whether Gemini should
+  instead have a seat count and rate entered like the other vendors, now that the report puts committed charges in one place, is
+  left open for this design sprint.
 
 ## Gap 3: the projections lag a seat step (recommended first)
 

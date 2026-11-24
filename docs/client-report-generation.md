@@ -44,6 +44,8 @@ dotnet run --project src/Meterist.Cli -- report generate --tenant <tenant-id> --
   most points to average and trend over (a trend over five monthly points means little, and a year has none), and so the
   projection figures are identical across `--period` values. The manifest and the report-to-report comparison also stay
   weekly, so a monthly report can be compared with a weekly one. A footnote says so.
+- The vendor rows show **variable** spend and the seat licence charges sit in one **Committed (seat licences)** row (see
+  section 7 below); the grouping applies to both.
 - Seat charges are accrued daily, and a note under the table says so. An annual seat charge is its annual price divided by
   the days in the year, so a shorter period shows a slightly lower seat figure (a 30-day month against a 31-day month); a
   monthly seat charge is its monthly price divided by the days in that month, so every full month shows the same figure.
@@ -107,11 +109,18 @@ bundled into one page:
 
 1. **Masthead** — title, tracked date range, tenants/vendors covered, a
    DRAFT status chip if the report isn't ready for client eyes yet.
+   The report separates the **committed** part of the spend (seat licence
+   charges, which are predictable) from the **variable** part (usage, and
+   overage beyond what the seats include). Claude API Platform has no seat
+   charge, so it is variable only. The stored columns stay `SeatFee` and
+   `UsageOrOverage`; only the presentation changed, and committed + variable is
+   always the gross figure. The report manifest and the report-to-report
+   comparison are unaffected.
 2. **KPI cards** — total tracked Gross Spend per tenant, vendor count, date
-   range, average $/day.
+   range, average $/day, and the committed and variable parts with the
+   variable share.
 3. **Vendor ledger table** — per-vendor $ comparison across tenants, with
-   the seat-fee/usage split called out where a vendor has both (ChatGPT
-   Enterprise today).
+   the committed and variable parts and the variable share called out.
 4. **Headline finding callout** — one genuinely interesting cross-tenant
    fact worth surfacing prominently (e.g., identical seat cost but a large
    usage-intensity gap between two tenants). Pick this from whatever the
@@ -119,27 +128,40 @@ bundled into one page:
 5. **Concentration risk** — a segmented bar per tenant showing vendor mix
    %, with a risk flag if any single vendor exceeds roughly 70–75% of that
    tenant's tracked spend, or a "diversified" flag if not.
-6. **Rate card** — per tenant/vendor pairing: seat fee (normalized to
-   $/seat/month, actual contracted cadence noted alongside), seat count,
-   overage mechanism, and the rate's effective-from date. This is
+6. **Committed charges and contract terms** (the former rate card) — per
+   tenant/vendor pairing: the currently-active rate lines (rate type, SKU,
+   rate, cadence, seat count, effective-from date), the **seat history**
+   (every seat row that applied during the report period, so a seat added in
+   steps shows each step), the **committed cost per year** (seat count × rate,
+   × 12 for a monthly rate, from the rate in force on the last day) and the
+   **committed charges in the period** (the accrued seat fees). This is
    deliberately **not** a per-vendor table — the same vendor can have a
    different seat rate and a different overage rate per tenant (confirmed
    real-world case: zelleri and ecosync both run ChatGPT Enterprise at 50
    seats but different seat rates and different credit-to-USD rates), so
    rows are one per (vendor, tenant) pair, labeled `Vendor (tenant)` to
    match the row-label convention already used in the audit table below.
-   Not every vendor has a seat/overage rate to show: Claude API Platform is
-   pure usage-based pricing with no seat concept at all, and Gemini
-   Enterprise's subscription fee arrives pre-priced from the BigQuery
-   billing export rather than being computed from a configured
-   `VendorRateConfig` row — both show `—` by design, not a data gap.
+   Not every vendor has a seat rate to show. **Claude API Platform** is
+   pure usage-based pricing and says "No seat charge — usage only".
+   **Gemini Enterprise's** seat charge arrives prorated in the BigQuery
+   billing export rather than from a configured `VendorRateConfig` row, so
+   the card shows the seat charge Meterist **observed** (period total, days
+   and average per day), labelled as not a contract rate, and has no
+   committed-per-year figure. A vendor with spend but no seat rate yet says so.
+   There is no term-end or renewal date, because the rate rows do not carry
+   one (see `docs/vnext-contract-model.md`).
 7. **Weekly spend by vendor** — per tenant, Wednesday-to-Tuesday weekly
-   buckets with the seat-fee and usage split. A week cut short by where the report starts or ends (a short first
+   buckets. The vendor rows show **variable** spend (usage and overage); the
+   seat licence charges are summed into one **Committed (seat licences)** row,
+   and the total row is the two added, so it still equals the gross spend. A week cut short by where the report starts or ends (a short first
    week, or a trailing week that hasn't fully elapsed) is marked with an asterisk and explained beneath the table.
    With `--period month`, `quarter` or `year` the table is grouped by that calendar period instead (see
    [Grouping the spend table](#grouping-the-spend-table)).
-8. **Annualized cost projection** — per tenant and vendor, three scenarios
-   (flat, trend-adjusted, latest-week annualized) computed only from weeks
+8. **Annualized cost projection** — per tenant and vendor, a **committed**
+   figure per year plus three scenarios for the **variable** part
+   (flat, trend-adjusted, latest-week annualized), with a total row that adds
+   the committed figure to each scenario. The committed figure has no trend
+   scenarios, since it changes only when the contract does. The scenarios are computed only from weeks
    that lie **fully inside the report period**, the same rule for every vendor
    (`ProjectionEligibility`). A report that starts or ends mid-week has a short
    first or last week; it stays in the weekly table and in the actual totals but
@@ -150,14 +172,13 @@ bundled into one page:
    Wednesday to include its first week. Fewer than one full week gives no
    projection (shown as a dash). **The seat part comes from the contract:** where a
    `seat` rate is configured with a seat count and an annual or monthly cadence
-   (Claude Enterprise, ChatGPT Enterprise), the seat part of every scenario is
+   (Claude Enterprise, ChatGPT Enterprise), the committed figure is
    `SeatCount × Rate` of the rate in force on the report's last day (× 12 for a
    monthly rate), because projecting past weekly seat fees lags every seat
-   change. It is therefore the same in all three scenarios; only the usage part
-   is projected from the weekly series. Without a usable rate (none configured,
+   change. Only the variable part is projected from the weekly series. Without a usable rate (none configured,
    no seat count, a one-time cadence, or Gemini Enterprise, whose seat fee comes
-   prorated from the billing export) the seat part is projected from the weekly
-   series as before. This also removes a small standing bias: weeks × 52 is 364
+   prorated from the billing export) the committed figure is the weekly seat
+   average × 52, and it is shown as one figure, not three scenarios. This also removes a small standing bias: weeks × 52 is 364
    days, so a constant annual charge used to project at 364/365 of its price. The
    footnote names the vendors it applied to. **Quiet weeks count as zero for a
    usage-priced vendor:** Claude API Platform stores nothing on a day without
@@ -205,6 +226,8 @@ bundled into one page:
    - **Idle seats** — per tenant and vendor, the rostered people with no activity in the 30 days, longest idle first, with
      role, seat type and last active day before the window (`none stored` means no earlier activity is on file, not that
      there was none; for Claude Enterprise it is the later of the last spend row and the last activity row). Up to 40 are listed.
+     Where a seat rate is configured, a line puts a dollar figure on them: the idle seats × the per-seat annual cost, as
+     committed seat charges a year at the contract rate.
 10. **Footnote** — methodology and caveats: what "Gross Spend" means, that tax
    and support fees are not included (so a figure can differ from an invoice;
    see `docs/architecture.md` §5.2), why

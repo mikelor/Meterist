@@ -47,8 +47,9 @@ public class SeatContractProjectionTests
         var weekly = 1200m / daysInYear * 7;   // what the accrual stores each week
         var html = Render(anchor, Claude(anchor, [weekly, weekly, weekly], [0m, 0m, 0m], Rate(1, 1200, BillingCadence.Annual)));
 
-        var row = VendorRow(html);
-        Assert.Equal(3, CountOf(row, "seat $1,200.00 + usage $0.00"));   // Flat, Trend-adjusted, Latest week
+        var cells = Cells(VendorRow(html));
+        Assert.Equal("$1,200.00", cells[0]);                                   // committed
+        Assert.Equal(["$0.00", "$0.00", "$0.00"], cells[1..4]);                // variable: Flat, Trend-adjusted, Latest week
         Assert.DoesNotContain("$1,196.71", html);   // the weekly method's answer in a normal year
         Assert.DoesNotContain("$1,193.44", html);   // and in a leap year
     }
@@ -60,7 +61,9 @@ public class SeatContractProjectionTests
         var html = Render(Anchor, Claude(Anchor, [70m, 77m, 91m], [100m, 100m, 100m], Rate(14, 365, BillingCadence.Annual)));
 
         var row = VendorRow(html);
-        Assert.Equal(3, CountOf(row, "seat $5,110.00 + usage $5,200.00"));
+        var cells = Cells(row);
+        Assert.Equal("$5,110.00", cells[0]);
+        Assert.Equal(["$5,200.00", "$5,200.00", "$5,200.00"], cells[1..4]);
         Assert.DoesNotContain("$12,376.00", row);   // the weekly seat average, (70+77+91)/3 x 52, is not used
     }
 
@@ -70,7 +73,7 @@ public class SeatContractProjectionTests
         // The rate the aggregator hands over is the one in force on the last day, so a renewal is just the new row.
         var html = Render(Anchor, Claude(Anchor, [50m, 50m, 50m], [0m, 0m, 0m], Rate(20, 300, BillingCadence.Annual)));
 
-        Assert.Contains("seat $6,000.00 + usage $0.00", VendorRow(html));
+        Assert.Equal("$6,000.00", Cells(VendorRow(html))[0]);
     }
 
     [Fact]
@@ -78,7 +81,7 @@ public class SeatContractProjectionTests
     {
         var html = Render(Anchor, Claude(Anchor, [10m, 10m, 10m], [0m, 0m, 0m], Rate(3, 20, BillingCadence.Monthly)));
 
-        Assert.Contains("seat $720.00 + usage $0.00", VendorRow(html));
+        Assert.Equal("$720.00", Cells(VendorRow(html))[0]);
     }
 
     [Fact]
@@ -94,11 +97,13 @@ public class SeatContractProjectionTests
 
     private static void AssertWeeklySeatProjection(VendorRateConfig? rate)
     {
-        // Seat fee 70 a week x 52 = $3,640.00 in all three, exactly as before.
+        // Seat fee 70 a week x 52 = $3,640.00 committed, exactly as before.
         var html = Render(Anchor, Claude(Anchor, [70m, 70m, 70m], [100m, 100m, 100m], rate));
 
-        Assert.Equal(3, CountOf(VendorRow(html), "seat $3,640.00 + usage $5,200.00"));
-        Assert.DoesNotContain("The seat part of the projections comes from the contract", html);
+        var cells = Cells(VendorRow(html));
+        Assert.Equal("$3,640.00", cells[0]);
+        Assert.Equal(["$5,200.00", "$5,200.00", "$5,200.00"], cells[1..4]);
+        Assert.DoesNotContain("The committed part of the projections comes from the contract", html);
     }
 
     [Fact]
@@ -107,18 +112,17 @@ public class SeatContractProjectionTests
         // Usage 100, 120, 140: flat 120 x 52 = $6,240.00; trend (next point 160) x 52 = $8,320.00; latest 140 x 52 = $7,280.00.
         var html = Render(Anchor, Claude(Anchor, [1m, 1m, 1m], [100m, 120m, 140m], Rate(1, 365, BillingCadence.Annual)));
 
-        var row = VendorRow(html);
-        Assert.Contains("seat $365.00 + usage $6,240.00", row);
-        Assert.Contains("seat $365.00 + usage $8,320.00", row);
-        Assert.Contains("seat $365.00 + usage $7,280.00", row);
+        var cells = Cells(VendorRow(html));
+        Assert.Equal("$365.00", cells[0]);
+        Assert.Equal(["$6,240.00", "$8,320.00", "$7,280.00"], cells[1..4]);
     }
 
     [Fact]
-    public void TheFootnote_SaysTheSeatPartIsFromTheContract_AndNamesTheDateAndTheCorrection()
+    public void TheFootnote_SaysTheCommittedPartIsFromTheContract_AndNamesTheDateAndTheCorrection()
     {
         var html = Render(Anchor, Claude(Anchor, [70m, 70m, 70m], [0m, 0m, 0m], Rate(1, 365, BillingCadence.Annual)));
 
-        var note = html[html.IndexOf("The seat part of the projections comes from the contract", StringComparison.Ordinal)..];
+        var note = html[html.IndexOf("The committed part of the projections comes from the contract", StringComparison.Ordinal)..];
         note = note[..note.IndexOf("</li>", StringComparison.Ordinal)];
         Assert.Contains("rate in force on Jul 21, 2026", note);
         Assert.Contains("364/365", note);
@@ -142,7 +146,7 @@ public class SeatContractProjectionTests
 
         var html = ClientBenchmarkReportRenderer.Render(Report(period, Tenant("t1", vendor)));
 
-        Assert.DoesNotContain("The seat part of the projections comes from the contract", html);
+        Assert.DoesNotContain("The committed part of the projections comes from the contract", html);
     }
 
     // ---- fixtures
@@ -203,14 +207,9 @@ public class SeatContractProjectionTests
         return section[row..section.IndexOf("</tr>", row, StringComparison.Ordinal)];
     }
 
-    private static int CountOf(string text, string value)
-    {
-        var count = 0;
-        for (var i = text.IndexOf(value, StringComparison.Ordinal); i >= 0; i = text.IndexOf(value, i + value.Length, StringComparison.Ordinal))
-        {
-            count++;
-        }
-
-        return count;
-    }
+    // The figures in a projection row: committed per year, then the variable Flat, Trend-adjusted and Latest week, then the actual.
+    private static string[] Cells(string row) =>
+        System.Text.RegularExpressions.Regex.Matches(row, "<td class=\"figure tabular\">([^<]*)</td>")
+            .Select(m => m.Groups[1].Value.Trim())
+            .ToArray();
 }

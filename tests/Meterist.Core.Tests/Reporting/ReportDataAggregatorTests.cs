@@ -326,6 +326,39 @@ public class ReportDataAggregatorTests
     }
 
     [Fact]
+    public async Task AggregateAsync_SeatRateHistory_HoldsEverySeatRowInThePeriod_OldestFirst_AndNoOtherRate()
+    {
+        // The first row has ended, the second is open-ended, and a non-seat row is not seat history.
+        var vendorId = VendorCatalog.ClaudeEnterprise.Id;
+        var rateConfigRepo = new FakeVendorRateConfigRepository(
+        [
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "per-seat", ModelOrSku = "seat", Rate = 320m, SeatCount = 12,
+                EffectiveFrom = new DateOnly(2026, 7, 8),
+            },
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "per-seat", ModelOrSku = "seat", Rate = 300m, SeatCount = 10,
+                EffectiveFrom = new DateOnly(2026, 1, 1), EffectiveTo = new DateOnly(2026, 7, 7),
+            },
+            new VendorRateConfig
+            {
+                VendorId = vendorId, RateType = "credit", ModelOrSku = "credit-usd", Rate = 0.04m,
+                EffectiveFrom = new DateOnly(2026, 1, 1),
+            },
+        ]);
+        var aggregator = new ReportDataAggregator(new FakeDailySpendRepository(), rateConfigRepo);
+
+        var data = await aggregator.AggregateAsync(
+            ["zelleri"], Period, cancellationToken: TestContext.Current.CancellationToken);
+
+        var claude = data.Tenants[0].Vendors.Single(v => v.Vendor.Id == vendorId);
+        Assert.Equal([10, 12], claude.SeatRateHistory.Select(r => r.SeatCount ?? 0));
+        Assert.Equal(2, claude.SeatRateHistory.Count);
+    }
+
+    [Fact]
     public async Task AggregateAsync_SeatRateAtPeriodEnd_IsNullWhenTheSeatRateEndedBeforeTheLastDay()
     {
         var vendorId = VendorCatalog.ClaudeEnterprise.Id;

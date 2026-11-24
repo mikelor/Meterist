@@ -21,8 +21,9 @@ public class EmptyWeekProjectionTests
         var html = Render(period, ClaudeApi(Week(0, 100), Week(1, 100), Week(2, 100)));
 
         var row = ApiRow(html);
-        Assert.Contains("seat $0.00 + usage $2,600.00", row);            // Flat
-        Assert.Contains("seat $0.00 + usage $0.00", row);                // Latest week (week 5) and the floored trend
+        var cells = Cells(row);
+        Assert.Equal("$2,600.00", cells[1]);                             // Flat
+        Assert.Equal(["$0.00", "$0.00"], cells[2..4]);                   // the floored trend, and the latest week (week 5)
         Assert.DoesNotContain("$5,200.00", row);                         // the old Flat and Latest
     }
 
@@ -33,8 +34,9 @@ public class EmptyWeekProjectionTests
         var html = Render(Period(weeks: 3), ClaudeApi(Week(0, 100), Week(2, 100)));
 
         var row = ApiRow(html);
-        Assert.Contains("seat $0.00 + usage $3,466.67", row);   // Flat, and Trend (a flat fit through 100, 0, 100)
-        Assert.Contains("seat $0.00 + usage $5,200.00", row);   // Latest week is week 2 = 100
+        var cells = Cells(row);
+        Assert.Equal(["$3,466.67", "$3,466.67"], cells[1..3]);   // Flat, and Trend (a flat fit through 100, 0, 100)
+        Assert.Equal("$5,200.00", cells[3]);                     // Latest week is week 2 = 100
     }
 
     [Fact]
@@ -46,7 +48,7 @@ public class EmptyWeekProjectionTests
         var html = Render(period, ClaudeApi(Week(1, 100)));
 
         var row = ApiRow(html);
-        Assert.Contains("seat $0.00 + usage $2,600.00", row);
+        Assert.Equal("$2,600.00", Cells(row)[1]);
         Assert.DoesNotContain("$1,733.33", row);
     }
 
@@ -58,7 +60,7 @@ public class EmptyWeekProjectionTests
         var html = Render(period, ClaudeApi(Week(0, 100)));
 
         var row = ApiRow(html);
-        Assert.Contains("seat $0.00 + usage $2,600.00", row);
+        Assert.Equal("$2,600.00", Cells(row)[1]);
         Assert.DoesNotContain("$1,733.33", row);
     }
 
@@ -68,8 +70,8 @@ public class EmptyWeekProjectionTests
         var html = Render(Period(weeks: 6), ClaudeApi());
 
         var row = ApiRow(html);
-        Assert.Equal(3, CountOf(row, "<span class=\"muted-dash\">—</span>"));
-        Assert.DoesNotContain("$0.00 + usage", row);
+        Assert.Equal(4, CountOf(row, "<span class=\"muted-dash\">—</span>"));   // committed and the three variable scenarios
+        Assert.Equal(["$0.00"], Cells(row));                                      // only the actual column is a figure
     }
 
     [Fact]
@@ -112,7 +114,7 @@ public class EmptyWeekProjectionTests
         var row = weekly[weekly.IndexOf("<th scope=\"row\">Claude API Platform</th>", StringComparison.Ordinal)..];
         row = row[..row.IndexOf("</tr>", StringComparison.Ordinal)];
         Assert.Equal(3, CountOf(row, "<span class=\"muted-dash\">—</span>"));   // weeks 3 to 5
-        Assert.DoesNotContain("seat $0.00 + usage $0.00", row);
+        Assert.DoesNotContain("$0.00", row);
     }
 
     // ---- the trend floor
@@ -208,6 +210,12 @@ public class EmptyWeekProjectionTests
         Assert.True(row >= 0);
         return section[row..section.IndexOf("</tr>", row, StringComparison.Ordinal)];
     }
+
+    // The figures in a projection row: committed per year, the variable Flat, Trend-adjusted and Latest week, then the actual.
+    private static string[] Cells(string row) =>
+        System.Text.RegularExpressions.Regex.Matches(row, "<td class=\"figure tabular\">([^<]*)</td>")
+            .Select(m => m.Groups[1].Value.Trim())
+            .ToArray();
 
     private static int CountOf(string text, string value)
     {

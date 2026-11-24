@@ -86,6 +86,7 @@ public static class ClientBenchmarkReportRenderer
             html.Append($"        <div class=\"kpi-label\">{Encode(tenant.TenantId)}</div>\n");
             html.Append($"        <div class=\"kpi-value tabular\">{Money(tenant.TotalGrossSpend)}</div>\n");
             html.Append($"        <div class=\"kpi-sub\">{vendorsWithSpend} vendor(s) · {FormatDate(data.Period.Start)}–{FormatDate(data.Period.End)} · avg {Money(perDay)}/day</div>\n");
+            html.Append($"        <div class=\"kpi-sub\">Committed {Money(tenant.TotalSeatFee)} (seat licences) · variable {Money(tenant.TotalUsageOrOverage)}{VariableShare(tenant.TotalUsageOrOverage, tenant.TotalGrossSpend)}</div>\n");
             html.Append("      </div>\n");
         }
         html.Append("    </div>\n  </section>\n\n");
@@ -114,7 +115,7 @@ public static class ClientBenchmarkReportRenderer
                 else
                 {
                     html.Append($"            <td class=\"figure tabular\">{Money(vendorData.TotalGrossSpend)}\n");
-                    html.Append($"              <span class=\"breakdown\">seat {Money(vendorData.TotalSeatFee)} + usage {Money(vendorData.TotalUsageOrOverage)}</span>\n            </td>\n");
+                    html.Append($"              <span class=\"breakdown\">committed {Money(vendorData.TotalSeatFee)} + variable {Money(vendorData.TotalUsageOrOverage)}{VariableShare(vendorData.TotalUsageOrOverage, vendorData.TotalGrossSpend)}</span>\n            </td>\n");
                 }
             }
             html.Append("          </tr>\n");
@@ -160,35 +161,70 @@ public static class ClientBenchmarkReportRenderer
         html.Append("    </div>\n  </section>\n\n");
     }
 
+    // The committed part of the spend: what each vendor's seat licences cost, set against the contract that fixes it. A
+    // vendor with a seat rate row shows the contract; one whose seat charge only arrives in the billing export (Gemini
+    // Enterprise) shows what was observed; one with no seat charge at all says so.
     private static void RenderRateCard(StringBuilder html, ReportData data)
     {
         html.Append("""
               <section>
                 <div class="eyebrow">Contract terms</div>
-                <h2>Rate card</h2>
-                <p class="audit-intro">What Meterist has configured today for each tenant/vendor pairing — currently-active rates only. A vendor with no configured rate here is either pure usage-based pricing with no seat concept, or its subscription fee arrives already priced in the vendor's own billing export.</p>
+                <h2>Committed charges and contract terms</h2>
+                <p class="audit-intro">The predictable part of the spend: seat licence charges, and the contract that sets them. Contract terms are what Meterist has configured (currently-active rates, with the seat-count history inside the report period). A vendor whose seat charge arrives in the vendor's own billing export has no contract rate here, so the charge Meterist observed is shown instead. Everything else in this report is variable spend: usage, and overage beyond what the seats include.</p>
             """);
-        html.Append("    <div class=\"table-scroll\">\n      <table>\n        <thead>\n          <tr>\n            <th>Vendor (tenant)</th>\n            <th class=\"note-col\">Configured rates</th>\n          </tr>\n        </thead>\n        <tbody>\n");
+        html.Append("    <div class=\"table-scroll\">\n      <table>\n        <thead>\n          <tr>\n            <th>Vendor (tenant)</th>\n            <th class=\"note-col\">Contract terms</th>\n            <th class=\"figure\">Committed per year</th>\n            <th class=\"figure\">Committed in this period</th>\n          </tr>\n        </thead>\n        <tbody>\n");
 
         foreach (var tenant in data.Tenants)
         {
             foreach (var vendor in VendorCatalog.All)
             {
                 var vendorData = tenant.Vendors.Single(v => v.Vendor.Id == vendor.Id);
+                var annual = ProjectionCalculator.AnnualSeatCostFromContract(vendorData.SeatRateAtPeriodEnd);
+                var observed = ObservedSeatCharge(vendorData);
+
                 html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.DisplayName)} ({Encode(tenant.TenantId)})</th>\n");
-                if (vendorData.CurrentRates.Count == 0)
+                html.Append("            <td class=\"note\">\n");
+                if (vendorData.CurrentRates.Count == 0 && vendorData.SeatRateHistory.Count == 0)
                 {
-                    html.Append("            <td class=\"note\"><span class=\"muted-dash\">—</span></td>\n");
+                    if (observed is { } o)
+                    {
+                        html.Append($"              Seat charge observed in the vendor's billing export, not a contract rate: {Money(o.Total)} over {o.Days} day(s), about {Money(o.Total / o.Days)} a day.<br/>\n");
+                    }
+                    else if (vendorData.TotalGrossSpend > 0m && !vendor.ExpectsRecordEveryDay)
+                    {
+                        html.Append("              No seat charge — usage only.<br/>\n");
+                    }
+                    else if (vendorData.TotalGrossSpend > 0m)
+                    {
+                        html.Append("              No seat rate configured (see 'rates set').<br/>\n");
+                    }
+                    else
+                    {
+                        html.Append("              <span class=\"muted-dash\">—</span>\n");
+                    }
                 }
                 else
                 {
-                    html.Append("            <td class=\"note\">\n");
                     foreach (var rate in vendorData.CurrentRates)
                     {
                         html.Append($"              {FormatRateLine(rate)}<br/>\n");
                     }
-                    html.Append("            </td>\n");
+
+                    // The seat rows that applied during the period, when there was more than one (a seat added or a
+                    // renewal): the changes the committed charge followed.
+                    if (vendorData.SeatRateHistory.Count > 1)
+                    {
+                        html.Append($"              <span class=\"breakdown\">Seat history: {Encode(FormatSeatHistory(vendorData.SeatRateHistory))}</span><br/>\n");
+                    }
                 }
+                html.Append("            </td>\n");
+
+                html.Append(annual is { } a
+                    ? $"            <td class=\"figure tabular\">{Money(a)}</td>\n"
+                    : "            <td class=\"figure tabular\"><span class=\"muted-dash\">—</span></td>\n");
+                html.Append(vendorData.TotalSeatFee > 0m
+                    ? $"            <td class=\"figure tabular\">{Money(vendorData.TotalSeatFee)}</td>\n"
+                    : "            <td class=\"figure tabular\"><span class=\"muted-dash\">—</span></td>\n");
                 html.Append("          </tr>\n");
             }
         }
@@ -214,6 +250,8 @@ public static class ClientBenchmarkReportRenderer
         var intro = aggregation == AggregationPeriod.Week
             ? "Weeks run Wednesday–Tuesday. A week cut short by where the report starts or ends is marked * and, like a ChatGPT Enterprise week with missing days, is left out of the projections below (\"A ChatGPT Enterprise week with missing days is excluded from the trend projections below\"); the footnote says which weeks, if any."
             : $"Each column is a calendar {noun}. A {noun} cut short by where the report starts or ends is marked *. The projections below are weekly whatever period this table uses, so they do not change with it; the footnote says which weeks they leave out, if any.";
+
+        intro += " The vendor rows show variable spend (usage and overage); the seat licence charges, which are predictable, are summed in the Committed row, and the total adds the two.";
 
         html.Append($"""
               <section>
@@ -254,7 +292,10 @@ public static class ClientBenchmarkReportRenderer
             }
             html.Append($"            <th class=\"figure\" style=\"width:{totalColumnWidth.ToString("0.0", Culture)}%;\">Total</th>\n          </tr>\n        </thead>\n        <tbody>\n");
 
-            var totalsByColumn = new decimal[columnCount];
+            // The vendor rows are the variable part (usage and overage). The seat licence charges, which are
+            // predictable, are summed into one committed row below them, so the two add up to the gross spend.
+            var variableByColumn = new decimal[columnCount];
+            var committedByColumn = new decimal[columnCount];
             foreach (var vendor in VendorCatalog.All)
             {
                 var vendorData = tenant.Vendors.Single(v => v.Vendor.Id == vendor.Id);
@@ -265,24 +306,40 @@ public static class ClientBenchmarkReportRenderer
                 {
                     if (byIndex.TryGetValue(i, out var period) && period.DaysPresent > 0)
                     {
-                        totalsByColumn[i] += period.GrossSpend;
-                        html.Append($"            <td class=\"figure tabular\">{Money(period.GrossSpend)}\n              <span class=\"breakdown\">seat {Money(period.SeatFee)} + usage {Money(period.UsageOrOverage)}</span>\n            </td>\n");
+                        variableByColumn[i] += period.UsageOrOverage;
+                        committedByColumn[i] += period.SeatFee;
+                        html.Append($"            <td class=\"figure tabular\">{Money(period.UsageOrOverage)}</td>\n");
                     }
                     else
                     {
                         html.Append("            <td class=\"figure tabular\"><span class=\"muted-dash\">—</span></td>\n");
                     }
                 }
-                html.Append($"            <td class=\"figure tabular\">{Money(vendorData.TotalGrossSpend)}\n              <span class=\"breakdown\">seat {Money(vendorData.TotalSeatFee)} + usage {Money(vendorData.TotalUsageOrOverage)}</span>\n            </td>\n          </tr>\n");
+                html.Append($"            <td class=\"figure tabular\">{Money(vendorData.TotalUsageOrOverage)}</td>\n          </tr>\n");
             }
+
+            html.Append("          <tr class=\"total-row\">\n            <th scope=\"row\">Total variable spend</th>\n");
+            for (var i = 0; i < columnCount; i++)
+            {
+                html.Append($"            <td class=\"figure tabular\">{Money(variableByColumn[i])}</td>\n");
+            }
+            html.Append($"            <td class=\"figure tabular\">{Money(variableByColumn.Sum())}</td>\n          </tr>\n");
+
+            html.Append("          <tr class=\"total-row\">\n            <th scope=\"row\">Committed (seat licences)</th>\n");
+            for (var i = 0; i < columnCount; i++)
+            {
+                html.Append($"            <td class=\"figure tabular\">{Money(committedByColumn[i])}</td>\n");
+            }
+            html.Append($"            <td class=\"figure tabular\">{Money(committedByColumn.Sum())}</td>\n          </tr>\n");
 
             html.Append($"          <tr class=\"total-row\">\n            <th scope=\"row\">Total {adjective.ToLowerInvariant()} spend</th>\n");
             decimal cumulative = 0m;
             var cumulativeRow = new StringBuilder("          <tr class=\"cumulative-row\">\n            <th scope=\"row\">Cumulative spend</th>\n");
             for (var i = 0; i < columnCount; i++)
             {
-                html.Append($"            <td class=\"figure tabular\">{Money(totalsByColumn[i])}</td>\n");
-                cumulative += totalsByColumn[i];
+                var columnTotal = variableByColumn[i] + committedByColumn[i];
+                html.Append($"            <td class=\"figure tabular\">{Money(columnTotal)}</td>\n");
+                cumulative += columnTotal;
                 cumulativeRow.Append($"            <td class=\"figure tabular\">{Money(cumulative)}</td>\n");
             }
             html.Append($"            <td class=\"figure tabular\">{Money(cumulative)}</td>\n          </tr>\n");
@@ -305,7 +362,7 @@ public static class ClientBenchmarkReportRenderer
               <section>
                 <div class="eyebrow">Looking ahead</div>
                 <h2>Annualized cost projection</h2>
-                <p class="audit-intro"><b>Flat</b> averages {(data.Aggregation == AggregationPeriod.Week ? "the complete weeks above" : "the complete weeks of the report period")} and multiplies by 52; <b>Trend-adjusted</b> fits a linear trend across those same weeks and projects the next week's rate forward × 52; <b>Latest week annualized</b> takes only the most recent complete week × 52. A partial week, one cut short by where the report starts or ends, is excluded from all three for every vendor, as is any ChatGPT Enterprise week with missing days (see the footnote).</p>
+                <p class="audit-intro"><b>Committed</b> is the seat licence charge for a year: the contract in force on the report's last day (seats × rate), or, where there is no contract rate, the average seat charge × 52. It is predictable, so it has no trend scenario. The variable part, usage and overage, is projected three ways. <b>Flat</b> averages {(data.Aggregation == AggregationPeriod.Week ? "the complete weeks above" : "the complete weeks of the report period")} and multiplies by 52; <b>Trend-adjusted</b> fits a linear trend across those same weeks and projects the next week's rate forward × 52; <b>Latest week annualized</b> takes only the most recent complete week × 52. A partial week, one cut short by where the report starts or ends, is excluded from all three for every vendor, as is any ChatGPT Enterprise week with missing days (see the footnote).</p>
 
             """);
 
@@ -317,18 +374,22 @@ public static class ClientBenchmarkReportRenderer
                   <table class="weekly-table">
                     <thead>
                       <tr>
-                        <th style="width:20%;">Vendor</th>
-                        <th class="figure" style="width:20%;">Flat (avg×52)</th>
-                        <th class="figure" style="width:24%;">Trend-adjusted (linear×52)</th>
-                        <th class="figure" style="width:18%;">Latest week ×52</th>
-                        <th class="figure" style="width:18%;">{totalWeekCount}-wk actual</th>
+                        <th style="width:16%;">Vendor</th>
+                        <th class="figure" style="width:17%;">Committed per year</th>
+                        <th class="figure" style="width:17%;">Variable: Flat (avg×52)</th>
+                        <th class="figure" style="width:18%;">Variable: Trend-adjusted (linear×52)</th>
+                        <th class="figure" style="width:16%;">Variable: Latest week ×52</th>
+                        <th class="figure" style="width:16%;">{totalWeekCount}-wk actual (committed + variable)</th>
                       </tr>
                     </thead>
                     <tbody>
 
             """);
 
-            ProjectionCalculator.Projection totalProjection = default;
+            // Committed is one predictable annual figure; only the variable part has a flat, trend and latest-week
+            // scenario. The totals row adds the two for each scenario.
+            decimal totalCommitted = 0m;
+            ProjectionCalculator.Projection totalVariable = default;
             decimal totalActual = 0m;
             var anyProjection = false;
 
@@ -349,16 +410,15 @@ public static class ClientBenchmarkReportRenderer
                 }
 
                 var usageProjection = ProjectionCalculator.Compute(completeWeeks.Select(w => w.UsageOrOverage).ToList());
-                var flat = seatProjection.Flat + usageProjection.Flat;
-                var trend = seatProjection.TrendAdjusted + usageProjection.TrendAdjusted;
-                var latest = seatProjection.LatestWeek + usageProjection.LatestWeek;
+                var committed = seatProjection.Flat;
                 var actual = vendorData.TotalGrossSpend;
 
-                totalProjection = totalProjection with
+                totalCommitted += committed;
+                totalVariable = totalVariable with
                 {
-                    Flat = totalProjection.Flat + flat,
-                    TrendAdjusted = totalProjection.TrendAdjusted + trend,
-                    LatestWeek = totalProjection.LatestWeek + latest,
+                    Flat = totalVariable.Flat + usageProjection.Flat,
+                    TrendAdjusted = totalVariable.TrendAdjusted + usageProjection.TrendAdjusted,
+                    LatestWeek = totalVariable.LatestWeek + usageProjection.LatestWeek,
                 };
                 totalActual += actual;
                 anyProjection |= completeWeeks.Count > 0;
@@ -368,6 +428,7 @@ public static class ClientBenchmarkReportRenderer
                     html.Append($"""
                               <tr>
                                 <th scope="row">{Encode(vendor.DisplayName)}</th>
+                                <td class="figure tabular"><span class="muted-dash">—</span></td>
                                 <td class="figure tabular"><span class="muted-dash">—</span></td>
                                 <td class="figure tabular"><span class="muted-dash">—</span></td>
                                 <td class="figure tabular"><span class="muted-dash">—</span></td>
@@ -381,15 +442,10 @@ public static class ClientBenchmarkReportRenderer
                 html.Append($"""
                           <tr>
                             <th scope="row">{Encode(vendor.DisplayName)}</th>
-                            <td class="figure tabular">{Money(flat)}
-                              <span class="breakdown">seat {Money(seatProjection.Flat)} + usage {Money(usageProjection.Flat)}</span>
-                            </td>
-                            <td class="figure tabular">{Money(trend)}
-                              <span class="breakdown">seat {Money(seatProjection.TrendAdjusted)} + usage {Money(usageProjection.TrendAdjusted)}</span>
-                            </td>
-                            <td class="figure tabular">{Money(latest)}
-                              <span class="breakdown">seat {Money(seatProjection.LatestWeek)} + usage {Money(usageProjection.LatestWeek)}</span>
-                            </td>
+                            <td class="figure tabular">{Money(committed)}</td>
+                            <td class="figure tabular">{Money(usageProjection.Flat)}</td>
+                            <td class="figure tabular">{Money(usageProjection.TrendAdjusted)}</td>
+                            <td class="figure tabular">{Money(usageProjection.LatestWeek)}</td>
                             <td class="figure tabular">{Money(actual)}</td>
                           </tr>
 
@@ -399,10 +455,19 @@ public static class ClientBenchmarkReportRenderer
             html.Append($"""
                           <tr class="total-row">
                             <th scope="row">Total</th>
-                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.Flat) : NoProjection)}</td>
-                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.TrendAdjusted) : NoProjection)}</td>
-                            <td class="figure tabular">{(anyProjection ? Money(totalProjection.LatestWeek) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalCommitted) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalVariable.Flat) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalVariable.TrendAdjusted) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalVariable.LatestWeek) : NoProjection)}</td>
                             <td class="figure tabular">{Money(totalActual)}</td>
+                          </tr>
+                          <tr class="total-row">
+                            <th scope="row">Total with committed</th>
+                            <td class="figure tabular">&nbsp;</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalCommitted + totalVariable.Flat) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalCommitted + totalVariable.TrendAdjusted) : NoProjection)}</td>
+                            <td class="figure tabular">{(anyProjection ? Money(totalCommitted + totalVariable.LatestWeek) : NoProjection)}</td>
+                            <td class="figure tabular">&nbsp;</td>
                           </tr>
                         </tbody>
                       </table>
@@ -582,10 +647,10 @@ public static class ClientBenchmarkReportRenderer
         }
 
         html.Append(
-            $"      <li><b>The seat part of the projections comes from the contract.</b> Seats are a known contract amount, so where a seat "
-            + $"rate is configured the seat part is the seat count × rate in force on {data.Period.End:MMM d, yyyy}, annualised "
-            + "(an annual rate as is, a monthly rate × 12), and is the same in Flat, Trend-adjusted and Latest week. Projecting past "
-            + "weekly seat fees would lag every seat change. The usage part is still projected from the weekly series. It also "
+            $"      <li><b>The committed part of the projections comes from the contract.</b> Seats are a known contract amount, so where a seat "
+            + $"rate is configured the committed figure is the seat count × rate in force on {data.Period.End:MMM d, yyyy}, annualised "
+            + "(an annual rate as is, a monthly rate × 12), and is the same in the Flat, Trend-adjusted and Latest week totals. Projecting past "
+            + "weekly seat fees would lag every seat change. The variable part is still projected from the weekly series. It also "
             + "removes a small standing bias: weeks × 52 is 364 days, so a constant annual seat charge used to project at 364/365 "
             + "of its price (about 0.3% low). Vendors with no usable seat rate keep the weekly method. Applies to — "
             + $"{string.Join("; ", used)}.</li>\n");
@@ -776,6 +841,30 @@ public static class ClientBenchmarkReportRenderer
         if (vendorId == VendorCatalog.ClaudeApiPlatform.Id) return "claude-api";
         return "claude-ent";
     }
+
+    // " (n% variable)" for a caption, or nothing when there is no spend to take a share of.
+    private static string VariableShare(decimal variable, decimal gross) =>
+        gross > 0m ? $" ({(variable / gross * 100m).ToString("0", Culture)}% variable)" : "";
+
+    // The seat charge a vendor with no seat rate row was billed, as read from its billing export: the period total and the
+    // number of days it covers. Null when there is no such charge.
+    private static (decimal Total, int Days)? ObservedSeatCharge(VendorReportData vendor)
+    {
+        if (vendor.TotalSeatFee <= 0m)
+        {
+            return null;
+        }
+
+        var kind = vendor.Breakdown.FirstOrDefault(b => b.Category == Models.SpendCategories.Seat && b.IsUsage);
+        var days = kind is { Days: > 0 }
+            ? kind.Days
+            : vendor.Weeks.Where(w => w.SeatFee > 0m).Sum(w => w.DaysPresent);
+        return days > 0 ? (vendor.TotalSeatFee, days) : null;
+    }
+
+    // "20 seats from Mar 29, 2026, 24 seats from Apr 15, 2026, ..." for the seat rows that applied during the period.
+    private static string FormatSeatHistory(IReadOnlyList<VendorRateConfig> history) =>
+        string.Join(", ", history.Select(r => $"{(r.SeatCount is int s ? $"{s} seats" : "seats")} from {FormatDate(r.EffectiveFrom)}"));
 
     private static string FormatRateLine(VendorRateConfig rate)
     {
