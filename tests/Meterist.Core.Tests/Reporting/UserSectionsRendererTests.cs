@@ -337,6 +337,35 @@ public class UserSectionsRendererTests
         Assert.Contains("5 more", section);
     }
 
+    [Fact]
+    public void IdleSeats_PutADollarFigureOnTheCommittedSeatsTheyOccupy_WhenThereIsASeatRate()
+    {
+        // 4 idle seats at $240 a seat a year is about $960 a year.
+        var rate = new VendorRateConfig
+        {
+            VendorId = ClaudeEnt.Id,
+            RateType = "per-seat",
+            ModelOrSku = ProjectionCalculator.SeatModelOrSku,
+            Rate = 240m,
+            SeatCount = 10,
+            BillingCadence = BillingCadence.Annual,
+            EffectiveFrom = new DateOnly(2026, 1, 1),
+        };
+        var seats = Seats(ClaudeEnt, billed: 10, assigned: 10, roster: 10, active: 6, idleCount: 4);
+        var section = Section(Render(Tenant("t1", Vendor(ClaudeEnt, seats: seats, seatRate: rate))), "Idle seats");
+
+        Assert.Contains("4 idle seat(s) are about $960.00 a year of committed seat charges ($240.00 a seat)", section);
+    }
+
+    [Fact]
+    public void IdleSeats_HaveNoDollarFigure_WhenThereIsNoSeatRate()
+    {
+        var seats = Seats(ClaudeEnt, billed: 10, assigned: 10, roster: 10, active: 6, idleCount: 4);
+        var section = Section(Render(Tenant("t1", Vendor(ClaudeEnt, seats: seats))), "Idle seats");
+
+        Assert.DoesNotContain("committed seat charges", section);
+    }
+
     // ---- footnote and sections together
 
     [Fact]
@@ -380,11 +409,13 @@ public class UserSectionsRendererTests
     };
 
     private static VendorReportData Vendor(
-        VendorIdentity vendor, VendorUserUsage? usage = null, VendorSeatAudit? seats = null, ActivityOverview? activity = null) => new()
+        VendorIdentity vendor, VendorUserUsage? usage = null, VendorSeatAudit? seats = null, ActivityOverview? activity = null,
+        VendorRateConfig? seatRate = null) => new()
     {
         Vendor = vendor,
         Weeks = [],
         CurrentRates = [],
+        SeatRateAtPeriodEnd = seatRate,
         UserUsage = usage,
         Seats = seats,
         Activity = activity,

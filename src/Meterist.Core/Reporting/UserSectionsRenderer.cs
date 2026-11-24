@@ -386,6 +386,16 @@ internal static class UserSectionsRenderer
             {
                 var idle = v.Seats!.Idle;
                 html.Append($"    <h4 class=\"vendor-subhead\">{Encode(v.Vendor.DisplayName)} <span class=\"muted-dash\">· {idle.IdleSeats.Count} idle of {v.Seats.RosterCount?.ToString(Culture) ?? "?"} on the roster</span></h4>\n");
+
+                // What the idle seats cost: the committed seat licence they occupy, at the contract rate in force on the
+                // report's last day. Only where there is a seat rate to take it from.
+                if (ProjectionCalculator.AnnualSeatCostFromContract(v.SeatRateAtPeriodEnd) is { } annualCommitted
+                    && v.SeatRateAtPeriodEnd?.SeatCount is > 0 and var billedSeats)
+                {
+                    var perSeat = annualCommitted / billedSeats;
+                    html.Append($"    <p class=\"small-note\">At the contract rate, these {idle.IdleSeats.Count} idle seat(s) are about {Money(idle.IdleSeats.Count * perSeat)} a year of committed seat charges ({Money(perSeat)} a seat).</p>\n");
+                }
+
                 html.Append("    <div class=\"table-scroll\">\n      <table>\n        <thead>\n          <tr>\n            <th>Member</th>\n            <th>Role</th>\n            <th>Seat type</th>\n            <th>Last active before the window</th>\n          </tr>\n        </thead>\n        <tbody>\n");
 
                 foreach (var seat in idle.IdleSeats.Take(IdleRowsShown))

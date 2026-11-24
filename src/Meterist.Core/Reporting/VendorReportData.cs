@@ -28,6 +28,12 @@ public sealed class VendorReportData
     public VendorRateConfig? SeatRateAtPeriodEnd { get; init; }
 
     /// <summary>
+    /// Every seat rate row that overlaps the report period, oldest first: the seat-count and rate changes the vendor was
+    /// billed on, for the rate card. Empty for a vendor with no seat rate rows.
+    /// </summary>
+    public IReadOnlyList<VendorRateConfig> SeatRateHistory { get; init; } = [];
+
+    /// <summary>
     /// How many stored days came from each data source (keyed by a
     /// <see cref="DailySpendSources"/> value), for vendors that record one.
     /// Empty for single-source vendors, where there is nothing to disclose.
@@ -61,8 +67,10 @@ public sealed class VendorReportData
     public bool HasNotableBreakdown =>
         Breakdown.Any(b => !b.IsNegligible && (!b.IsUsage || b.Category != Models.SpendCategories.Seat));
 
+    /// <summary>The committed part of the spend: the seat licence charges.</summary>
     public decimal TotalSeatFee => Weeks.Sum(w => w.SeatFee);
 
+    /// <summary>The variable part of the spend: usage, and overage beyond what the seats include.</summary>
     public decimal TotalUsageOrOverage => Weeks.Sum(w => w.UsageOrOverage);
 
     public decimal TotalGrossSpend => Weeks.Sum(w => w.GrossSpend);

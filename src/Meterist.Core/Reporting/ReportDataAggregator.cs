@@ -124,6 +124,10 @@ public sealed class ReportDataAggregator
                         ? []
                         : PeriodBuckets.Bucket(records, aggregation, period, anchor),
                     SeatRateAtPeriodEnd = rates.FindRateForDay(ProjectionCalculator.SeatModelOrSku, period.End),
+                    SeatRateHistory = rates
+                        .Where(r => r.ModelOrSku == ProjectionCalculator.SeatModelOrSku)
+                        .OrderBy(r => r.EffectiveFrom)
+                        .ToList(),
                     SourceDayCounts = sourceDayCounts,
                     Breakdown = breakdown,
                     UserUsage = userUsage,

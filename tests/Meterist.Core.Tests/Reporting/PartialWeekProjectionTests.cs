@@ -142,7 +142,7 @@ public class PartialWeekProjectionTests
         var html = ClientBenchmarkReportRenderer.Render(Report(period, Tenant("t1", Claude(weeks), ChatGpt(weeks))));
 
         var total = TotalRow(html);
-        Assert.Equal(3, CountOf(total, "<span class=\"muted-dash\">—</span>"));   // flat, trend, latest
+        Assert.Equal(4, CountOf(total, "<span class=\"muted-dash\">—</span>"));   // committed, then flat, trend, latest
         Assert.DoesNotContain("$0.00", total);
         Assert.Contains("$60.00", total);   // the actual column still totals what was spent
     }
