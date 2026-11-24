@@ -42,6 +42,7 @@ public sealed class ReportDataAggregator
         IReadOnlyList<string> tenantIds,
         DateRange period,
         DateTime? generatedAt = null,
+        AggregationPeriod aggregation = AggregationPeriod.Week,
         CancellationToken cancellationToken = default)
     {
         var anchor = WeeklyBucketer.AnchorWednesdayOnOrBefore(period.Start);
@@ -119,6 +120,9 @@ public sealed class ReportDataAggregator
                     Vendor = vendor,
                     Weeks = weeks,
                     CurrentRates = currentRates,
+                    DisplayPeriods = aggregation == AggregationPeriod.Week
+                        ? []
+                        : PeriodBuckets.Bucket(records, aggregation, period, anchor),
                     SeatRateAtPeriodEnd = rates.FindRateForDay(ProjectionCalculator.SeatModelOrSku, period.End),
                     SourceDayCounts = sourceDayCounts,
                     Breakdown = breakdown,
@@ -135,6 +139,7 @@ public sealed class ReportDataAggregator
         {
             Period = period,
             WeekAnchor = anchor,
+            Aggregation = aggregation,
             Tenants = tenantReports,
             GeneratedAt = generatedAt ?? DateTime.Now,
         };

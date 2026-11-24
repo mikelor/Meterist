@@ -232,6 +232,40 @@ public class ReportDataAggregatorTests
     };
 
     [Fact]
+    public async Task AggregateAsync_ByMonth_GroupsTheDailyRecordsIntoCalendarMonths_AndLeavesTheWeeksAlone()
+    {
+        // Jul 20 to Aug 10, $10 a day: 12 days in July ($120) and 10 in August ($100).
+        var period = new DateRange(new DateOnly(2026, 7, 20), new DateOnly(2026, 8, 10));
+        var dailyRepo = new FakeDailySpendRepository(
+            recordsFor: (tenantId, vendorId) => Enumerable.Range(0, 22)
+                .Select(i => new DailySpendRecord
+                {
+                    TenantId = tenantId, VendorId = vendorId, Date = period.Start.AddDays(i),
+                    SeatFee = 4m, UsageOrOverage = 6m, GrossSpend = 10m,
+                })
+                .ToList());
+        var aggregator = new ReportDataAggregator(dailyRepo, new FakeVendorRateConfigRepository());
+
+        var byMonth = await aggregator.AggregateAsync(
+            ["zelleri"], period, aggregation: AggregationPeriod.Month, cancellationToken: TestContext.Current.CancellationToken);
+        var byWeek = await aggregator.AggregateAsync(
+            ["zelleri"], period, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(AggregationPeriod.Month, byMonth.Aggregation);
+        var claude = byMonth.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ClaudeEnterprise.Id);
+        Assert.Equal([120m, 100m], claude.DisplayPeriods.Select(p => p.GrossSpend));
+        Assert.Equal([12, 10], claude.DisplayPeriods.Select(p => p.DaysPresent));
+        Assert.Equal([48m, 40m], claude.DisplayPeriods.Select(p => p.SeatFee));
+        Assert.Equal(claude.TotalGrossSpend, claude.DisplayPeriods.Sum(p => p.GrossSpend));
+
+        // The weekly buckets, which feed the projections and the manifest, are the same whichever period was asked for.
+        var weeksByMonth = claude.Weeks;
+        var weeksByWeek = byWeek.Tenants[0].Vendors.Single(v => v.Vendor.Id == VendorCatalog.ClaudeEnterprise.Id).Weeks;
+        Assert.Equal(weeksByWeek, weeksByMonth);
+        Assert.Empty(byWeek.Tenants[0].Vendors[0].DisplayPeriods);
+    }
+
+    [Fact]
     public async Task AggregateAsync_OnlyKeepsCurrentlyActiveRates()
     {
         var vendorId = VendorCatalog.GeminiEnterprise.Id;

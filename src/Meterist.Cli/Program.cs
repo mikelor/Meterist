@@ -2038,6 +2038,11 @@ static Command BuildReportCommand(IHost host)
         Description = "Dollars a weekly figure may move before it counts as changed",
         DefaultValueFactory = _ => ReportDiffer.DefaultTolerance,
     };
+    var periodOption = new Option<string>("--period")
+    {
+        Description = "What the spend table is grouped by: week (default), month, quarter or year. Projections and the manifest stay weekly",
+        DefaultValueFactory = _ => "week",
+    };
     var failOnDecreaseOption = new Option<bool>("--fail-on-decrease")
     {
         Description = "Exit non-zero when any weekly figure fell since the previous report (the report is still written)",
@@ -2050,6 +2055,7 @@ static Command BuildReportCommand(IHost host)
     generateCommand.Options.Add(outOption);
     generateCommand.Options.Add(compareToOption);
     generateCommand.Options.Add(toleranceOption);
+    generateCommand.Options.Add(periodOption);
     generateCommand.Options.Add(failOnDecreaseOption);
 
     generateCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -2061,6 +2067,13 @@ static Command BuildReportCommand(IHost host)
         var compareTo = parseResult.GetValue(compareToOption);
         var tolerance = parseResult.GetValue(toleranceOption);
         var failOnDecrease = parseResult.GetValue(failOnDecreaseOption);
+        var periodText = parseResult.GetValue(periodOption);
+
+        if (!PeriodBuckets.TryParse(periodText, out var aggregation))
+        {
+            AnsiConsole.MarkupLine($"[red]--period must be week, month, quarter or year, not[/] {Markup.Escape(periodText ?? string.Empty)}");
+            return 1;
+        }
 
         if (tolerance < 0m)
         {
@@ -2083,7 +2096,7 @@ static Command BuildReportCommand(IHost host)
         using var scope = host.Services.CreateScope();
         var aggregator = scope.ServiceProvider.GetRequiredService<ReportDataAggregator>();
         var data = await aggregator.AggregateAsync(
-            tenantIds, new DateRange(from, to), cancellationToken: cancellationToken);
+            tenantIds, new DateRange(from, to), aggregation: aggregation, cancellationToken: cancellationToken);
 
         var manifest = ReportManifest.From(data);
         // A named baseline is used as given; otherwise the newest manifest in the output folder for the same tenants.
