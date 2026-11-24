@@ -184,7 +184,16 @@ public static class ClientBenchmarkReportRenderer
 
                 html.Append($"          <tr>\n            <th scope=\"row\">{Encode(vendor.DisplayName)} ({Encode(tenant.TenantId)})</th>\n");
                 html.Append("            <td class=\"note\">\n");
-                if (vendorData.CurrentRates.Count == 0 && vendorData.SeatRateHistory.Count == 0)
+                // The currently-active rate lines (a credit-conversion rate included), then what there is to say about
+                // the seat charge. Whether a seat rate exists is decided from the seat rows alone: a vendor with only a
+                // non-seat rate still has no seat rate configured.
+                foreach (var rate in vendorData.CurrentRates)
+                {
+                    html.Append($"              {FormatRateLine(rate)}<br/>\n");
+                }
+
+                var seatRows = vendorData.SeatRateHistory;
+                if (seatRows.Count == 0)
                 {
                     if (observed is { } o)
                     {
@@ -198,24 +207,25 @@ public static class ClientBenchmarkReportRenderer
                     {
                         html.Append("              No seat rate configured (see 'rates set').<br/>\n");
                     }
-                    else
+                    else if (vendorData.CurrentRates.Count == 0)
                     {
                         html.Append("              <span class=\"muted-dash\">—</span>\n");
                     }
                 }
+                else if (seatRows.Count == 1)
+                {
+                    // A single seat row that has since ended is not among the current rates, so show it here, with the
+                    // date it ended, instead of leaving the terms blank for a historical period.
+                    if (seatRows[0].EffectiveTo is { } ended)
+                    {
+                        html.Append($"              {FormatRateLine(seatRows[0])} · ended {FormatDate(ended)}<br/>\n");
+                    }
+                }
                 else
                 {
-                    foreach (var rate in vendorData.CurrentRates)
-                    {
-                        html.Append($"              {FormatRateLine(rate)}<br/>\n");
-                    }
-
-                    // The seat rows that applied during the period, when there was more than one (a seat added or a
-                    // renewal): the changes the committed charge followed.
-                    if (vendorData.SeatRateHistory.Count > 1)
-                    {
-                        html.Append($"              <span class=\"breakdown\">Seat history: {Encode(FormatSeatHistory(vendorData.SeatRateHistory))}</span><br/>\n");
-                    }
+                    // More than one seat row applied during the period (a seat added or a renewal): the changes the
+                    // committed charge followed.
+                    html.Append($"              <span class=\"breakdown\">Seat history: {Encode(FormatSeatHistory(seatRows))}</span><br/>\n");
                 }
                 html.Append("            </td>\n");
 

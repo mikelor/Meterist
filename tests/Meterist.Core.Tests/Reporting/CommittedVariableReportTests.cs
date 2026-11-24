@@ -128,6 +128,51 @@ public class CommittedVariableReportTests
         Assert.Contains("No seat rate configured", card);
     }
 
+    [Fact]
+    public void TheRateCard_StillWarnsThereIsNoSeatRate_WhenTheOnlyRateIsACreditConversion()
+    {
+        // ChatGPT with only a credit-to-USD rate has rate rows, but no seat rate: its seat charges are unconfigured.
+        var credit = new VendorRateConfig
+        {
+            VendorId = VendorCatalog.ChatGptEnterprise.Id,
+            RateType = "credit-to-usd",
+            ModelOrSku = "credit-usd",
+            Rate = 0.07m,
+            EffectiveFrom = new DateOnly(2026, 1, 1),
+        };
+        var chatGpt = new VendorReportData
+        {
+            Vendor = VendorCatalog.ChatGptEnterprise,
+            Weeks = Weeks([0m, 0m, 0m], [50m, 50m, 50m]),
+            CurrentRates = [credit],
+            SourceDayCounts = NoSources,
+        };
+        var card = Section(Render(ThreeWeeks, Tenant(chatGpt)), "Committed charges and contract terms");
+
+        Assert.Contains("credit-to-usd", card);                // the rate that is configured is still listed
+        Assert.Contains("No seat rate configured", card);
+    }
+
+    [Fact]
+    public void TheRateCard_ShowsASeatRateThatEndedInsideTheReportPeriod_NotBlankTerms()
+    {
+        // A historical period with one seat row that has since ended: it is not among the current rates, and it is the
+        // only seat row, so there is no history line either. The terms must still show.
+        var ended = SeatRate(VendorCatalog.ClaudeEnterprise, 12, 240m, new DateOnly(2026, 1, 1), new DateOnly(2026, 7, 31));
+        var claude = new VendorReportData
+        {
+            Vendor = VendorCatalog.ClaudeEnterprise,
+            Weeks = Weeks([70m, 70m, 70m], [100m, 100m, 100m]),
+            CurrentRates = [],
+            SeatRateHistory = [ended],
+            SourceDayCounts = NoSources,
+        };
+        var card = Section(Render(ThreeWeeks, Tenant(claude)), "Committed charges and contract terms");
+
+        Assert.Contains("per-seat · seat · $240.00 · Annual · 12 seats · since Jan 1, 2026 · ended Jul 31, 2026", card);
+        Assert.DoesNotContain("No seat rate configured", card);
+    }
+
     // ---- fixtures
 
     private static string Render(DateRange period, TenantReportData tenant) =>
@@ -154,7 +199,7 @@ public class CommittedVariableReportTests
         SourceDayCounts = NoSources,
     };
 
-    private static VendorRateConfig SeatRate(VendorIdentity vendor, int seats, decimal rate, DateOnly from) => new()
+    private static VendorRateConfig SeatRate(VendorIdentity vendor, int seats, decimal rate, DateOnly from, DateOnly? to = null) => new()
     {
         VendorId = vendor.Id,
         RateType = "per-seat",
@@ -163,6 +208,7 @@ public class CommittedVariableReportTests
         SeatCount = seats,
         BillingCadence = BillingCadence.Annual,
         EffectiveFrom = from,
+        EffectiveTo = to,
     };
 
     // Every catalog vendor for the tenant (the renderer looks each up), with the given ones carrying data.
